@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 // ── 教程步骤定义 ──────────────────────────────────
 
@@ -26,7 +26,7 @@ const TUTORIAL_STEPS: TutorialStep[] = [
     id: "welcome",
     title: "欢迎使用配线图编辑器",
     description: `配线图编辑器用于绘制轨道交通线路的轨道布局、道岔、站台和存车线。
-本教程将在 7 个步骤内带你快速上手。你可以随时点击"跳过教程"或按 Esc 退出。`,
+本教程将在 8 个步骤内带你快速上手。你可以随时点击"跳过教程"或按 Esc 退出。`,
     placement: "center",
     skippable: true,
   },
@@ -101,6 +101,16 @@ const TUTORIAL_STEPS: TutorialStep[] = [
     actionLabel: "查看属性面板",
   },
   {
+    id: "avoidance",
+    title: "自动避让与站名整理",
+    description: `站名、图标与站台重叠时会被自动推开，避免相互遮挡。
+• 顶部工具栏「自动避让」默认开启；关闭后可点击「🔀 避让一次」手动整理
+• 想手动微调时，可关闭「自动避让」后直接拖动站名或图标`,
+    targetSelector: ".wiring-toolbar",
+    placement: "bottom",
+    actionLabel: "下一步",
+  },
+  {
     id: "shortcuts",
     title: "快捷键与实用技巧",
     description: `• V — 选择工具    H — 平移工具    C — 连接工具
@@ -118,7 +128,9 @@ const TUTORIAL_STEPS: TutorialStep[] = [
   },
 ];
 
-const STORAGE_KEY = "metro-wiring-tutorial-dismissed";
+// 版本化关闭标记：v2 对应更新后的教程内容。升级版本号可让已关闭旧教程的用户
+// 重新看到一次新教程（用户确认：教程更新后对老用户重弹一次）。
+const STORAGE_KEY = "metro-wiring-tutorial-dismissed-v2";
 
 // ── TutorialOverlay 组件 ────────────────────────
 
@@ -137,6 +149,7 @@ export default function TutorialOverlay({
     height: number;
   } | null>(null);
   const [visible, setVisible] = useState(true);
+  const bubbleRef = useRef<HTMLDivElement>(null);
 
   const step = TUTORIAL_STEPS[currentStep];
   const isLastStep = currentStep === TUTORIAL_STEPS.length - 1;
@@ -225,9 +238,7 @@ export default function TutorialOverlay({
     handleDismiss();
   }
 
-  if (!visible) return null;
-
-  // 气泡定位逻辑
+  // 气泡定位逻辑（在 early-return 之前定义，供视口约束 useLayoutEffect 复用）
   function getBubbleStyle(): React.CSSProperties {
     if (!position || step.placement === "center") {
       return {
@@ -271,6 +282,34 @@ export default function TutorialOverlay({
     return style;
   }
 
+  // 将气泡约束在视口内：靠近屏幕边缘时把整个气泡拉回视口，避免飘出页面。
+  // 先重置到基础 transform，再实测是否越界并追加平移量（不重置会残留上次的位移）。
+  // 基础 transform 与 getBubbleStyle 保持一致（这里内联以避免依赖该渲染期函数）。
+  useLayoutEffect(() => {
+    const el = bubbleRef.current;
+    if (!el) return;
+    const base =
+      !position || step.placement === "center"
+        ? "translate(-50%, -50%)"
+        : step.placement === "top" || step.placement === "bottom"
+          ? "translateX(-50%)"
+          : "translateY(-50%)";
+    el.style.transform = base;
+    const rect = el.getBoundingClientRect();
+    const margin = 12;
+    let dx = 0;
+    let dy = 0;
+    if (rect.left < margin) dx = margin - rect.left;
+    else if (rect.right > window.innerWidth - margin) dx = window.innerWidth - margin - rect.right;
+    if (rect.top < margin) dy = margin - rect.top;
+    else if (rect.bottom > window.innerHeight - margin) dy = window.innerHeight - margin - rect.bottom;
+    if (dx !== 0 || dy !== 0) {
+      el.style.transform = `${base} translate(${dx}px, ${dy}px)`;
+    }
+  }, [currentStep, position, step.placement]);
+
+  if (!visible) return null;
+
   return (
     <div className="tutorial-overlay-root" role="dialog" aria-modal="false" aria-label="配线图编辑器教程">
       {/* 半透明遮罩 */}
@@ -307,7 +346,7 @@ export default function TutorialOverlay({
       </div>
 
       {/* 气泡卡片 */}
-      <div className="tutorial-bubble" style={getBubbleStyle()}>
+      <div ref={bubbleRef} className="tutorial-bubble" style={getBubbleStyle()}>
         {/* 标题 */}
         <div className="tutorial-bubble-header">
           <span className="tutorial-bubble-step">

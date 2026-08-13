@@ -10,6 +10,7 @@ import {
   type StorageMode,
 } from "./projects/repositories";
 import "./portal.css";
+import { ABOUT_LINKS, APP_VERSION, BETA_DETAILS, BETA_NOTICE, DISCLAIMER_SECTIONS, FREE_NOTE, NOTES } from "./portalContent";
 
 const TransitMapApp = lazy(() => import("./transit/TransitMapApp"));
 const EntranceSignApp = lazy(() => import("./entrance/EntranceSignApp"));
@@ -95,6 +96,7 @@ export default function ProjectPortal() {
   const [projectImportFile, setProjectImportFile] = useState<File | null>(null);
   const [assetImportFile, setAssetImportFile] = useState<File | null>(null);
   const [transferMessage, setTransferMessage] = useState("");
+  const [infoDialog, setInfoDialog] = useState<"about" | "notes" | "beta" | null>(null);
   const documentStore = useMemo(() => new BrowserEditorDocumentStore(), []);
 
   useEffect(() => {
@@ -293,6 +295,12 @@ export default function ProjectPortal() {
         </div>
       </header>
 
+      <div className="portal-beta-banner" role="note">
+        <span aria-hidden="true">⚠️</span>
+        <p><strong>本软件为 Beta 版本</strong>，可能存在兼容性问题。</p>
+        <button type="button" onClick={() => setInfoDialog("beta")}>查看详情</button>
+      </div>
+
       <section className="portal-panel" aria-label="项目工作台">
         <aside className="portal-tools">
           <div className="portal-tools-heading"><span>工具</span><strong>选择设计类型</strong></div>
@@ -358,6 +366,12 @@ export default function ProjectPortal() {
         </div>
       </section>
 
+      <footer className="portal-legal">
+        <span>轨道交通视觉设计工坊 v{APP_VERSION} · 完全免费</span>
+        <button type="button" onClick={() => setInfoDialog("about")}>关于 / 关于本项目</button>
+        <button type="button" onClick={() => setInfoDialog("notes")}>注意事项与免责声明</button>
+      </footer>
+
       {transferDialog && (
         <div className="portal-modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && !transferring && setTransferDialog(null)}>
           <section className="portal-transfer-modal" role="dialog" aria-modal="true" aria-labelledby="portal-transfer-title">
@@ -405,6 +419,80 @@ export default function ProjectPortal() {
                 {transferring ? "处理中…" : transferDialog === "export" ? "开始导出" : transferDialog === "assets" || (!projectImportFile && assetImportFile) ? "补充到当前项目" : "开始导入"}
               </button>
             </footer>
+          </section>
+        </div>
+      )}
+
+      {infoDialog === "about" && (
+        <div className="portal-modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && setInfoDialog(null)}>
+          <section className="portal-info-modal" role="dialog" aria-modal="true" aria-labelledby="portal-about-title">
+            <header>
+              <div><span>关于</span><h2 id="portal-about-title">关于本项目</h2></div>
+              <button type="button" onClick={() => setInfoDialog(null)} aria-label="关闭">×</button>
+            </header>
+            <div className="portal-info-body">
+              <p className="portal-free-note">🆓 {FREE_NOTE}</p>
+              <h3>关注与支持</h3>
+              <div className="portal-link-list">
+                {ABOUT_LINKS.map((link) => link.url ? (
+                  <a key={link.label} href={link.url} target="_blank" rel="noopener noreferrer">
+                    <strong>{link.label}</strong><small>{link.sublabel}</small>
+                  </a>
+                ) : (
+                  <div key={link.label} className="portal-link-note">
+                    <strong>{link.label}</strong><small>{link.sublabel}</small>
+                  </div>
+                ))}
+              </div>
+              <p className="portal-version">当前版本 v{APP_VERSION}</p>
+            </div>
+            <footer><button type="button" className="is-primary" onClick={() => setInfoDialog(null)}>知道了</button></footer>
+          </section>
+        </div>
+      )}
+
+      {infoDialog === "notes" && (
+        <div className="portal-modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && setInfoDialog(null)}>
+          <section className="portal-info-modal" role="dialog" aria-modal="true" aria-labelledby="portal-notes-title">
+            <header>
+              <div><span>使用须知</span><h2 id="portal-notes-title">注意事项与免责声明</h2></div>
+              <button type="button" onClick={() => setInfoDialog(null)} aria-label="关闭">×</button>
+            </header>
+            <div className="portal-info-body">
+              <h3>注意事项</h3>
+              <ul className="portal-notes-list">
+                {NOTES.map((note) => <li key={note}>{note}</li>)}
+              </ul>
+              <h3>免责声明</h3>
+              {DISCLAIMER_SECTIONS.map((section) => (
+                <div key={section.title} className="portal-disclaimer-section">
+                  <h4>{section.title}</h4>
+                  <p>{section.body}</p>
+                </div>
+              ))}
+            </div>
+            <footer><button type="button" className="is-primary" onClick={() => setInfoDialog(null)}>知道了</button></footer>
+          </section>
+        </div>
+      )}
+
+      {infoDialog === "beta" && (
+        <div className="portal-modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && setInfoDialog(null)}>
+          <section className="portal-info-modal" role="dialog" aria-modal="true" aria-labelledby="portal-beta-title">
+            <header>
+              <div><span>Beta 版本</span><h2 id="portal-beta-title">Beta 版本与兼容性</h2></div>
+              <button type="button" onClick={() => setInfoDialog(null)} aria-label="关闭">×</button>
+            </header>
+            <div className="portal-info-body">
+              <p className="portal-beta-alert">⚠️ {BETA_NOTICE}</p>
+              {BETA_DETAILS.map((section) => (
+                <div key={section.title} className="portal-disclaimer-section">
+                  <h4>{section.title}</h4>
+                  <p>{section.body}</p>
+                </div>
+              ))}
+            </div>
+            <footer><button type="button" className="is-primary" onClick={() => setInfoDialog(null)}>知道了</button></footer>
           </section>
         </div>
       )}

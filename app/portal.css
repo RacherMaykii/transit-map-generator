@@ -221,6 +221,43 @@
 .portal-transfer-modal footer .is-primary { border-color: #087fa4; background: #087fa4; color: #fff; }
 .portal-transfer-modal button:disabled { cursor: not-allowed; opacity: .5; }
 
+.portal-legal { width: min(1180px, calc(100% - 48px)); margin: 0 auto 26px; display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 12px 22px; color: rgba(255, 255, 255, .78); font-size: 12px; }
+.portal-legal span { font-weight: 700; letter-spacing: .02em; }
+.portal-legal button { padding: 4px 6px; border: 0; background: transparent; color: rgba(255, 255, 255, .9); font-size: 12px; font-weight: 700; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.portal-legal button:hover { color: #fff; }
+
+.portal-beta-banner { width: min(1180px, calc(100% - 48px)); margin: 16px auto 0; padding: 11px 16px; display: flex; align-items: center; gap: 10px; border: 1px solid #eccf7e; border-radius: 13px; background: linear-gradient(180deg, #fff8e1, #fff2c8); color: #6b5200; box-sizing: border-box; }
+.portal-beta-banner > span { font-size: 16px; }
+.portal-beta-banner p { margin: 0; flex: 1; font-size: 13px; line-height: 1.6; }
+.portal-beta-banner strong { color: #8a6a00; }
+.portal-beta-banner button { padding: 5px 12px; border: 0; border-radius: 8px; background: #f5c842; color: #4d3a00; font-size: 12px; font-weight: 800; cursor: pointer; white-space: nowrap; }
+.portal-beta-banner button:hover { background: #efb91f; }
+
+.portal-info-modal { width: min(620px, 100%); max-height: 86vh; overflow: auto; border: 1px solid #c9dbe2; border-radius: 22px; background: #fbfdfe; color: #18313d; box-shadow: 0 30px 90px rgba(8, 29, 39, .34); }
+.portal-info-modal header { padding: 22px 24px 18px; position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #dce7eb; background: #fbfdfe; }
+.portal-info-modal header span { color: #087fa4; font-size: 10px; font-weight: 900; letter-spacing: .12em; }
+.portal-info-modal h2 { margin: 4px 0 0; font-size: 24px; }
+.portal-info-modal header button { width: 38px; height: 38px; border: 0; border-radius: 50%; background: #eaf2f5; color: #18313d; font-size: 23px; cursor: pointer; }
+.portal-info-body { padding: 18px 24px 10px; }
+.portal-info-modal h3 { margin: 16px 0 8px; font-size: 14px; color: #087fa4; }
+.portal-info-modal h4 { margin: 0 0 4px; font-size: 13px; }
+.portal-info-modal p { margin: 0 0 10px; color: #4d626d; font-size: 13px; line-height: 1.7; }
+.portal-free-note { padding: 11px 14px; border-radius: 10px; background: #eef7f9; color: #087fa4; font-weight: 700; }
+.portal-beta-alert { padding: 11px 14px; border-radius: 10px; background: #fff8e1; color: #7a5c00; font-weight: 700; }
+.portal-version { margin-top: 14px; color: #6b7d86; }
+.portal-link-list { margin: 10px 0 6px; display: grid; gap: 10px; }
+.portal-link-list a, .portal-link-note { padding: 13px 15px; display: flex; flex-direction: column; gap: 3px; border: 1px solid #d5e1e6; border-radius: 13px; background: #fff; text-decoration: none; }
+.portal-link-list a:hover { border-color: #0786aa; box-shadow: 0 0 0 3px rgba(7, 134, 170, .11); background: #f0fafd; }
+.portal-link-note { background: #f6fafb; }
+.portal-link-list strong { font-size: 14px; color: #18313d; }
+.portal-link-list small { font-size: 11px; color: #6b7d86; line-height: 1.5; }
+.portal-notes-list { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 7px; }
+.portal-notes-list li { color: #4d626d; font-size: 13px; line-height: 1.6; }
+.portal-disclaimer-section { margin: 0 0 10px; }
+.portal-info-modal footer { padding: 14px 24px 22px; display: flex; justify-content: flex-end; gap: 10px; }
+.portal-info-modal footer button { min-height: 40px; padding: 0 18px; border: 1px solid #ccdbe1; border-radius: 10px; background: #fff; color: #18313d; font-weight: 800; cursor: pointer; }
+.portal-info-modal footer .is-primary { border-color: #087fa4; background: #087fa4; color: #fff; }
+
 @media (max-width: 760px) {
   .project-portal { overflow: auto; }
   .portal-heading { width: min(100% - 28px, 1180px); margin-top: 26px; }
@@ -248,4 +285,7 @@
   .project-workspace-bar { padding-inline: 12px; }
   .portal-transfer-options { grid-template-columns: 1fr; }
   .portal-transfer-files label { grid-template-columns: 1fr; }
+  .portal-legal { width: min(100% - 28px, 1180px); }
+  .portal-beta-banner { width: min(100% - 28px, 1180px); flex-wrap: wrap; }
+  .portal-beta-banner button { margin-left: auto; }
 }

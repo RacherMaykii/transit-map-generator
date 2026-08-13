@@ -49,6 +49,79 @@ test("renders the project portal", async () => {
   assert.match(html, /\/assets\/rail-transit-icon\.png/);
   assert.doesNotMatch(html, /rail-transit-icon\.jpg/);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton|SkeletonPreview/);
+  // 门户页脚：版本号、免费声明与两个信息弹窗入口按钮（初始渲染可见）
+  assert.match(html, /关于 \/ 关于本项目/);
+  assert.match(html, /注意事项与免责声明/);
+  assert.match(html, /完全免费/);
+  // v{APP_VERSION} 是「字面文本 + 表达式」边界，React 会在其间插入 <!-- --> 注释
+  assert.match(html, /v(?:<!-- -->)?0\.1\.0/);
+  // 顶部 Beta 提示条（初始渲染可见）
+  assert.match(html, /本软件为 Beta 版本/);
+  assert.match(html, /查看详情/);
+  assert.match(html, /兼容性/);
+});
+
+test("portal about modal has real links, free note, version, and disclaimer", async () => {
+  const [content, app, css] = await Promise.all([
+    readFile(new URL("app/portalContent.ts", root), "utf8"),
+    readFile(new URL("app/ProjectPortal.tsx", root), "utf8"),
+    readFile(new URL("app/portal.css", root), "utf8"),
+  ]);
+
+  // 真实外链
+  assert.match(content, /space\.bilibili\.com\/14029842/);
+  assert.match(content, /v\.douyin\.com\/ZAkiWV5IbdM/);
+  assert.match(content, /pd\.qq\.com\/s\/c17qqsm1s/);
+  // 虚空城为「我的世界」搜索引导条目（无外链）
+  assert.match(content, /我的世界 · 虚空城/);
+  assert.match(content, /搜索「虚空小组」或「虚空城」/);
+  // 免费声明与版本号来源（跟随 package.json）
+  assert.match(content, /完全免费/);
+  assert.match(content, /APP_VERSION/);
+  assert.match(content, /package\.json/);
+  // 注意事项与免责声明
+  assert.match(content, /注意事项/);
+  assert.match(content, /免责声明/);
+  // ProjectPortal 使用内容模块并渲染两个入口按钮
+  assert.match(app, /portalContent/);
+  assert.match(app, /ABOUT_LINKS/);
+  assert.match(app, /关于 \/ 关于本项目/);
+  assert.match(app, /注意事项与免责声明/);
+  assert.match(app, /infoDialog/);
+  // 样式
+  assert.match(css, /\.portal-info-modal/);
+  assert.match(css, /\.portal-legal/);
+  // Beta 提示条与详情弹窗内容
+  assert.match(content, /BETA_NOTICE/);
+  assert.match(content, /BETA_DETAILS/);
+  assert.match(content, /如何反馈问题/);
+  assert.match(content, /已知问题/);
+  assert.match(content, /工程兼容性/);
+  assert.match(content, /\.railcity/);
+  // ProjectPortal 渲染提示条并复用信息弹窗
+  assert.match(app, /BETA_NOTICE/);
+  assert.match(app, /portal-beta-banner/);
+  assert.match(app, /setInfoDialog\("beta"\)/);
+  assert.match(app, /infoDialog === "beta"/);
+  // 样式
+  assert.match(css, /\.portal-beta-banner/);
+  assert.match(css, /\.portal-beta-alert/);
+});
+
+test("static analytics beacon injects Cloudflare Web Analytics only when token is configured", async () => {
+  const [analytics, entry] = await Promise.all([
+    readFile(new URL("app/analytics.tsx", root), "utf8"),
+    readFile(new URL("app/static-entry.tsx", root), "utf8"),
+  ]);
+  // 组件读取构建期环境变量，注入 Cloudflare 官方 beacon 脚本
+  assert.match(analytics, /beacon\.min\.js/);
+  assert.match(analytics, /VITE_CLOUDFLARE_ANALYTICS_TOKEN/);
+  assert.match(analytics, /data-cf-beacon/);
+  // 未配置令牌时零输出（构建产物无痕迹）
+  assert.match(analytics, /if \(!token\)/);
+  assert.match(analytics, /return null/);
+  // 仅静态入口渲染该组件
+  assert.match(entry, /AnalyticsBeacon/);
 });
 
 test("keeps local data and rendering modules in the project", async () => {
@@ -792,9 +865,23 @@ test("unified transfer button, discardSnapshot, and tutorial cleanup", async () 
   assert.ok(!/\.tutorial-backdrop\s*\{[^}]*pointer-events:\s*none/.test(tutorial),
     "tutorial backdrop must not have pointer-events: none");
 
-  // ── 10. Tutorial says 7 steps (not 6) ──
-  assert.match(tutorial, /7 个步骤/);
-  assert.ok(!/6 个步骤/.test(tutorial), "tutorial must say 7 steps, not 6");
+  // ── 10. Tutorial says 8 steps (covers the new 自动避让 step) ──
+  assert.match(tutorial, /8 个步骤/);
+  assert.ok(!/7 个步骤/.test(tutorial), "tutorial must say 8 steps, not 7");
+
+  // ── 11. Tutorial covers the new 自动避让 feature ──
+  assert.match(tutorial, /自动避让/);
+  assert.match(tutorial, /避让一次/);
+  assert.match(tutorial, /站名、图标与站台重叠时会被自动推开/);
+
+  // ── 12. Dismissal marker is versioned (v2) so the updated tutorial re-shows once ──
+  assert.match(tutorial, /metro-wiring-tutorial-dismissed-v2/);
+  assert.ok(!/"metro-wiring-tutorial-dismissed"/.test(tutorial), "old unversioned key literal must be gone");
+
+  // ── 13. Bubble is clamped into viewport (overflow fix: ref + measured clamp) ──
+  assert.match(tutorial, /bubbleRef/);
+  assert.match(tutorial, /getBoundingClientRect/);
+  assert.match(tutorial, /useLayoutEffect/);
 });
 
 test("auto-avoidance is a persistent toggle with a manual one-shot when off", async () => {
