@@ -1,0 +1,26 @@
+:root {
+  color-scheme: light;
+  --page: #f3f6f8;
+  --ink: #15252f;
+  --muted: #6b7b85;
+  --border: #dce4e8;
+  --accent: #087fa4;
+  --accent-strong: #006b8d;
+  --accent-soft: #e1f4f8;
+  --orange: #ef7d32;
+}
+
+* { box-sizing: border-box; }
+
+html { background: var(--page); }
+
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--ink);
+  font-family: "Microsoft YaHei", "Noto Sans SC", "PingFang SC", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+button, input, select { font: inherit; }
+button { color: inherit; }

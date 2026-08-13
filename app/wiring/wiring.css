@@ -1,0 +1,529 @@
+/* ══════════════════════════════════════════════
+   配线图编辑器 · 样式
+   ══════════════════════════════════════════════ */
+
+.wiring-editor-shell { display: flex; flex-direction: column; height: calc(100vh - 54px); height: calc(100dvh - 54px); overflow: hidden; }
+.wiring-app-shell { padding-top: 0; }
+
+/* ── 顶部工具栏 ── */
+.wiring-toolbar {
+  flex: 0 0 auto; display: flex; flex-direction: column; gap: 6px;
+  padding: 8px 18px; border-bottom: 1px solid var(--border); background: white;
+  box-shadow: 0 2px 8px rgba(20, 49, 63, .04);
+  z-index: 10;
+}
+.wiring-toolbar-row { display: flex; align-items: center; gap: 6px; }
+.wiring-toolbar-group { display: flex; align-items: center; gap: 4px; }
+.wiring-toolbar-group + .wiring-toolbar-group { margin-left: 4px; padding-left: 8px; border-left: 1px solid var(--border); }
+.wiring-toolbar-hidden-inputs { display: none; }
+.wiring-toolbar .brand-mark { width: 32px; height: 32px; border-radius: 9px; }
+.wiring-toolbar-title { display: flex; flex-direction: column; gap: 1px; margin-right: 8px; }
+.wiring-toolbar-title h1 { margin: 0; font-size: 15px; letter-spacing: -.01em; }
+.wiring-toolbar-title p { margin: 0; color: var(--muted); font-size: 10px; }
+
+.wiring-btn {
+  min-height: 34px; padding: 0 11px; display: inline-flex; align-items: center; gap: 5px;
+  border-radius: 8px; background: white; border: 1px solid var(--border);
+  font-size: 12px; font-weight: 700; color: var(--ink); cursor: pointer; white-space: nowrap;
+  transition: border-color .15s ease, background .15s ease, color .15s ease;
+}
+.wiring-btn:hover { border-color: var(--accent); background: #f5fcfe; }
+.wiring-btn.active { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-strong); box-shadow: inset 0 0 0 1px var(--accent); }
+.wiring-btn.primary { background: var(--accent); color: white; border-color: var(--accent); box-shadow: 0 3px 10px rgba(8, 127, 164, .18); }
+.wiring-btn.primary:hover { background: var(--accent-strong); }
+.wiring-btn.danger { color: #a63838; border-color: #f0c6c6; background: #fff5f5; }
+.wiring-btn.icon-only { width: 34px; padding: 0; justify-content: center; font-size: 16px; }
+.wiring-btn:disabled { opacity: .4; cursor: not-allowed; }
+.wiring-btn-sep { width: 1px; height: 22px; background: var(--border); margin: 0 3px; }
+.wiring-tutorial-btn {
+  font-weight: 800; font-size: 15px; color: var(--accent); border-color: var(--accent);
+  border-radius: 50%; width: 30px; height: 30px; min-height: 30px; padding: 0;
+}
+.wiring-tutorial-btn:hover {
+  background: var(--accent); color: white;
+}
+
+.wiring-toolbar-spacer { flex: 1; }
+.wiring-toolbar-info { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); }
+.wiring-toolbar-info select { min-height: 30px; font-size: 12px; border-radius: 7px; }
+.wiring-page-select, .wiring-export-select { max-width: 132px; min-height: 30px; padding: 0 7px; border: 1px solid var(--border); border-radius: 7px; background: white; color: var(--ink); font-size: 11px; }
+
+.wiring-segmented { display: inline-flex; padding: 3px; border: 1px solid var(--border); background: #edf2f4; border-radius: 8px; }
+.wiring-segmented button { min-height: 28px; padding: 0 10px; background: transparent; border-radius: 6px; font-size: 12px; font-weight: 700; color: var(--muted); cursor: pointer; border: 0; }
+.wiring-segmented button.active { background: white; color: var(--accent-strong); box-shadow: 0 1px 4px rgba(20, 49, 63, .12); }
+
+.wiring-check { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); white-space: nowrap; cursor: pointer; }
+.wiring-check input { accent-color: var(--accent); width: 14px; height: 14px; }
+
+.wiring-placement-rotation { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; }
+.wiring-placement-rotation-panel { display: flex; flex-direction: column; align-items: center; padding-top: 8px; }
+.wiring-placement-rotation-panel > h5 { align-self: stretch; }
+.wiring-placement-defaults-panel { margin-top: 0; }
+.wiring-placement-defaults-note { margin: 2px 0 0; color: var(--muted); font-size: 10px; line-height: 1.55; }
+.wiring-rotation-grid { display: grid; grid-template-columns: repeat(3, 25px); grid-template-rows: repeat(3, 25px); gap: 2px; }
+.wiring-rotation-grid button { display: grid; width: 25px; height: 25px; min-width: 25px; min-height: 25px; place-items: center; padding: 0; border: 1px solid var(--border); border-radius: 4px; background: white; color: var(--ink); font-size: 14px; line-height: 1; cursor: pointer; }
+.wiring-rotation-grid button:hover { border-color: var(--accent); background: #f5fcfe; }
+.wiring-rotation-grid button.active { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-strong); box-shadow: inset 0 0 0 1px var(--accent); }
+.wiring-rotation-grid .top-left { grid-area: 1 / 1; }.wiring-rotation-grid .top { grid-area: 1 / 2; }.wiring-rotation-grid .top-right { grid-area: 1 / 3; }
+.wiring-rotation-grid .left { grid-area: 2 / 1; }.wiring-rotation-grid .center { grid-area: 2 / 2; }.wiring-rotation-grid .right { grid-area: 2 / 3; }
+.wiring-rotation-grid .bottom-left { grid-area: 3 / 1; }.wiring-rotation-grid .bottom { grid-area: 3 / 2; }.wiring-rotation-grid .bottom-right { grid-area: 3 / 3; }
+.wiring-module-direction { align-items: start; }.wiring-direction-control { display: flex; align-items: center; gap: 8px; min-height: 79px; color: var(--muted); font-size: 12px; }.wiring-direction-center { grid-area: 2 / 2; display: grid; place-items: center; color: var(--muted); font-size: 16px; }
+
+/* ── 镜像开关（模块/图形属性面板与放置面板共用） ── */
+.wiring-mirror-toggle { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.wiring-mirror-btn {
+  min-height: 24px; padding: 0 8px; border: 1px solid var(--border); border-radius: 4px;
+  background: white; color: var(--ink); font-size: 11px; font-weight: 600; cursor: pointer; line-height: 1;
+  transition: border-color .15s ease, background .15s ease, color .15s ease;
+}
+.wiring-mirror-btn:hover { border-color: var(--accent); background: #f5fcfe; }
+.wiring-mirror-btn.active { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-strong); box-shadow: inset 0 0 0 1px var(--accent); }
+.wiring-mirror-btn:disabled { opacity: .5; cursor: not-allowed; }
+.wiring-mirror-placement { margin-top: 6px; }
+
+/* ── Popover 下拉菜单 ── */
+.popover-menu-root { position: relative; display: inline-flex; }
+.popover-trigger {
+  display: inline-flex; align-items: center; gap: 4px;
+}
+.popover-trigger-icon { font-size: 14px; }
+.popover-trigger-arrow { font-size: 9px; margin-left: 2px; opacity: 0.6; }
+.popover-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 17px; height: 17px; padding: 0 5px;
+  border-radius: 99px; background: var(--accent); color: white;
+  font-size: 10px; font-weight: 800; line-height: 1;
+}
+.popover-backdrop { position: fixed; inset: 0; z-index: 4999; }
+.popover-panel {
+  background: white; border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(20, 49, 63, .16), 0 2px 6px rgba(20, 49, 63, .06);
+  padding: 6px; overflow-y: auto; max-height: 480px;
+  animation: popover-in .12s ease-out;
+}
+@keyframes popover-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.popover-item {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; min-height: 32px; padding: 5px 10px;
+  border: 0; border-radius: 6px; background: transparent;
+  font-size: 12px; color: var(--ink); cursor: pointer;
+  transition: background .1s ease;
+}
+.popover-item:hover { background: #f0f6f8; }
+.popover-action.danger { color: #a63838; }
+.popover-action.danger:hover { background: #fff0f0; }
+.popover-item-icon { font-size: 14px; flex: 0 0 auto; }
+.popover-item-label { flex: 1; text-align: left; font-weight: 600; }
+.popover-item-shortcut { font-size: 10px; color: var(--muted); background: #f0f4f5; padding: 1px 6px; border-radius: 4px; }
+
+.popover-separator { height: 1px; background: var(--border); margin: 4px 6px; }
+
+.popover-checkbox { cursor: pointer; font-weight: 600; }
+.popover-checkbox input { accent-color: var(--accent); width: 14px; height: 14px; flex: 0 0 auto; }
+
+.popover-select-row { display: flex; align-items: center; gap: 8px; }
+.popover-select-label { font-size: 11px; font-weight: 700; color: var(--muted); white-space: nowrap; flex: 0 0 auto; }
+.popover-select { flex: 1; min-height: 30px; padding: 0 7px; border: 1px solid var(--border); border-radius: 6px; background: white; color: var(--ink); font-size: 11px; }
+
+.popover-section { /* wrapper */ }
+.popover-section-header {
+  display: flex; align-items: center; gap: 5px;
+  width: 100%; min-height: 32px; padding: 5px 10px;
+  border: 0; border-radius: 6px; background: transparent;
+  font-size: 11px; font-weight: 700; color: var(--muted);
+  cursor: pointer; transition: background .1s ease;
+}
+.popover-section-header:hover { background: #f0f6f8; }
+.popover-section-arrow { font-size: 9px; transition: transform .15s ease; display: inline-block; }
+.popover-section-arrow.open { transform: rotate(90deg); }
+.popover-section-body { padding-left: 4px; }
+
+/* ── 右键菜单 ── */
+.context-menu-overlay {
+  transform: translate(4px, 4px);
+}
+.context-menu-panel {
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(20, 49, 63, .18), 0 2px 6px rgba(20, 49, 63, .08);
+  border: 1px solid var(--border);
+  min-width: 140px;
+  overflow: hidden;
+  animation: context-slide-in .12s ease;
+}
+@keyframes context-slide-in {
+  from { opacity: 0; transform: scale(.94); }
+  to { opacity: 1; transform: scale(1); }
+}
+.context-menu-item {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; min-height: 32px; padding: 6px 14px;
+  border: 0; background: transparent; cursor: pointer;
+  font-size: 12px; font-weight: 600; color: var(--ink);
+  transition: background .1s ease;
+}
+.context-menu-item:hover { background: #f0f6f8; }
+
+/* ── 左侧面板 Accordion ── */
+.wiring-accordion-section { border-bottom: 1px solid var(--border); }
+.wiring-accordion-section:last-child { border-bottom: 0; }
+.wiring-accordion-header {
+  display: flex; align-items: center; gap: 6px;
+  width: 100%; min-height: 38px; padding: 0 12px;
+  border: 0; background: transparent;
+  font-size: 12px; font-weight: 700; color: var(--ink);
+  cursor: pointer; transition: background .12s ease;
+}
+.wiring-accordion-header:hover { background: rgba(8, 127, 164, .04); }
+.wiring-accordion-arrow {
+  font-size: 10px; transition: transform .15s ease; flex: 0 0 auto;
+  color: var(--muted);
+}
+.wiring-accordion-section.open > .wiring-accordion-header .wiring-accordion-arrow { transform: rotate(90deg); }
+.wiring-accordion-title { flex: 0 0 auto; }
+.wiring-accordion-meta { font-size: 10px; color: var(--muted); font-weight: 500; }
+.wiring-accordion-body { padding: 6px 12px 14px; }
+
+/* ── 三栏主体 ── */
+.wiring-body { flex: 1 1 auto; display: grid; grid-template-columns: 260px 1fr 280px; min-height: 0; overflow: hidden; }
+
+/* ── 左侧面板 ── */
+.wiring-left-panel {
+  border-right: 1px solid var(--border); background: #fbfcfd; display: flex; flex-direction: column; min-height: 0; overflow: hidden;
+}
+
+.wiring-left-content { flex: 1 1 auto; overflow-y: auto; padding: 0; }
+.wiring-left-content::-webkit-scrollbar { width: 7px; }
+.wiring-left-content::-webkit-scrollbar-track { background: transparent; }
+.wiring-left-content::-webkit-scrollbar-thumb { background: #c0ccd1; border-radius: 99px; }
+
+/* ── 元件库 ── */
+.wiring-template-category { margin-bottom: 18px; }
+.wiring-template-category > h4 { margin: 0 0 8px; font-size: 11px; font-weight: 800; color: var(--accent); letter-spacing: .06em; text-transform: uppercase; }
+/* 元件库分类可单独收起：标题做成可点击的按钮 */
+.wiring-library-cat-header {
+  display: flex; align-items: center; gap: 6px; width: 100%; padding: 2px 0; margin-bottom: 8px;
+  border: 0; background: transparent; cursor: pointer; text-align: left;
+}
+.wiring-library-cat-header .wiring-accordion-arrow { transition: transform .15s ease; }
+.wiring-library-cat-header h4 { margin: 0; font-size: 11px; font-weight: 800; color: var(--accent); letter-spacing: .06em; text-transform: uppercase; }
+.wiring-library-cat-header:hover h4 { color: #0a6c8a; }
+.wiring-template-category.collapsed .wiring-library-cat-header { margin-bottom: 0; }
+.wiring-template-category.collapsed .wiring-library-cat-header .wiring-accordion-arrow { transform: rotate(90deg); }
+.wiring-template-category.collapsed .wiring-template-grid { display: none; }
+.wiring-template-grid { display: grid; gap: 7px; }
+.wiring-template-card {
+  display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 9px;
+  background: white; cursor: pointer; transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease;
+}
+.wiring-template-card:hover { border-color: var(--accent); box-shadow: 0 3px 10px rgba(8, 127, 164, .1); transform: translateY(-1px); }
+.wiring-template-card.active { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent), 0 3px 10px rgba(8, 127, 164, .12); background: var(--accent-soft); }
+.wiring-template-preview { flex: 0 0 auto; width: 56px; height: 40px; border-radius: 5px; overflow: hidden; background: #f5f8f9; }
+.wiring-template-preview svg { width: 100%; height: 100%; display: block; }
+.wiring-template-info { min-width: 0; flex: 1 1 auto; display: grid; gap: 1px; }
+.wiring-template-info b { font-size: 12px; font-weight: 700; }
+.wiring-template-info small { font-size: 10px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── 线路与站点列表 ── */
+.wiring-data-search { width: 100%; margin-bottom: 10px; min-height: 34px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 12px; background: white; }
+.wiring-data-search:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 3px rgba(8, 127, 164, .1); }
+.wiring-line-group { margin-bottom: 14px; }
+.wiring-line-group > header { display: flex; align-items: center; gap: 7px; margin-bottom: 6px; }
+.wiring-line-group > header i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; box-shadow: inset 0 0 0 1px rgba(0,0,0,.1); }
+.wiring-line-group > header b { font-size: 12px; }
+.wiring-line-group > header small { color: var(--muted); font-size: 10px; }
+.wiring-station-row {
+  display: flex; align-items: center; gap: 7px; padding: 5px 8px; border-radius: 6px; font-size: 11px; cursor: pointer;
+  transition: background .12s ease;
+}
+.wiring-station-row:hover { background: #eef4f5; }
+.wiring-station-row.placed { background: var(--accent-soft); }
+.wiring-station-row .seq { flex: 0 0 auto; width: 20px; height: 18px; display: grid; place-items: center; border-radius: 4px; background: #e8f4f7; color: var(--accent-strong); font-size: 9px; font-weight: 800; }
+.wiring-station-row .station-resource-icon { width: 18px; height: 18px; flex: 0 0 18px; object-fit: contain; }
+.wiring-station-row .station-resource-icon.missing { display: none; }
+.wiring-station-row .station-icon-missing { width: 16px; height: 16px; flex: 0 0 16px; display: grid; place-items: center; border: 1px solid #d5a214; border-radius: 50%; color: #8a6812; font-size: 9px; font-weight: 800; }
+.wiring-station-row .name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wiring-station-row .badge { flex: 0 0 auto; font-size: 8px; padding: 2px 4px; border-radius: 3px; font-weight: 800; }
+.wiring-station-row .badge.closed { color: #8a4b3c; background: #f8eae6; }
+.wiring-station-row .badge.terminal { color: #7a5b1c; background: #fdf3df; }
+
+/* ── 图层树 ── */
+.wiring-layer-tree { display: grid; gap: 2px; }
+.wiring-layer-add-btn { width: 100%; margin-bottom: 4px; font-size: 11px; }
+.wiring-layer-row {
+  display: flex; align-items: center; gap: 4px; padding: 4px 6px; border-radius: 6px; font-size: 12px; cursor: grab;
+  transition: background .12s ease, outline .08s ease;
+  user-select: none;
+}
+.wiring-layer-row:hover { background: #eef4f5; }
+.wiring-layer-row.dragging { opacity: .5; }
+.wiring-layer-row.drop-before { outline: 2px solid var(--accent); outline-offset: -1px; border-radius: 6px 6px 0 0; }
+.wiring-layer-row.drop-after { outline: 2px solid var(--accent); outline-offset: -1px; border-radius: 0 0 6px 6px; }
+.wiring-layer-row.drop-inside { background: rgba(8, 127, 164, .12); outline: 2px dashed var(--accent); outline-offset: -1px; }
+.wiring-layer-row .layer-toggle { width: 18px; height: 18px; display: grid; place-items: center; border: 0; background: transparent; cursor: pointer; font-size: 12px; border-radius: 4px; flex-shrink: 0; }
+.wiring-layer-row .layer-toggle:hover { background: #e0e8ea; }
+.wiring-layer-row .layer-toggle.muted { opacity: .3; }
+.wiring-layer-row .layer-toggle.layer-menu { font-size: 11px; opacity: .5; }
+.wiring-layer-row .layer-toggle.layer-menu:hover { opacity: 1; }
+.wiring-layer-row .layer-toggle.layer-menu.danger:hover { color: #d04545; }
+.wiring-layer-row .layer-toggle.layer-expand { font-size: 10px; }
+.wiring-layer-row .layer-toggle-spacer { width: 18px; height: 18px; flex-shrink: 0; }
+.wiring-layer-row .layer-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wiring-layer-row .layer-name-input { flex: 1 1 auto; min-width: 0; font-size: 12px; padding: 2px 4px; border: 1px solid var(--accent); border-radius: 4px; outline: none; }
+.wiring-layer-row input[type="range"] { width: 36px; height: 4px; flex-shrink: 0; }
+
+/* ── 中央画布 ── */
+.wiring-canvas-area { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: #e9eef1; }
+.wiring-canvas-svg { width: 100%; height: 100%; display: block; cursor: default; user-select: none; }
+.wiring-canvas-svg.tool-pan { cursor: grab; }
+.wiring-canvas-svg.tool-pan:active { cursor: grabbing; }
+.wiring-canvas-svg.tool-place { cursor: crosshair; }
+.wiring-canvas-svg.tool-label { cursor: text; }
+
+.wiring-canvas-overlay { position: absolute; pointer-events: none; }
+.wiring-canvas-toolbar {
+  position: absolute; top: 12px; right: 12px; display: flex; gap: 4px; padding: 5px; background: white;
+  border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 4px 14px rgba(20, 49, 63, .1); pointer-events: auto;
+}
+.wiring-canvas-toolbar button {
+  width: 32px; height: 32px; display: grid; place-items: center; border: 0; border-radius: 7px; background: transparent;
+  cursor: pointer; font-size: 16px; color: var(--muted); transition: background .12s ease, color .12s ease;
+}
+.wiring-canvas-toolbar button:hover { background: #eef4f5; color: var(--ink); }
+.wiring-canvas-toolbar .zoom-display { min-width: 48px; display: grid; place-items: center; font-size: 11px; font-weight: 700; color: var(--ink); }
+
+.wiring-canvas-hint {
+  position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); padding: 7px 14px; border-radius: 99px;
+  background: rgba(21, 37, 47, .82); color: white; font-size: 11px; white-space: nowrap; pointer-events: none;
+  backdrop-filter: blur(6px);
+}
+
+/* ── 新建画布对话框 ── */
+.wiring-dialog-backdrop { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; padding: 18px; background: rgba(24, 37, 46, .34); }
+.wiring-dialog { width: min(520px, 100%); border: 1px solid var(--border); border-radius: 8px; background: white; box-shadow: 0 18px 48px rgba(18, 38, 48, .25); }
+.wiring-dialog > header, .wiring-dialog > footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 13px 16px; }
+.wiring-dialog > header { border-bottom: 1px solid var(--border); }.wiring-dialog > footer { border-top: 1px solid var(--border); justify-content: flex-end; }
+.wiring-dialog h2 { margin: 0; font-size: 15px; }.wiring-dialog-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 16px; }
+.wiring-dialog-grid > label { display: grid; gap: 5px; color: var(--muted); font-size: 11px; font-weight: 700; }.wiring-dialog-grid > .wiring-check { display: flex; align-self: end; }
+.wiring-dialog-grid input, .wiring-dialog-grid select { min-height: 32px; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; background: white; color: var(--ink); font-size: 12px; }.wiring-dialog-grid input[type="color"] { width: 100%; padding: 3px; }
+.wiring-csv-import-modal { width: min(760px, 100%); max-height: min(720px, calc(100vh - 36px)); overflow: hidden; }
+.wiring-csv-body { display: grid; gap: 14px; padding: 16px; overflow: auto; }
+.wiring-csv-files { display: flex; flex-wrap: wrap; gap: 8px; }
+.wiring-csv-files > span { display: grid; gap: 2px; min-width: 140px; padding: 9px 11px; border: 1px solid var(--border); border-radius: 6px; background: #f7fafb; }
+.wiring-csv-files > span.missing { border-style: dashed; color: var(--muted); }
+.wiring-csv-files small { color: var(--muted); font-size: 10px; }
+.wiring-csv-diff { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.wiring-csv-diff > span { padding: 10px; border: 1px solid var(--border); border-radius: 6px; background: white; color: var(--muted); font-size: 11px; }
+.wiring-csv-diff b { color: #237044; font-style: normal; }.wiring-csv-diff i { color: #a52e2e; font-style: normal; }
+.wiring-csv-issues { display: grid; gap: 6px; max-height: 220px; overflow: auto; }
+.wiring-csv-issues p { margin: 0; padding: 8px 10px; border-left: 3px solid #d5a214; background: #f8fafb; font-size: 11px; }.wiring-csv-issues p.error { border-left-color: #d54848; }
+.wiring-csv-issues b { margin-right: 8px; }.wiring-csv-ok { margin: 0; padding: 12px; border-radius: 6px; background: #eff9f2; color: #237044; font-size: 12px; font-weight: 700; text-align: center; }
+.wiring-csv-preview-data summary { cursor: pointer; padding: 9px 10px; border: 1px solid var(--border); border-radius: 6px; background: #f8fafb; font-size: 11px; font-weight: 700; }
+.wiring-csv-preview-data > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; padding-top: 8px; font-size: 10px; }
+@media (max-width: 720px) { .wiring-csv-diff { grid-template-columns: 1fr; }.wiring-csv-preview-data > div { grid-template-columns: 1fr; } }
+
+/* ── 右侧属性面板 ── */
+.wiring-right-panel {
+  border-left: 1px solid var(--border); background: white; display: flex; flex-direction: column; min-height: 0; overflow: hidden;
+}
+.wiring-right-header { flex: 0 0 auto; padding: 14px 16px 10px; border-bottom: 1px solid var(--border); background: #fbfcfd; }
+.wiring-right-header h3 { margin: 0; font-size: 14px; }
+.wiring-right-header p { margin: 3px 0 0; color: var(--muted); font-size: 11px; }
+.wiring-right-content { flex: 1 1 auto; overflow-y: auto; padding: 14px 16px; }
+.wiring-right-content::-webkit-scrollbar { width: 7px; }
+.wiring-right-content::-webkit-scrollbar-thumb { background: #c0ccd1; border-radius: 99px; }
+
+.wiring-prop-empty { display: grid; justify-items: center; align-content: start; gap: 3px; text-align: center; padding: 32px 12px; color: var(--muted); font-size: 12px; line-height: 1.7; }
+.wiring-prop-empty svg { margin: 0 auto 12px; opacity: .35; }
+.wiring-prop-empty b { color: var(--ink); font-size: 13px; }
+.wiring-prop-group { margin-bottom: 18px; }
+.wiring-prop-group > h5 { margin: 0 0 8px; font-size: 11px; font-weight: 800; color: var(--muted); letter-spacing: .05em; text-transform: uppercase; }
+.wiring-prop-row { display: grid; grid-template-columns: 72px 1fr; align-items: center; gap: 8px; margin-bottom: 8px; }
+.wiring-prop-row > label { font-size: 11px; font-weight: 700; color: var(--muted); }
+.wiring-prop-row > input, .wiring-prop-row > select { min-height: 32px; padding: 0 8px; border: 1px solid var(--border); border-radius: 7px; font-size: 12px; background: white; }
+.wiring-prop-row > input:focus, .wiring-prop-row > select:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 3px rgba(8, 127, 164, .1); }
+.wiring-prop-row > input[type="number"] { font-family: Consolas, monospace; }
+.wiring-param-slider { grid-template-columns: 64px 1fr 48px; gap: 8px; align-items: center; }
+.wiring-param-slider input[type="range"] { width: 100%; accent-color: var(--accent, #087FA4); }
+.wiring-param-value { font-size: 11px; color: var(--muted); text-align: right; min-width: 40px; }
+.wiring-prop-color { display: flex; align-items: center; gap: 6px; }
+.wiring-prop-color input[type="color"] { width: 34px; height: 32px; padding: 3px; border: 1px solid var(--border); border-radius: 7px; background: white; }
+.wiring-prop-color input[type="text"] { flex: 1; min-height: 32px; padding: 0 8px; border: 1px solid var(--border); border-radius: 7px; font-family: Consolas, monospace; font-size: 11px; }
+
+.wiring-prop-actions { display: grid; gap: 6px; margin-top: 14px; }
+.wiring-prop-actions button { min-height: 32px; border-radius: 7px; font-size: 12px; font-weight: 700; cursor: pointer; border: 1px solid var(--border); background: white; color: var(--ink); }
+.wiring-prop-actions button:hover { border-color: var(--accent); background: #f5fcfe; }
+.wiring-prop-actions button.danger { color: #a63838; border-color: #f0c6c6; background: #fff5f5; }
+
+/* ── 交叉类型编辑 ── */
+.wiring-crossing-buttons { display: flex; gap: 6px; }
+.wiring-crossing-buttons .wiring-btn { flex: 1; justify-content: center; font-size: 11px; }
+.wiring-line-picker { display: flex; flex-direction: column; gap: 2px; max-height: 160px; overflow-y: auto; border: 1px solid var(--border); border-radius: 7px; padding: 4px; }
+.wiring-line-option { display: flex; align-items: center; gap: 6px; padding: 3px 4px; border-radius: 5px; cursor: pointer; font-size: 11px; color: var(--ink); }
+.wiring-line-option:hover { background: rgba(127, 127, 127, .08); }
+.wiring-line-option input { accent-color: var(--accent); width: 14px; height: 14px; flex-shrink: 0; }
+.wiring-line-swatch { width: 12px; height: 12px; border-radius: 3px; border: 1px solid rgba(0, 0, 0, .15); flex-shrink: 0; }
+.wiring-line-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wiring-crossing-list { display: grid; gap: 4px; }
+.wiring-crossing-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 8px; border-radius: 6px; background: #f5f8f9; font-size: 11px; }
+.wiring-crossing-row .wiring-btn { min-height: 26px; padding: 0 8px; font-size: 10px; }
+
+/* ── 底部状态栏 ── */
+.wiring-status-bar {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 16px; padding: 7px 18px;
+  border-top: 1px solid var(--border); background: #fbfcfd; font-size: 11px; color: var(--muted);
+}
+.wiring-status-bar > span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.wiring-status-bar b { color: var(--ink); font-weight: 700; }
+.wiring-status-bar i { width: 6px; height: 6px; border-radius: 50%; background: #45b879; display: inline-block; }
+.wiring-status-bar .spacer { flex: 1; }
+
+/* ── SVG 元素样式 ── */
+.wiring-svg { --track-stroke-width: 3; }
+.wiring-svg .track { fill: none; stroke: var(--track-stroke, #202124); stroke-width: var(--track-stroke-width); stroke-linecap: round; stroke-linejoin: round; }
+.wiring-svg .track.siding { stroke: var(--track-stroke, #202124); stroke-width: 2.5; stroke-dasharray: 0; }
+.wiring-svg .track.yard { stroke: var(--track-stroke, #202124); stroke-width: 2.5; }
+.wiring-svg .track.branch { stroke: var(--track-stroke, #202124); stroke-width: 2.5; }
+.wiring-svg .track.turnback { stroke: var(--track-stroke, #202124); stroke-width: 2.5; stroke-dasharray: 5 3; }
+.wiring-svg .platform { fill: var(--platform-fill, #D7B06A); stroke: var(--platform-stroke, #C49A52); stroke-width: 1; rx: 2; }
+.wiring-svg .platform-label { font-size: 7px; fill: #8a6b2e; text-anchor: middle; pointer-events: none; }
+.wiring-svg .station-label { font-size: 13px; fill: var(--label-fill, #202124); text-anchor: middle; pointer-events: none; font-weight: 700; }
+.wiring-svg .station-label-en { font-size: 9px; fill: #6b7b85; text-anchor: middle; pointer-events: none; }
+.wiring-svg .aux-label { font-size: 8px; fill: #6b7b85; text-anchor: middle; pointer-events: none; }
+.wiring-svg .grid-line { stroke: #E0E6EA; stroke-width: .5; }
+.wiring-svg .grid-line.major { stroke: #D0D8DC; stroke-width: .8; }
+.wiring-svg .module-group { cursor: move; transition: filter .12s ease; }
+.wiring-svg .module-group:hover { filter: drop-shadow(0 0 3px rgba(8, 127, 164, .3)); }
+.wiring-svg .module-group.selected { filter: drop-shadow(0 0 4px rgba(8, 127, 164, .5)); }
+.wiring-svg .module-group.locked { cursor: default; }
+.wiring-svg .selection-box { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 4 3; pointer-events: none; }
+.wiring-svg .port { fill: white; stroke: var(--accent); stroke-width: 1.5; cursor: pointer; }
+.wiring-svg .port:hover { fill: var(--accent); }
+.wiring-svg .port.active { fill: var(--accent); r: 5; }
+.wiring-svg .port.connectable { fill: #f7fcfd; stroke: #087fa4; stroke-width: 2; }
+.wiring-svg .port.connectable:hover { fill: #087fa4; stroke: white; }
+.wiring-svg .port.connect-start { fill: #087fa4; stroke: #ffd479; stroke-width: 2.5; animation: wiring-port-pulse 1s ease-in-out infinite; }
+.wiring-svg .port.incompatible { fill: #f3f5f6; stroke: #a9b5ba; stroke-dasharray: 2 2; opacity: .75; }
+.wiring-svg .port.incompatible:hover { fill: #f3f5f6; }
+.wiring-svg .port-label { font-size: 7px; fill: var(--accent-strong); text-anchor: middle; pointer-events: none; }
+.wiring-svg .connection-track { fill: none; stroke: var(--track-stroke, #202124); stroke-width: var(--track-stroke-width); stroke-linecap: round; stroke-linejoin: round; }
+.wiring-svg .connection-preview { fill: none; stroke: #087fa4; stroke-width: var(--track-stroke-width); stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 7 5; pointer-events: none; }
+.wiring-svg .connection-track.selected { stroke: var(--accent-strong); stroke-width: 3.5; }
+.wiring-svg .connection-track.crossing-gap { stroke-dasharray: 8 4; stroke: var(--track-stroke, #5a6c75); }
+.wiring-svg .connection-track.crossing-bridge { stroke-width: 3.5; }
+.wiring-svg .connection-track.line-dashed { stroke-dasharray: 8 4; }
+.wiring-svg .connection-group { cursor: pointer; }
+.wiring-svg .connection-group:hover .connection-track { stroke: var(--accent); }
+.wiring-svg .crossing-point { fill: var(--accent); stroke: white; stroke-width: 1.5; cursor: pointer; }
+.wiring-svg .crossing-point:hover { fill: #d04545; }
+.wiring-svg .crossing-label { font-size: 9px; fill: var(--accent-strong); text-anchor: middle; pointer-events: none; font-weight: 700; }
+/* 语义化轨道：控制点节点与曲率手柄 */
+.wiring-svg .track-node { fill: #ffffff; stroke: var(--accent-strong); stroke-width: 2; cursor: grab; }
+.wiring-svg .track-node:active { cursor: grabbing; }
+.wiring-svg .track-node.curved { fill: #ffd479; stroke: #b8860b; }
+.wiring-svg .track-node:hover { stroke: #d04545; }
+.wiring-svg .track-handle-line { stroke: #b8860b; stroke-width: 1; stroke-dasharray: 3 2; pointer-events: none; }
+.wiring-svg .track-handle-dot { fill: #ffd479; stroke: #b8860b; stroke-width: 1.5; cursor: grab; }
+.wiring-svg .track-handle-dot:active { cursor: grabbing; }
+.wiring-svg .track-handle-dot:hover { stroke: #d04545; }
+.wiring-svg .snap-preview { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 3 2; pointer-events: none; animation: wiring-snap-pulse 1s ease-in-out infinite; }
+.wiring-svg .buffer-stop { stroke: #202124; stroke-width: 3; stroke-linecap: round; }
+.wiring-svg .module-ghost { opacity: .45; pointer-events: none; }
+
+/* ── 背景图 ── */
+.wiring-svg .bg-image { cursor: move; transition: opacity .2s ease; }
+.wiring-svg .bg-image:hover { filter: drop-shadow(0 0 3px rgba(8, 127, 164, .2)); }
+.wiring-svg .bg-image.selected { filter: drop-shadow(0 0 4px rgba(8, 127, 164, .4)); }
+/* 锁定背景图不拦截任何鼠标事件：框选、平移等操作在它上面照常进行（它只是背景）。 */
+.wiring-svg .bg-image.locked { pointer-events: none; }
+.wiring-svg .bg-image-selection { pointer-events: none; }
+.wiring-svg .bg-image-unlock { pointer-events: auto; cursor: pointer; }
+.wiring-svg .bg-image-unlock-ring { fill: rgba(32, 33, 36, .72); stroke: #fff; stroke-width: 1.5; transition: fill .12s ease; }
+.wiring-svg .bg-image-unlock:hover .bg-image-unlock-ring { fill: var(--accent); }
+.wiring-svg .bg-image-unlock-icon { fill: #fff; }
+
+/* ── 独立标签 ── */
+.wiring-svg .independent-label { font-family: inherit; pointer-events: auto; transition: filter .12s ease; }
+.wiring-svg .independent-label:hover { filter: drop-shadow(0 0 3px rgba(8, 127, 164, .3)); }
+.wiring-svg .independent-label.selected { filter: drop-shadow(0 0 4px rgba(8, 127, 164, .5)); }
+.wiring-svg .independent-label.locked { cursor: default; }
+.wiring-svg .independent-platform { cursor: move; }
+.wiring-svg .independent-platform.selected { stroke: var(--accent); stroke-width: 2; }
+.wiring-svg .object-resize-handle { fill: #087fa4; stroke: #fff; stroke-width: 1; cursor: nwse-resize; }
+.wiring-svg .object-resize-handle:hover { fill: #055d7b; }
+.wiring-pending-tray,.wiring-change-panel { border: 1px solid var(--border); background: #f7fbfc; padding: 8px; margin: 0 0 10px; border-radius: 6px; display: grid; gap: 6px; font-size: 12px; }
+.wiring-pending-tray > span { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 5px; align-items: center; padding-top: 6px; border-top: 1px solid #e3eaed; }
+.wiring-pending-tray > span > span { grid-column: 1 / -1; min-width: 0; display: grid; gap: 2px; }
+.wiring-pending-tray > span small { color: var(--muted); overflow-wrap: anywhere; }
+.wiring-pending-tray > span .wiring-btn { min-width: 0; white-space: normal; line-height: 1.25; }
+.wiring-change-panel header,.wiring-change-row { display: flex; align-items: center; gap: 6px; justify-content: space-between; }
+.wiring-change-row { padding: 5px 0; border-top: 1px solid #e3eaed; }
+.wiring-change-row.error { color: #a23333; }.wiring-change-row.warning { color: #8b6514; }
+.wiring-change-row button { font-size: 11px; border: 1px solid var(--border); background: white; border-radius: 3px; padding: 2px 5px; }
+.wiring-svg .label-anchor { pointer-events: none; }
+
+@keyframes wiring-snap-pulse { 0%, 100% { opacity: .5; } 50% { opacity: 1; } }
+@keyframes wiring-port-pulse { 0%, 100% { filter: drop-shadow(0 0 1px rgba(255, 212, 121, .6)); } 50% { filter: drop-shadow(0 0 5px rgba(255, 212, 121, 1)); } }
+
+/* ── 换乘组合 ── */
+.wiring-svg .transfer-group { transition: opacity .15s ease; }
+.wiring-svg .transfer-group.selected .transfer-group-label { font-weight: 700; }
+.wiring-svg .transfer-walkway { pointer-events: none; stroke-linecap: round; }
+
+.wiring-asset-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.wiring-asset-item { position: relative; min-width: 0; padding: 4px; border: 1px solid var(--border); background: white; color: var(--text); display: grid; justify-items: center; gap: 4px; }
+.wiring-asset-item:hover { border-color: var(--accent); }
+.wiring-asset-item img { width: 32px; height: 32px; object-fit: contain; }
+.wiring-asset-item small { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wiring-asset-place { width: 100%; min-width: 0; padding: 3px; border: 0; background: transparent; color: inherit; cursor: pointer; display: grid; justify-items: center; gap: 4px; }
+.wiring-asset-remove { position: absolute; top: 2px; right: 2px; width: 20px; height: 20px; padding: 0; border: 1px solid #edcaca; background: rgba(255,255,255,.92); color: #a63838; cursor: pointer; line-height: 1; }
+.wiring-svg .module-group.source-deleted .selection-box { stroke: #b42318; stroke-dasharray: 5 3; }
+.wiring-source-deleted { color: #b42318; font-size: 11px; line-height: 1.45; }
+.wiring-station-associations { display: grid; gap: 6px; margin-top: 8px; }
+.wiring-association-empty { padding: 8px 10px; border: 1px dashed var(--border); border-radius: 7px; color: var(--muted); font-size: 11px; text-align: center; }
+.wiring-station-association { display: grid; grid-template-columns: 9px minmax(0, 1fr) 26px; align-items: center; gap: 8px; padding: 7px 8px; border: 1px solid var(--border); border-radius: 8px; background: #f8fbfc; }
+.wiring-association-swatch { width: 9px; height: 28px; border-radius: 5px; }
+.wiring-station-association > span:nth-child(2) { min-width: 0; display: grid; gap: 1px; }
+.wiring-station-association b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.wiring-station-association small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 9px; }
+.wiring-station-association button { width: 26px; height: 26px; padding: 0; border: 1px solid var(--border); border-radius: 6px; background: white; color: #667085; cursor: pointer; }
+.wiring-station-association button:hover:not(:disabled) { border-color: #e5484d; color: #c62828; background: #fff5f5; }
+.wiring-text-tool-category { border-bottom: 1px solid var(--border); padding-bottom: 10px; margin-bottom: 10px; }
+.wiring-text-tool-preview { display: grid; place-items: center; min-width: 52px; color: var(--accent); background: #eef9fc; border-radius: 7px; }
+.wiring-text-tool-preview span { font-size: 23px; font-weight: 900; letter-spacing: -.06em; }
+.wiring-layer-edge-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 8px; }
+.wiring-layer-edge-actions button,
+.wiring-label-overlap-stack button { border: 1px solid var(--border); border-radius: 6px; background: white; color: var(--ink); font: inherit; font-size: 10px; padding: 5px 7px; cursor: pointer; }
+.wiring-layer-edge-actions button:hover,
+.wiring-label-overlap-stack button:hover { border-color: var(--accent); color: var(--accent); background: #f0fafd; }
+.wiring-label-overlap-stack { display: grid; gap: 5px; margin-top: 10px; padding: 8px; border: 1px solid var(--border); border-radius: 8px; background: #f8fbfc; }
+.wiring-label-overlap-stack > b { font-size: 10px; color: var(--muted); }
+.wiring-label-overlap-stack > span { font-size: 10px; color: var(--muted); line-height: 1.45; }
+.wiring-label-overlap-stack > div { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 4px; align-items: center; }
+.wiring-label-overlap-stack > div > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
+.wiring-line-badge-list { display: flex; flex-wrap: wrap; gap: 4px; }
+.wiring-line-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border: 1px solid; border-radius: 12px; font-size: 10px; background: #f5f8f9; }
+.wiring-line-badge i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+
+/* ── 响应式 ── */
+@media (max-width: 1280px) {
+  .wiring-body { grid-template-columns: 220px 1fr 240px; }
+}
+@media (max-width: 1024px) {
+  .wiring-body { grid-template-columns: 200px 1fr 220px; }
+  .wiring-toolbar { padding: 8px 12px; gap: 4px; }
+  .wiring-toolbar-group + .wiring-toolbar-group { padding-left: 4px; margin-left: 2px; }
+}
+@media (max-width: 860px) {
+  .wiring-body { grid-template-columns: 1fr; }
+  .wiring-left-panel, .wiring-right-panel { display: none; }
+  .wiring-toolbar { display: grid; grid-template-columns: minmax(0, 1fr); max-height: 228px; overflow-y: auto; align-items: stretch; padding: 7px 8px; }
+  .wiring-toolbar-group { width: 100%; max-width: 100%; overflow-x: auto; overflow-y: hidden; flex-wrap: nowrap; padding-bottom: 2px; scrollbar-width: thin; }
+  .wiring-toolbar-group + .wiring-toolbar-group { margin-left: 0; padding-left: 0; border-left: 0; }
+  .wiring-toolbar-spacer { display: none; }
+  .wiring-toolbar-info { flex-basis: auto; }
+}

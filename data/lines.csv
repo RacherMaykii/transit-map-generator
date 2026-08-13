@@ -1,0 +1,17 @@
+﻿id,kind,number,name_zh,name_en,code,line_color,station_color,current_color,passed_color,text_color,description
+L1,metro,1,1号线,Line 1,L1,#FFC600,#FFC600,#DF0024,#818181,#FFC600,灵港线
+L2,metro,2,2号线,Line 2,L2,#FF00FF,#FF00FF,#DF0024,#818181,#FF00FF,博园-盈水线
+L3,metro,3,3号线,Line 3,L3,#FF3C00,#FF3C00,#DF0024,#818181,#FF3C00,盈水-冬椿线
+L4,metro,4,4号线,Line 4,L4,#00A8FF,#00A8FF,#DF0024,#818181,#00A8FF,交通快速线
+L5,metro,5,5号线,Line 5,L5,#0000FF,#0000FF,#DF0024,#818181,#0000FF,博园区市域线
+L6,metro,6,6号线,Line 6,L6,#DF0024,#DF0024,#DF0024,#818181,#DF0024,综合干线
+L7,metro,7,7号线,Line 7,L7,#8E8E8E,#8E8E8E,#DF0024,#DEDEDE,#8E8E8E,学院线
+L8,metro,8,8号线,Line 8,L8,#1B9D06,#1B9D06,#DF0024,#818181,#1B9D06,枫林线
+L9,metro,9,9号线,Line 9,L9,#7E00FF,#7E00FF,#DF0024,#818181,#7E00FF,南部景区线
+L10,metro,10,10号线,Line 10,L10,#00F0FF,#00F0FF,#DF0024,#818181,#00F0FF,城市快线
+R1,metro,R1,R1线,Line R1,R1,#481E1C,#481E1C,#DF0024,#818181,#481E1C,79环线
+T1,tram,1,有轨电车1号线,Tram 1,T1,#FFA800,#FFA800,#DF0024,#818181,#FFA800,博园区半自动线
+T2,tram,2,有轨电车2号线,Tram 2,T2,#00FF00,#00FF00,#DF0024,#818181,#00FF00,盈水区自动线
+T3,tram,3,有轨电车3号线,Tram 3,T3,#EA7293,#EA7293,#DF0024,#818181,#EA7293,椿江半自动线
+T4,tram,4,有轨电车4号线,Tram 4,T4,#964D22,#964D22,#DF0024,#818181,#964D22,枫叶镇半自动线
+T5,tram,5,有轨电车5号线,Tram 5,T5,#1781B5,#1781B5,#DF0024,#818181,#1781B5,盈东半自动线

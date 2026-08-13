@@ -1,0 +1,6786 @@
+"use client";
+
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  DEFAULT_LAYOUT,
+  DEFAULT_LOOP_LAYOUT,
+  DEFAULT_PULSE_LAYOUT,
+  DEFAULT_SCENIC_LAYOUT,
+  normalizeTransitData,
+  Station,
+  TransitData,
+} from "../transit/types";
+import { buildSourceIdentityRecords, confirmPhysicalStationSuggestion, suggestPhysicalStations, type PhysicalStationSuggestion } from "./sourceIdentity";
+import { findAssetByFilename, importIconArchive, importIconFiles } from "./assetImport";
+import { evaluateFilter } from "./filtering";
+import {
+  buildResolvedTemplateMap,
+  MODULE_TEMPLATES,
+  supportsAvoidanceTracks,
+  templatesByCategory,
+} from "./templates";
+import {
+  BackgroundImageObject,
+  buildControlPointPathD,
+  CrossingType,
+  DEFAULT_LAYERS,
+  DEFAULT_SERVICE_PATTERNS,
+  DiagramModule,
+  genId,
+  getChildLayers,
+  getRootLayers,
+  GRID_SIZE,
+  GraphicShapeType,
+  isLayerTreeLocked,
+  isLayerTreeVisible,
+  LABEL_ANCHOR_MAP,
+  LabelAnchor,
+  LabelObject,
+  AttachedGraphic,
+  AssetRecord,
+  FilterState,
+  LayerNode,
+  LeftPanelTab,
+  ModuleConnection,
+  ModulePort,
+  ModuleTemplate,
+  PendingPlacement,
+  PhysicalStation,
+  PlatformObject,
+  PORT_SNAP_RADIUS,
+  rebuildTracksFromControlPoints,
+  snapToGrid,
+  TemplateCategory,
+  TemplateTrack,
+  TrackControlPoint,
+  TransferGroup,
+  SourceChange,
+  SourceLine,
+  SourceMapping,
+  SourceStationOnLine,
+  ViewportState,
+  WiringTool,
+  worldPortPosition,
+} from "./types";
+import { generateSourceChanges, pendingPlacementChanges, updateSourceChangeStatus } from "../transit/sourceChanges";
+import {
+  buildImportPreview,
+  CsvImportPreview,
+  hasBlockingIssues,
+  parseCsvFile,
+  type ParsedCsvFile,
+} from "../transit/csv-io";
+import { alignModuleToTrackPorts, CANVAS_PRESETS, centerBackgroundOnCanvas, compareRenderOrder, createCanvasPage, createLayerRank, effectiveConnectionZIndex, effectiveLayerOpacity, effectivePlatformZIndex, expandCanvasToFitBounds, fitBackgroundToCanvas, leafLayerIds, mirrorModuleOwnedObjects, readableLabelRotation, relayoutModuleOwnedObjects, restoreBackgroundSize, rotateModuleOwnedObjects, shiftOwnedPlatformZIndex, toggleOwnedModuleSelection, translateCanvasSelection, translateModuleGroup } from "./canvasLogic";
+import { computeGraphicBbox, computeLabelBbox, computeLabelLocalBox, computePlatformBbox, resolveLabelIconOverlaps } from "./labelAvoidance";
+import { addStationAssociation, lineIdsForStationAssociations, removeStationAssociation } from "./stationAssociation";
+import { duplicateTransferStationLabelIds } from "./transferLabels";
+import { defaultConnectionLayerId, defaultGraphicLayerId, defaultLabelLayerId, defaultModuleLayerId, defaultPlatformLayerId } from "./layerAssignment";
+import { expandServicePatternFilter } from "./servicePatterns";
+import {
+  createAutoControlPoints,
+  createPairedAutoControlPoints,
+  buildPairedOffsetPathD,
+  endpointsForConnection,
+  findDoubleTrackPartner,
+  findPairedConnection,
+  getConnectionEndpoint,
+  getConnectionGeometry,
+  getConnectionTracks,
+  pathsCross,
+  portIsOccupied,
+  synchronizeConnectionTracks,
+  validateConnection,
+  type ConnectionGeometry,
+  type PairedCurveEndpoints,
+} from "./connectionLogic";
+import {
+  DEFAULT_TRACK_COLOR,
+  DEFAULT_PLATFORM_FILL,
+  darkenHex,
+  effectiveColor,
+  resolveConnectionColor,
+  resolveLabelFillColor,
+  resolveModuleColorPlan,
+  resolvePlatformFillColor,
+  platformLineNames,
+  templatePlatformLineNames,
+  twoToneColors,
+  sampleSpecAt,
+  templateTrackYBounds,
+  type ColorSpec,
+  type GradientDef,
+} from "./color";
+import { useHistory } from "./history";
+import {
+  loadFromIndexedDB,
+  migrateProjectSchema,
+  projectToJson,
+  saveToIndexedDB,
+  serializeProject,
+  type DiagramPage,
+  type ProjectFile,
+} from "./projectStore";
+import { newestWiringProject, synchronizeWiringProjectSource } from "./sourceSync";
+import TutorialOverlay, { useTutorialState } from "./TutorialOverlay";
+import PopoverMenu, { type PopoverMenuItem } from "./PopoverMenu";
+import {
+  createProjectRepository,
+  DEFAULT_PROJECT_ID,
+  type ProjectRepository,
+} from "../projects/repositories";
+import { BrowserEditorDocumentStore, type JsonEditorDocument } from "../projects/editorDocumentStore";
+import "../transit/transit.css";
+import "./wiring.css";
+
+/** 矩形相交检测 */
+function rectsIntersect(a: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }): boolean {
+  return !(a.x + a.w < b.x || b.x + b.w < a.x || a.y + a.h < b.y || b.y + b.h < a.y);
+}
+
+function rotatedRectBounds(x: number, y: number, width: number, height: number, rotation = 0) {
+  if (!rotation) return { x, y, w: width, h: height };
+  const radians = rotation * Math.PI / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  const cx = x + width / 2;
+  const cy = y + height / 2;
+  const corners = [[x, y], [x + width, y], [x + width, y + height], [x, y + height]].map(([px, py]) => ({
+    x: cx + (px - cx) * cos - (py - cy) * sin,
+    y: cy + (px - cx) * sin + (py - cy) * cos,
+  }));
+  const xs = corners.map((point) => point.x);
+  const ys = corners.map((point) => point.y);
+  const minX = Math.min(...xs);
+  const minY = Math.min(...ys);
+  return { x: minX, y: minY, w: Math.max(...xs) - minX, h: Math.max(...ys) - minY };
+}
+
+/** 下载 Blob 辅助 */
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function ProjectStationIcon({
+  repository,
+  projectId,
+  name,
+  embeddedSrc,
+}: {
+  repository: ProjectRepository;
+  projectId: string;
+  name: string;
+  embeddedSrc?: string;
+}) {
+  const [src, setSrc] = useState(embeddedSrc || "");
+  useEffect(() => {
+    if (embeddedSrc) {
+      setSrc(embeddedSrc);
+      return;
+    }
+    let disposed = false;
+    let objectUrl = "";
+    repository.getAsset(projectId, name).then((asset) => {
+      if (!asset || disposed) return;
+      objectUrl = URL.createObjectURL(asset.blob);
+      setSrc(objectUrl);
+    }).catch(() => undefined);
+    return () => {
+      disposed = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [embeddedSrc, name, projectId, repository]);
+  return src
+    ? <img className="station-resource-icon" src={src} alt="" onError={(event) => { event.currentTarget.classList.add("missing"); }} />
+    : <span className="station-icon-missing" title="未配置图标">!</span>;
+}
+
+function createBackgroundPreview(image: HTMLImageElement): string | undefined {
+  const maxDimension = 2048;
+  const longest = Math.max(image.naturalWidth, image.naturalHeight);
+  if (longest <= maxDimension && image.naturalWidth * image.naturalHeight <= 4_000_000) return undefined;
+  const scale = Math.min(1, maxDimension / longest);
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+  canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+  canvas.getContext("2d")?.drawImage(image, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL("image/webp", 0.82);
+}
+
+interface ExportBounds { x: number; y: number; width: number; height: number }
+
+type CanvasRenderItem =
+  | { kind: "connection"; item: ModuleConnection; creationIndex: number }
+  | { kind: "background"; item: BackgroundImageObject; creationIndex: number }
+  | { kind: "module"; item: DiagramModule; creationIndex: number }
+  | { kind: "platform"; item: PlatformObject; creationIndex: number }
+  | { kind: "graphic"; item: AttachedGraphic; creationIndex: number }
+  | { kind: "label"; item: LabelObject; creationIndex: number }
+  | { kind: "transfer"; item: TransferGroup; creationIndex: number };
+
+const PLACEMENT_Z_LEVELS = [
+  { label: "高架-高", value: 20 },
+  { label: "高架", value: 10 },
+  { label: "地面", value: 0 },
+  { label: "半地下", value: -5 },
+  { label: "地下", value: -10 },
+  { label: "地下-深", value: -20 },
+  { label: "地下-极深", value: -30 },
+  { label: "标注", value: 100 },
+  { label: "背景", value: -100 },
+] as const;
+
+/** 生成不含编辑辅助元素的独立 SVG。 */
+function svgToString(svg: SVGSVGElement, bounds: ExportBounds, includeBackground: boolean, transparent: boolean): string {
+  const clone = svg.cloneNode(true) as SVGSVGElement;
+  clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+  clone.setAttribute("width", String(bounds.width));
+  clone.setAttribute("height", String(bounds.height));
+  clone.setAttribute("viewBox", `${bounds.x} ${bounds.y} ${bounds.width} ${bounds.height}`);
+  clone.querySelector(".canvas-bg")?.remove();
+  clone.querySelectorAll(".grid-group, .selection-box, .port, .track-control-handle, .crossing-point, .crossing-label, .connection-preview, .module-ghost, .bg-image-selection, .bg-image-unlock, .label-anchor").forEach((node) => node.remove());
+  clone.querySelectorAll<SVGImageElement>("image[data-export-src]").forEach((node) => {
+    node.setAttribute("href", node.getAttribute("data-export-src") || node.getAttribute("href") || "");
+    node.removeAttribute("data-export-src");
+  });
+  if (!includeBackground) clone.querySelectorAll(".bg-image").forEach((node) => node.remove());
+  const viewportGroup = clone.querySelector("g[transform]");
+  viewportGroup?.removeAttribute("transform");
+  const paper = clone.querySelector(".canvas-paper");
+  if (transparent) paper?.remove();
+  const style = document.createElementNS("http://www.w3.org/2000/svg", "style");
+  style.textContent = `
+    .track,.connection-track{fill:none;stroke:var(--track-stroke,#202124);stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
+    .track.siding,.track.yard,.track.branch,.track.turnback{stroke:var(--track-stroke,#202124);stroke-width:2.5}.track.turnback{stroke-dasharray:5 3}
+    .connection-track.crossing-gap{stroke:var(--track-stroke,#5a6c75);stroke-dasharray:8 4}.connection-track.crossing-bridge{stroke-width:3.5}.connection-track.line-dashed{stroke-dasharray:8 4}
+    .platform{fill:var(--platform-fill,#D7B06A);stroke:var(--platform-stroke,#C49A52);stroke-width:1}.platform-label{font-size:7px;fill:#8a6b2e;text-anchor:middle}
+    .station-label{font-family:"Microsoft YaHei","PingFang SC","Noto Sans CJK SC",sans-serif;font-size:13px;fill:var(--label-fill,#202124);text-anchor:middle;font-weight:700}
+    .station-label-en,.aux-label{font-family:"Microsoft YaHei","PingFang SC","Noto Sans CJK SC",sans-serif;fill:#6b7b85;text-anchor:middle}.station-label-en{font-size:9px}.aux-label{font-size:8px}
+    .independent-label{font-family:"Microsoft YaHei","PingFang SC","Noto Sans CJK SC",sans-serif}.transfer-group{pointer-events:none}
+  `;
+  clone.insertBefore(style, clone.firstChild);
+  const helper = document.createElement("div");
+  helper.appendChild(clone);
+  return `<?xml version="1.0" encoding="UTF-8"?>\n${helper.innerHTML}`;
+}
+
+// ── 模板预览 SVG ──────────────────────────────
+
+function templateTrackPathD(track: TemplateTrack): string {
+  return track.cx2 !== undefined && track.cy2 !== undefined
+    ? `M${track.x1},${track.y1} C${track.cx},${track.cy} ${track.cx2},${track.cy2} ${track.x2},${track.y2}`
+    : `M${track.x1},${track.y1} Q${track.cx},${track.cy} ${track.x2},${track.y2}`;
+}
+
+function TemplatePreviewSvg({ template }: { template: ModuleTemplate }) {
+  const scale = Math.min(54 / template.width, 38 / template.height) * 0.85;
+  const ox = (54 - template.width * scale) / 2;
+  const oy = (38 - template.height * scale) / 2;
+  return (
+    <svg width={54} height={38}>
+      <g transform={`translate(${ox},${oy}) scale(${scale})`}>
+        {template.tracks.map((t, i) =>
+          t.curved ? (
+            <path key={i} d={templateTrackPathD(t)} fill="none" stroke="#202124" strokeWidth={3} strokeLinecap="round" />
+          ) : (
+            <line key={i} x1={t.x1} y1={t.y1} x2={t.x2} y2={t.y2} stroke="#202124" strokeWidth={3} strokeLinecap="round" />
+          ),
+        )}
+        {template.platforms.map((p, i) => (
+          <rect key={i} x={p.x} y={p.y} width={p.width} height={p.height} fill="#D7B06A" stroke="#C49A52" strokeWidth={0.5} rx={1.5} />
+        ))}
+      </g>
+    </svg>
+  );
+}
+
+// ── 元件库矢量图形：基础元素 + 工程图标（信号机） ──────────────
+
+/** 每种形状的元数据：显示名、默认尺寸、默认颜色 */
+const SHAPE_META: Record<GraphicShapeType, { label: string; width: number; height: number; defaultFill?: string; defaultStroke?: string }> = {
+  rect:          { label: "矩形",     width: 80, height: 60, defaultFill: "#cce6f5", defaultStroke: "#202124" },
+  roundRect:     { label: "圆角矩形", width: 80, height: 60, defaultFill: "#d7f0d7", defaultStroke: "#202124" },
+  triangle:      { label: "三角形",   width: 80, height: 70, defaultFill: "#f5e6cc", defaultStroke: "#202124" },
+  circle:        { label: "圆形",     width: 70, height: 70, defaultFill: "#f2ccf5", defaultStroke: "#202124" },
+  diamond:       { label: "菱形",     width: 70, height: 70, defaultFill: "#f5d7cc", defaultStroke: "#202124" },
+  "signal-in":   { label: "进站信号机", width: 28, height: 64 },
+  "signal-out":  { label: "出站信号机", width: 28, height: 64 },
+  "signal-shunt": { label: "调车信号机", width: 24, height: 40 },
+};
+
+/**
+ * 局部镜像的 SVG transform 后缀：绕对象中心先做镜像（scale(-1,1) / scale(1,-1)），
+ * 再叠加在外层 translate/rotate 之后（SVG 变换从右往左作用）。
+ */
+/**
+ * 模块内部文字的反镜像 transform：外层模块组已做镜像+旋转，这里把文字旋回可读角度，
+ * 并抵消镜像，避免镜像后的文字左右颠倒。未镜像时退化为原来的纯旋转写法。
+ */
+function moduleLabelTextTransform(rotation: number, mirrorX: boolean | undefined, mirrorY: boolean | undefined, x: number, y: number): string {
+  const sx = mirrorX ? -1 : 1;
+  const sy = mirrorY ? -1 : 1;
+  if (sx === 1 && sy === 1) return `rotate(${readableLabelRotation(rotation) - rotation} ${x} ${y})`;
+  return `scale(${sx} ${sy} ${x} ${y}) rotate(${-rotation} ${x} ${y}) rotate(${readableLabelRotation(rotation)} ${x} ${y})`;
+}
+
+function moduleMirrorTransform(width: number, height: number, mirrorX?: boolean, mirrorY?: boolean): string {
+  const sx = mirrorX ? -1 : 1;
+  const sy = mirrorY ? -1 : 1;
+  if (sx === 1 && sy === 1) return "";
+  const cx = width / 2;
+  const cy = height / 2;
+  return ` translate(${cx} ${cy}) scale(${sx} ${sy}) translate(${-cx} ${-cy})`;
+}
+
+/** 水平/垂直镜像开关（模块、图形属性面板与放置面板复用）。 */
+function MirrorToggle({ mirrorX, mirrorY, onChange, disabled }: {
+  mirrorX?: boolean;
+  mirrorY?: boolean;
+  onChange: (next: { mirrorX: boolean; mirrorY: boolean }) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="wiring-mirror-toggle">
+      <button
+        type="button"
+        className={`wiring-mirror-btn ${mirrorX ? "active" : ""}`}
+        onClick={() => onChange({ mirrorX: !mirrorX, mirrorY: !!mirrorY })}
+        title="水平镜像（左右翻转）"
+        aria-pressed={!!mirrorX}
+        disabled={disabled}
+      >⇔ 水平</button>
+      <button
+        type="button"
+        className={`wiring-mirror-btn ${mirrorY ? "active" : ""}`}
+        onClick={() => onChange({ mirrorX: !!mirrorX, mirrorY: !mirrorY })}
+        title="垂直镜像（上下翻转）"
+        aria-pressed={!!mirrorY}
+        disabled={disabled}
+      >↕ 垂直</button>
+    </div>
+  );
+}
+
+/** 信号机灯位颜色（固定，与线路配色无关） */
+const SIGNAL_LAMP: Record<string, { fill: string; stroke?: string }> = {
+  red:    { fill: "#E53935" },
+  yellow: { fill: "#FDD835", stroke: "#B9A21A" },
+  green:  { fill: "#43A047" },
+  blue:   { fill: "#1565C0" },
+  white:  { fill: "#FFFFFF", stroke: "#555555" },
+};
+
+/** 信号机灯序（从上到下） */
+const SIGNAL_LAMPS: Partial<Record<GraphicShapeType, string[]>> = {
+  "signal-in": ["red", "yellow", "green"],
+  "signal-out": ["green", "red"],
+  "signal-shunt": ["blue", "white"],
+};
+
+/** 在画布上渲染一个矢量形状 / 信号机（SVG 主体，不含外层变换）。 */
+function ShapeGraphic({ shapeType, width, height, fill, stroke }: { shapeType: GraphicShapeType; width: number; height: number; fill?: string; stroke?: string }) {
+  if (shapeType.startsWith("signal-")) {
+    // 高柱信号机：竖柱 + 深色灯头 + 固定灯位
+    const lamps = SIGNAL_LAMPS[shapeType] || [];
+    const headW = Math.min(width * 0.8, 20);
+    const headH = lamps.length * 8 + 6;
+    const headX = (width - headW) / 2;
+    const headTop = Math.max(0, height - headH - 10);
+    const lampR = Math.max(2, Math.min(3.2, headW * 0.18));
+    return (
+      <g>
+        <line x1={width / 2} y1={height} x2={width / 2} y2={headTop + headH} stroke="#3c4043" strokeWidth={2} />
+        <rect x={headX} y={headTop} width={headW} height={headH} rx={3} fill="#202124" />
+        {lamps.map((color, i) => {
+          const lamp = SIGNAL_LAMP[color];
+          const cy = headTop + headH - (i * 8 + 5);
+          return <circle key={i} cx={width / 2} cy={cy} r={lampR} fill={lamp.fill} stroke={lamp.stroke || "none"} strokeWidth={0.6} />;
+        })}
+      </g>
+    );
+  }
+  const f = fill || "#cce6f5";
+  const s = stroke || "#202124";
+  const rx = shapeType === "roundRect" ? Math.min(14, Math.min(width, height) * 0.2) : 0;
+  switch (shapeType) {
+    case "rect":
+      return <rect width={width} height={height} fill={f} stroke={s} strokeWidth={1.5} rx={rx} />;
+    case "roundRect":
+      return <rect width={width} height={height} fill={f} stroke={s} strokeWidth={1.5} rx={rx} />;
+    case "triangle":
+      return <polygon points={`${width / 2},0 ${width},${height} 0,${height}`} fill={f} stroke={s} strokeWidth={1.5} strokeLinejoin="round" />;
+    case "circle":
+      return <circle cx={width / 2} cy={height / 2} r={Math.min(width, height) / 2} fill={f} stroke={s} strokeWidth={1.5} />;
+    case "diamond":
+      return <polygon points={`${width / 2},0 ${width},${height / 2} ${width / 2},${height} 0,${height / 2}`} fill={f} stroke={s} strokeWidth={1.5} strokeLinejoin="round" />;
+    default:
+      return null;
+  }
+}
+
+/** 元件卡片迷你预览（固定画布，自动缩放形状）。 */
+function ShapePreview({ shapeType }: { shapeType: GraphicShapeType }) {
+  const meta = SHAPE_META[shapeType];
+  const scale = Math.min(50 / meta.width, 34 / meta.height) * 0.9;
+  const ox = (54 - meta.width * scale) / 2;
+  const oy = (38 - meta.height * scale) / 2;
+  return (
+    <svg width={54} height={38}>
+      <g transform={`translate(${ox},${oy}) scale(${scale})`}>
+        <ShapeGraphic shapeType={shapeType} width={meta.width} height={meta.height} fill={meta.defaultFill} stroke={meta.defaultStroke} />
+      </g>
+    </svg>
+  );
+}
+
+/** 基础元素分类卡片（形状） */
+const SHAPE_CARDS: { shapeType: GraphicShapeType; description: string }[] = [
+  { shapeType: "rect", description: "矩形框，用于图框、图例、分区" },
+  { shapeType: "roundRect", description: "圆角矩形，用于模块标识、色块" },
+  { shapeType: "triangle", description: "三角形，用于警示、箭头、标志" },
+  { shapeType: "circle", description: "圆形，用于信号灯、车挡、圆标" },
+  { shapeType: "diamond", description: "菱形，用于编号底标、道岔标识" },
+];
+
+/** 工程图标分类卡片（信号机） */
+const SIGNAL_CARDS: { shapeType: GraphicShapeType; description: string }[] = [
+  { shapeType: "signal-in", description: "进站信号机：红·黄·绿三灯" },
+  { shapeType: "signal-out", description: "出站信号机：绿·红两灯" },
+  { shapeType: "signal-shunt", description: "调车信号机：蓝·白两灯" },
+];
+
+/** 工程图标分类卡片（编号标注） */
+const NUMBER_CARDS: { numeralType: "track" | "switch"; description: string }[] = [
+  { numeralType: "track", description: "站内股道编号，如 1道、2道" },
+  { numeralType: "switch", description: "道岔编号，如 1#、3#、5#" },
+];
+
+// ── 设置持久化 ─────────────────────────────────
+
+/**
+ * 编辑器偏好设置的 localStorage 持久化。
+ * 首次渲染用保存值初始化；每次 set（含函数式更新）同步写回。
+ * 只存小体积偏好（开关/面板折叠），大体积工程数据仍走 IndexedDB。
+ * localStorage 不可用或内容损坏时静默回退默认值。
+ */
+function usePersistentState<T>(storageKey: string, defaultValue: T): [T, React.Dispatch<React.SetStateAction<T>>] {
+  const [value, setValue] = useState<T>(() => {
+    try {
+      const raw = localStorage.getItem(storageKey);
+      if (raw !== null) return JSON.parse(raw) as T;
+    } catch {
+      // 忽略读取失败
+    }
+    return defaultValue;
+  });
+  const setWithPersist = useCallback((next: React.SetStateAction<T>) => {
+    setValue((prev) => {
+      const resolved = typeof next === "function" ? (next as (prev: T) => T)(prev) : next;
+      try {
+        localStorage.setItem(storageKey, JSON.stringify(resolved));
+      } catch {
+        // 忽略写入失败（隐私模式/配额）
+      }
+      return resolved;
+    });
+  }, [storageKey]);
+  return [value, setWithPersist];
+}
+
+/** 偏好设置的 localStorage 键前缀 */
+const PREF_KEY = (name: string) => `metro-wiring-prefs.${name}`;
+
+// ── 主组件 ────────────────────────────────────
+
+interface WiringDiagramAppProps {
+  projectId?: string;
+  repository?: ProjectRepository;
+}
+
+export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repository }: WiringDiagramAppProps) {
+  const projectRepository = useMemo(
+    () => repository || createProjectRepository({ storageMode: "http" }),
+    [repository],
+  );
+  const autosaveKey = useMemo(() => `wiring:${projectId}:autosave`, [projectId]);
+  const documentStore = useMemo(() => new BrowserEditorDocumentStore(), []);
+  // ── 数据 ──
+  const [data, setData] = useState<TransitData | null>(null);
+  const [error, setError] = useState("");
+  const [status, setStatus] = useState("正在读取本地数据…");
+
+  // ── 编辑器状态 ──
+  const [modules, setModules] = useState<DiagramModule[]>([]);
+  const [connections, setConnections] = useState<ModuleConnection[]>([]);
+  const [layers, setLayers] = useState<LayerNode[]>(DEFAULT_LAYERS);
+  const [viewport, setViewport] = useState<ViewportState>({ panX: 100, panY: 60, scale: 0.75 });
+  const [pages, setPages] = useState<DiagramPage[]>([createCanvasPage({ id: "page-1", name: "主画布", width: 1920, height: 1080, layerRootIds: DEFAULT_LAYERS.filter((layer) => layer.parentId === null).map((layer) => layer.id) })]);
+  const [activePageId, setActivePageId] = useState("page-1");
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [manualCurveEditingId, setManualCurveEditingId] = useState<string | null>(null);
+  const [activeTool, setActiveTool] = useState<WiringTool>("auto");
+  const [activeTemplateId, setActiveTemplateId] = useState<string | null>(null);
+  /** 元件库"形状/编号"待放置元素；activeTool==="shape" 时点击画布按此放置 */
+  const [pendingElement, setPendingElement] = useState<{ kind: "shape"; shapeType: GraphicShapeType } | { kind: "number"; numeralType: "track" | "switch" } | null>(null);
+  const [placementRotation, setPlacementRotation] = useState(0);
+  const [placementMirrorX, setPlacementMirrorX] = useState(false);
+  const [placementMirrorY, setPlacementMirrorY] = useState(false);
+  const [placementZIndex, setPlacementZIndex] = useState(0);
+  const [placementLayerId, setPlacementLayerId] = useState("auto");
+  const [showGrid, setShowGrid] = useState(true);
+  const [showAuxLabels, setShowAuxLabels] = usePersistentState(PREF_KEY("showAuxLabels"), true);
+  const [snapEnabled, setSnapEnabled] = usePersistentState(PREF_KEY("snapEnabled"), true);
+  const [autoConnect, setAutoConnect] = usePersistentState(PREF_KEY("autoConnect"), true);
+  const [filterLineIds, setFilterLineIds] = useState<string[]>([]);
+  const [servicePatterns, setServicePatterns] = useState(DEFAULT_SERVICE_PATTERNS);
+  const [activeServicePatternId, setActiveServicePatternId] = useState("");
+  const [csvImportPreview, setCsvImportPreview] = useState<CsvImportPreview | null>(null);
+  const [showCsvImport, setShowCsvImport] = useState(false);
+  const [expandedSections, setExpandedSections] = usePersistentState<Record<string, boolean>>(PREF_KEY("expandedSections"), { library: true, stations: true, assets: false, layers: false });
+  const toggleSection = useCallback((sectionId: string) => {
+    setExpandedSections((prev) => ({ ...prev, [sectionId]: !prev[sectionId] }));
+  }, []);
+  // 元件库各分类（基础元素/工程图标/轨道模板）可单独收起
+  const [collapsedCats, setCollapsedCats] = useState<Record<string, boolean>>({});
+  const toggleCat = useCallback((key: string) => {
+    setCollapsedCats((prev) => ({ ...prev, [key]: !prev[key] }));
+  }, []);
+  const [mouseWorld, setMouseWorld] = useState({ x: 0, y: 0 });
+  const [searchQuery, setSearchQuery] = useState("");
+  const [showPlacedOnly, setShowPlacedOnly] = useState(false);
+  const [advancedMode, setAdvancedMode] = usePersistentState(PREF_KEY("advancedMode"), false);
+  const [continuousPlace, setContinuousPlace] = usePersistentState(PREF_KEY("continuousPlace"), false);
+  const [editingPlatformModuleId, setEditingPlatformModuleId] = useState<string | null>(null);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [projectName, setProjectName] = useState("未命名配线图");
+  const [backgroundImages, setBackgroundImages] = useState<BackgroundImageObject[]>([]);
+  const [labels, setLabels] = useState<LabelObject[]>([]);
+  const [transferGroups, setTransferGroups] = useState<TransferGroup[]>([]);
+  const [platforms, setPlatforms] = useState<PlatformObject[]>([]);
+  const [graphics, setGraphics] = useState<AttachedGraphic[]>([]);
+  const [assets, setAssets] = useState<AssetRecord[]>([]);
+  const [sourceLines, setSourceLines] = useState<SourceLine[]>([]);
+  const [sourceStationsOnLine, setSourceStationsOnLine] = useState<SourceStationOnLine[]>([]);
+  const [physicalStations, setPhysicalStations] = useState<PhysicalStation[]>([]);
+  const [sourceMappings, setSourceMappings] = useState<SourceMapping[]>([]);
+  const [filterState, setFilterState] = useState<FilterState>({ lineIds: [], mode: "target_only" });
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [selectionBox, setSelectionBox] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
+  const [unresolvedChanges, setUnresolvedChanges] = useState<SourceChange[]>([]);
+  const [pendingPlacement, setPendingPlacement] = useState<PendingPlacement | null>(null);
+  const [changeSeverity, setChangeSeverity] = useState<"all" | SourceChange["severity"]>("all");
+  const [tracingMode, setTracingMode] = useState(false);
+  const [pendingStationId, setPendingStationId] = useState<string | null>(null);
+  const [connectFrom, setConnectFrom] = useState<{ moduleId: string; portId: string } | null>(null);
+  const [doubleTrackConnect, setDoubleTrackConnect] = useState(true);
+  const [newCanvasOpen, setNewCanvasOpen] = useState(false);
+  const [newCanvasDraft, setNewCanvasDraft] = useState<{ name: string; width: number; height: number; backgroundColor: string; gridSize: number; showGrid: boolean; orientation: "landscape" | "portrait" }>({ name: "新画布", width: 1920, height: 1080, backgroundColor: "#FFFFFF", gridSize: 20, showGrid: true, orientation: "landscape" });
+  const [exportIncludeBackground, setExportIncludeBackground] = useState(true);
+  const [exportTransparent, setExportTransparent] = useState(false);
+  const [pngScale, setPngScale] = useState(2);
+  const [exportScope, setExportScope] = useState<"canvas" | "selection">("canvas");
+
+  // ── 引用 ──
+  const svgRef = useRef<SVGSVGElement>(null);
+  const csvImportRef = useRef<HTMLInputElement>(null);
+  const bgImageInputRef = useRef<HTMLInputElement>(null);
+  const replaceBackgroundInputRef = useRef<HTMLInputElement>(null);
+  const iconArchiveInputRef = useRef<HTMLInputElement>(null);
+  const iconDirectoryInputRef = useRef<HTMLInputElement>(null);
+  const saveProjectActionRef = useRef<() => void>(() => undefined);
+  const deleteSelectedActionRef = useRef<() => void>(() => undefined);
+  const dragRef = useRef<{
+    type: "none" | "module" | "selection" | "transferGroup" | "pan" | "bgImage" | "label" | "platform" | "graphic" | "platformResize" | "graphicResize" | "controlPoint" | "controlPointHandle" | "selectionBox";
+    selectionIds?: string[];
+    moduleId?: string;
+    transferGroupId?: string;
+    bgImageId?: string;
+    labelId?: string;
+    platformId?: string;
+    graphicId?: string;
+    /** 控制点拖拽：所属连接 ID */
+    connId?: string;
+    /** 控制点拖拽：节点 ID */
+    cpId?: string;
+    /** 曲率手柄拖拽起始偏移 */
+    startHX?: number;
+    startHY?: number;
+    startSX: number;
+    startSY: number;
+    startMX: number;
+    startMY: number;
+    startPX: number;
+    startPY: number;
+    startWidth?: number;
+    startHeight?: number;
+    moved: boolean;
+    /** mousedown 时对象是否已处于选中状态：mouseup 未移动时据此决定取消选中还是选中，避免闭包陈旧 */
+    wasSelected?: boolean;
+    /** 模块拖拽：上一帧的模块位置（避免 modulesRef 异步延迟导致平台漂移） */
+    lastMX?: number;
+    lastMY?: number;
+  }>({ type: "none", startSX: 0, startSY: 0, startMX: 0, startMY: 0, startPX: 0, startPY: 0, moved: false });
+  const selectionBoxRef = useRef<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
+
+  /** 图层拖拽排序状态 */
+  const layerDragRef = useRef<{ draggedId: string | null; dropTargetId: string | null; dropPosition: "before" | "after" | "inside" | null }>({ draggedId: null, dropTargetId: null, dropPosition: null });
+  const [layerDragState, setLayerDragState] = useState<{ draggedId: string | null; dropTargetId: string | null; dropPosition: "before" | "after" | "inside" | null }>({ draggedId: null, dropTargetId: null, dropPosition: null });
+  const [renamingLayerId, setRenamingLayerId] = useState<string | null>(null);
+  const { showTutorial, dismissTutorial, resetTutorial } = useTutorialState();
+
+  // ── 状态镜像 ref（供历史系统读取当前值，避免闭包过期） ──
+  const modulesRef = useRef<DiagramModule[]>(modules);
+  const connectionsRef = useRef<ModuleConnection[]>(connections);
+  const layersRef = useRef<LayerNode[]>(layers);
+  const backgroundImagesRef = useRef<BackgroundImageObject[]>(backgroundImages);
+  const labelsRef = useRef<LabelObject[]>(labels);
+  const transferGroupsRef = useRef<TransferGroup[]>(transferGroups);
+  const dataRef = useRef<TransitData | null>(data); const pagesRef = useRef<DiagramPage[]>(pages);
+  const servicePatternsRef = useRef(servicePatterns); const platformsRef = useRef<PlatformObject[]>(platforms);
+  const graphicsRef = useRef<AttachedGraphic[]>(graphics); const assetsRef = useRef<AssetRecord[]>(assets);
+  const sourceLinesRef = useRef<SourceLine[]>(sourceLines); const sourceStationsOnLineRef = useRef<SourceStationOnLine[]>(sourceStationsOnLine);
+  const physicalStationsRef = useRef<PhysicalStation[]>(physicalStations); const sourceMappingsRef = useRef<SourceMapping[]>(sourceMappings);
+  const filterStateRef = useRef<FilterState>(filterState); const unresolvedChangesRef = useRef<SourceChange[]>(unresolvedChanges);
+  const pendingPlacementRef = useRef<PendingPlacement | null>(pendingPlacement);
+  useEffect(() => { selectionBoxRef.current = selectionBox; }, [selectionBox]);
+  useEffect(() => { modulesRef.current = modules; }, [modules]);
+  useEffect(() => { connectionsRef.current = connections; }, [connections]);
+  useEffect(() => { layersRef.current = layers; }, [layers]);
+  useEffect(() => { backgroundImagesRef.current = backgroundImages; }, [backgroundImages]);
+  useEffect(() => { labelsRef.current = labels; }, [labels]);
+  useEffect(() => { transferGroupsRef.current = transferGroups; }, [transferGroups]);
+  useEffect(() => { dataRef.current = data; pagesRef.current = pages; servicePatternsRef.current = servicePatterns; platformsRef.current = platforms; graphicsRef.current = graphics; assetsRef.current = assets; sourceLinesRef.current = sourceLines; sourceStationsOnLineRef.current = sourceStationsOnLine; physicalStationsRef.current = physicalStations; sourceMappingsRef.current = sourceMappings; filterStateRef.current = filterState; unresolvedChangesRef.current = unresolvedChanges; pendingPlacementRef.current = pendingPlacement; }, [data, pages, servicePatterns, platforms, graphics, assets, sourceLines, sourceStationsOnLine, physicalStations, sourceMappings, filterState, unresolvedChanges, pendingPlacement]);
+
+  // ── 撤销/重做 ──
+  const history = useHistory({ modules: modulesRef, connections: connectionsRef, layers: layersRef, backgroundImages: backgroundImagesRef, labels: labelsRef, transferGroups: transferGroupsRef, transitData: dataRef, pages: pagesRef, servicePatterns: servicePatternsRef, platforms: platformsRef, graphics: graphicsRef, assets: assetsRef, sourceLines: sourceLinesRef, sourceStationsOnLine: sourceStationsOnLineRef, physicalStations: physicalStationsRef, sourceMappings: sourceMappingsRef, filters: filterStateRef, unresolvedChanges: unresolvedChangesRef, pendingPlacement: pendingPlacementRef });
+
+  /** 执行撤销 */
+  const handleUndo = useCallback(() => {
+    const snapshot = history.undo();
+    if (snapshot) {
+      setModules(snapshot.modules);
+      setConnections(snapshot.connections);
+      setLayers(snapshot.layers);
+      setBackgroundImages(snapshot.backgroundImages);
+      setLabels(snapshot.labels);
+      setTransferGroups(snapshot.transferGroups);
+      setData(snapshot.transitData); setPages(snapshot.pages); setServicePatterns(snapshot.servicePatterns); setPlatforms(snapshot.platforms); setGraphics(snapshot.graphics); setAssets(snapshot.assets); setSourceLines(snapshot.sourceLines); setSourceStationsOnLine(snapshot.sourceStationsOnLine); setPhysicalStations(snapshot.physicalStations); setSourceMappings(snapshot.sourceMappings); setFilterState(snapshot.filters); setUnresolvedChanges(snapshot.unresolvedChanges); setPendingPlacement(snapshot.pendingPlacement);
+      setSelectedIds([]);
+      setHasUnsavedChanges(true);
+      setStatus(`已撤销：${snapshot.operationName}`);
+    }
+  }, [history]);
+
+  /** 执行重做 */
+  const handleRedo = useCallback(() => {
+    const snapshot = history.redo();
+    if (snapshot) {
+      setModules(snapshot.modules);
+      setConnections(snapshot.connections);
+      setLayers(snapshot.layers);
+      setBackgroundImages(snapshot.backgroundImages);
+      setLabels(snapshot.labels);
+      setTransferGroups(snapshot.transferGroups);
+      setData(snapshot.transitData); setPages(snapshot.pages); setServicePatterns(snapshot.servicePatterns); setPlatforms(snapshot.platforms); setGraphics(snapshot.graphics); setAssets(snapshot.assets); setSourceLines(snapshot.sourceLines); setSourceStationsOnLine(snapshot.sourceStationsOnLine); setPhysicalStations(snapshot.physicalStations); setSourceMappings(snapshot.sourceMappings); setFilterState(snapshot.filters); setUnresolvedChanges(snapshot.unresolvedChanges); setPendingPlacement(snapshot.pendingPlacement);
+      setSelectedIds([]);
+      setHasUnsavedChanges(true);
+      setStatus(`已重做：${snapshot.operationName}`);
+    }
+  }, [history]);
+
+  // ── 站台编辑模式   // ── 加载数据 ── 加载数据 ──
+
+  // 选中不同模块时退出站台编辑模式
+  useEffect(() => {
+    if (editingPlatformModuleId) {
+      const stillEditing = modules.find(m => m.id === editingPlatformModuleId && selectedIds.includes(m.id));
+      if (!stillEditing) setEditingPlatformModuleId(null);
+    }
+  }, [selectedIds, editingPlatformModuleId, modules]);
+  function cancelCsvImport() {
+    setShowCsvImport(false);
+    setCsvImportPreview(null);
+    if (csvImportRef.current) csvImportRef.current.value = "";
+  }
+
+  function resolveSourceChange(change: SourceChange, status: "accepted" | "ignored") {
+    history.captureSnapshot(status === "accepted" ? "接受数据变更" : "忽略数据变更");
+    setUnresolvedChanges((prev) => updateSourceChangeStatus(prev, [change.id], status));
+    if (pendingPlacement?.sourceStationId === change.entityId) setPendingPlacement(null);
+    setHasUnsavedChanges(true);
+  }
+
+  function locateSourceChange(change: SourceChange) {
+    const objectId = change.affectedObjectIds[0];
+    if (objectId) { setSelectedIds([objectId]); setStatus(`已定位变更对象 ${objectId}`); }
+    else setStatus("该变更尚未关联画布对象");
+  }
+
+  function acceptInformationalChanges() {
+    const ids = unresolvedChanges.filter((change) => change.status === "unresolved" && change.severity === "info").map((change) => change.id);
+    if (!ids.length) return;
+    history.captureSnapshot("批量接受信息级变更");
+    setUnresolvedChanges((prev) => updateSourceChangeStatus(prev, ids, "accepted"));
+    setHasUnsavedChanges(true);
+  }
+
+  function beginStationPlacement(stationId: string) {
+    setPendingStationId(stationId); setPendingPlacement({ sourceStationId: stationId, pageId: activePageId });
+    selectTemplate("island_platform");
+  }
+
+  function adjacentStationContext(stationId: string) {
+    const station = data?.stations.find((candidate) => candidate.id === stationId);
+    if (!station || !data) return null;
+    const siblings = data.stations.filter((candidate) => candidate.lineId === station.lineId).sort((a, b) => a.sequence - b.sequence);
+    const index = siblings.findIndex((candidate) => candidate.id === stationId);
+    const previous = index > 0 ? siblings[index - 1] : undefined;
+    const next = index >= 0 && index < siblings.length - 1 ? siblings[index + 1] : undefined;
+    const previousModule = previous ? modules.find((module) => isOnActivePage(module.pageId) && module.sourceStationIds.includes(previous.id)) : undefined;
+    const nextModule = next ? modules.find((module) => isOnActivePage(module.pageId) && module.sourceStationIds.includes(next.id)) : undefined;
+    return { station, line: data.lines.find((line) => line.id === station.lineId), previous, next, previousModule, nextModule };
+  }
+
+  function insertStationBetweenNeighbors(stationId: string) {
+    const context = adjacentStationContext(stationId);
+    if (!context?.previousModule || !context.nextModule) {
+      setStatus("需要先放置前后相邻站点，才能自动插入中间位置");
+      return;
+    }
+    placeModule(
+      (context.previousModule.x + context.nextModule.x) / 2,
+      (context.previousModule.y + context.nextModule.y) / 2,
+      "island_platform",
+      stationId,
+    );
+  }
+
+  function confirmPhysicalMapping(suggestion: PhysicalStationSuggestion) {
+    const confirmed = confirmPhysicalStationSuggestion(suggestion);
+    history.captureSnapshot("确认物理站映射");
+    setPhysicalStations((prev) => [...prev.filter((station) => station.id !== confirmed.physicalStation.id), confirmed.physicalStation]);
+    setSourceMappings((prev) => {
+      const sourceIds = new Set(confirmed.mappings.map((mapping) => mapping.sourceStationId));
+      return [...prev.filter((mapping) => !sourceIds.has(mapping.sourceStationId)), ...confirmed.mappings];
+    });
+    setHasUnsavedChanges(true);
+  }
+
+  async function handleCsvImportSelect(event: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files || []);
+    if (!files.length || !data) return;
+    const parsed: ParsedCsvFile[] = [];
+    for (const file of files) {
+      const item = parseCsvFile(file.name, await file.text());
+      if (item) parsed.push(item);
+    }
+    if (!parsed.length) {
+      setStatus("未识别 CSV 类型，请选择 lines、stations 或 transfers 文件");
+      return;
+    }
+    setCsvImportPreview(buildImportPreview(parsed, data));
+    setShowCsvImport(true);
+    setStatus("CSV 已解析，等待确认导入");
+  }
+
+  function confirmCsvImport() {
+    if (!data || !csvImportPreview || hasBlockingIssues(csvImportPreview.issues)) return;
+    history.captureSnapshot("导入 CSV 数据");
+    const nextData = normalizeTransitData({ ...data, lines: csvImportPreview.lines, stations: csvImportPreview.stations, transfers: csvImportPreview.transfers });
+    const bindings = Object.fromEntries(modules.flatMap((module) => module.sourceStationIds.map((id) => [`station:${id}`, [module.id]])));
+    const changes = generateSourceChanges(data, nextData, bindings);
+    const identity = buildSourceIdentityRecords(nextData);
+    const nextStations = new Map(nextData.stations.map((station) => [station.id, station]));
+    setModules((prev) => prev.map((module) => {
+      const station = module.sourceStationIds.map((id) => nextStations.get(id)).find(Boolean);
+      return station ? { ...module, customLabel: station.nameZh, lineIds: Array.from(new Set([station.lineId, ...station.throughLineIds])) } : module;
+    }));
+    setLabels((prev) => prev.map((label) => {
+      const ownerStationId = label.sourceStationId || modules.find((module) => module.id === label.attachedToId)?.sourceStationIds[0];
+      const station = ownerStationId ? nextStations.get(ownerStationId) : undefined;
+      if (!station || !label.language || label.language === "neutral") return label;
+      return { ...label, sourceStationId: station.id, text: label.language === "en" ? station.nameEn : station.nameZh };
+    }));
+    setGraphics((prev) => prev.map((graphic) => {
+      const stationId = modules.find((module) => module.id === graphic.attachedToId)?.sourceStationIds[0];
+      const station = stationId ? nextStations.get(stationId) : undefined;
+      const asset = findAssetByFilename(assets, station?.icon);
+      return asset ? { ...graphic, assetId: asset.id } : graphic;
+    }));
+    setData(nextData);
+    setSourceLines(identity.sourceLines);
+    setSourceStationsOnLine(identity.sourceStationsOnLine);
+    setUnresolvedChanges(changes);
+    const pending = pendingPlacementChanges(changes)[0];
+    setPendingPlacement(pending ? { sourceStationId: pending.entityId } : null);
+    setShowCsvImport(false);
+    setCsvImportPreview(null);
+    setHasUnsavedChanges(true);
+    setStatus("CSV 数据已导入");
+    if (csvImportRef.current) csvImportRef.current.value = "";
+  }
+
+  async function reloadProjectCsv() {
+    setStatus("正在同步当前项目 CSV…");
+    try {
+      const normalized = normalizeTransitData(await projectRepository.loadTransitData(projectId));
+      const currentProject = serializeProject({
+        projectName, modules, connections, layers, viewport, backgroundImages, labels, transferGroups,
+        platforms, graphics, assets, sourceLines, sourceStationsOnLine, physicalStations, sourceMappings,
+        filters: filterState, unresolvedChanges, pendingPlacement, servicePatterns,
+        sourceDataSnapshot: data || undefined,
+        pages: pages.map((page) => page.id === activePageId ? { ...page, viewport, showGrid } : page),
+      });
+      const synchronized = synchronizeWiringProjectSource(currentProject, normalized);
+      setData(normalized);
+      setModules(synchronized.modules);
+      setLabels(synchronized.labels);
+      setGraphics(synchronized.graphics);
+      setSourceLines(synchronized.sourceLines);
+      setSourceStationsOnLine(synchronized.sourceStationsOnLine);
+      setUnresolvedChanges(synchronized.unresolvedChanges);
+      setPendingPlacement(synchronized.pendingPlacement);
+      setHasUnsavedChanges(true);
+      setStatus(synchronized.unresolvedChanges.length
+        ? `已同步当前 CSV，检测到 ${synchronized.unresolvedChanges.length} 项变化`
+        : "当前 CSV 已是最新状态");
+    } catch (reason) {
+      setStatus(`同步 CSV 失败：${reason instanceof Error ? reason.message : "未知错误"}`);
+    }
+  }
+
+  // ── 辅助计算 ──
+
+  const templateMap = useMemo(() => {
+    const map = new Map<string, ModuleTemplate>();
+    MODULE_TEMPLATES.forEach((t) => map.set(t.id, t));
+    return map;
+  }, []);
+
+  /** Augmented template map that includes per-module customized entries for modules with customParams. */
+  const resolvedTemplateMap = useMemo(
+    () => buildResolvedTemplateMap(templateMap, modules),
+    [templateMap, modules],
+  );
+
+  function resolveTemplatesFor(moduleList: DiagramModule[]) {
+    return buildResolvedTemplateMap(templateMap, moduleList);
+  }
+
+  function alignModuleToExistingTracks(candidate: DiagramModule) {
+    const allModules = modulesRef.current.some((module) => module.id === candidate.id)
+      ? modulesRef.current.map((module) => module.id === candidate.id ? candidate : module)
+      : [...modulesRef.current, candidate];
+    const templates = buildResolvedTemplateMap(templateMap, allModules);
+    const template = templates.get(candidate.id) || templateMap.get(candidate.templateId);
+    if (!template) return { x: candidate.x, y: candidate.y, aligned: false };
+    return alignModuleToTrackPorts({
+      module: candidate,
+      template,
+      others: allModules,
+      templates,
+      threshold: pageGridSize,
+    });
+  }
+
+  const activePage = useMemo(
+    () => pages.find((page) => page.id === activePageId) || pages[0],
+    [pages, activePageId],
+  );
+  const pageWidth = activePage?.width || 1920;
+  const pageHeight = activePage?.height || 1080;
+  const pageGridSize = activePage?.gridSize || GRID_SIZE;
+  const activeLayerRank = useMemo(() => createLayerRank(layers), [layers]);
+  const selectableLayers = useMemo(() => leafLayerIds(layers), [layers]);
+  function resolvePlacementLayer(defaultLayerId: string): string {
+    return placementLayerId !== "auto" && selectableLayers.includes(placementLayerId)
+      ? placementLayerId
+      : defaultLayerId;
+  }
+  const isOnActivePage = useCallback((pageId?: string) => (pageId || "page-1") === activePageId, [activePageId]);
+
+  /** 对当前画布上的站名/图标执行自动避让；有位移时才落历史快照。
+   *  captureHistory=false 用于跟随其他事务（如拖动）自动触发，避免产生独立撤销步骤。 */
+  const applyLabelAvoidance = useCallback((captureHistory = true) => {
+    const result = resolveLabelIconOverlaps({
+      modules: modulesRef.current,
+      labels: labelsRef.current,
+      graphics: graphicsRef.current,
+      platforms: platformsRef.current,
+      activePageId,
+      ignoredLabelIds: duplicateTransferStationLabelIds(labelsRef.current, transferGroupsRef.current),
+    });
+    if (!result.changed) return;
+    if (captureHistory) history.captureSnapshot("自动避让");
+    setLabels(result.labels);
+    setGraphics(result.graphics);
+    setHasUnsavedChanges(true);
+    if (captureHistory) setStatus(`已自动避让 ${result.patches.length} 处站名/图标重叠`);
+  }, [activePageId]);
+
+  // Run after project data loads and when drawable objects change. The solver
+  // is idempotent, so a settled layout returns unchanged arrays and does not
+  // create a render loop or an extra history entry.
+  useEffect(() => {
+    applyLabelAvoidance(false);
+  }, [applyLabelAvoidance, modules, labels, graphics, platforms]);
+
+  // Older projects and manually placed station modules may still rely on the
+  // template's fallback "站名"/"Station" text. Materialize those two labels
+  // once so the same collision solver can move them like normal labels.
+  useEffect(() => {
+    const existing = labelsRef.current;
+    const additions: LabelObject[] = [];
+    for (const mod of modules) {
+      const template = resolvedTemplateMap.get(mod.id) || templateMap.get(mod.templateId);
+      if (!template) continue;
+      // 物化标签文字优先取当前关联站点名，保证"先放模块、后关联站点"的模块站名正确
+      const station = data?.stations.find((candidate) => mod.sourceStationIds.includes(candidate.id));
+      const ownerLabels = existing.filter((label) => label.attachedToId === mod.id && label.visible !== false);
+      for (const templateLabel of template.labels.filter((label) => label.text === "站名" || label.text === "Station")) {
+        const language = templateLabel.text === "Station" ? "en" : "zh";
+        const hasLabel = ownerLabels.some((label) => {
+          if (label.language === language) return true;
+          if (label.language) return false;
+          const hasCjk = /[\u3400-\u9fff]/.test(label.text);
+          return language === "zh" ? hasCjk : !hasCjk && label.text !== "站名";
+        });
+        if (hasLabel) continue;
+        const centerX = template.width / 2;
+        const centerY = template.height / 2;
+        const radians = (mod.rotation * Math.PI) / 180;
+        const dx = templateLabel.x - centerX;
+        const dy = templateLabel.y - centerY;
+        const worldX = mod.x + centerX + dx * Math.cos(radians) - dy * Math.sin(radians);
+        const worldY = mod.y + centerY + dx * Math.sin(radians) + dy * Math.cos(radians);
+        // 模板标签的 anchor 是文字对齐（start/middle/end），需映射到
+        // LabelObject 的位置型锚点；映射后 start→top_right、end→top_left 与
+        // 模板原渲染（textAnchor）语义一致，middle 回落到默认 top。
+        const templateTextAnchor = templateLabel.anchor || "middle";
+        const labelAnchor: LabelAnchor = templateTextAnchor === "start" ? "top_right" : templateTextAnchor === "end" ? "top_left" : "top";
+        additions.push({
+          id: `${mod.id}:template-label:${language}`,
+          text: language === "zh" ? (mod.customLabel || station?.nameZh || templateLabel.text) : (station?.nameEn || templateLabel.text),
+          x: worldX,
+          y: worldY,
+          fontSize: templateLabel.fontSize || 13,
+          anchor: labelAnchor,
+          rotation: readableLabelRotation(mod.rotation),
+          fill: templateLabel.fill || "#202124",
+          fontWeight: language === "zh" ? 700 : 400,
+          backgroundMask: true,
+          maskStrokeWidth: 3,
+          locked: false,
+          visible: true,
+          layerId: "layer-label",
+          zIndex: labels.length + additions.length,
+          pageId: mod.pageId || activePageId,
+          createdOrder: Date.now() + additions.length,
+          attachedToId: mod.id,
+          positionMode: "attached",
+          offsetX: worldX - mod.x,
+          offsetY: worldY - mod.y,
+          language,
+        });
+      }
+    }
+    if (additions.length) setLabels((previous) => [...previous, ...additions]);
+  }, [modules, labels.length, resolvedTemplateMap, templateMap, activePageId, data]);
+
+  // Projects saved before label rotation support retain attached station names at
+  // 0 degrees. Align them once with their owning module after loading.
+  useEffect(() => {
+    const rotationByModuleId = new Map(modules.map((module) => [module.id, readableLabelRotation(module.rotation)]));
+    let changed = false;
+    const synchronized = labels.map((label) => {
+      if (!label.attachedToId) return label;
+      const rotation = rotationByModuleId.get(label.attachedToId);
+      if (rotation === undefined || label.rotation === rotation) return label;
+      changed = true;
+      return { ...label, rotation };
+    });
+    if (changed) setLabels(synchronized);
+  }, [modules, labels]);
+
+  // The canvas is finite for export, but grows on demand as users arrange
+  // modules beyond its right or bottom edge. Object coordinates stay stable.
+  useEffect(() => {
+    if (!activePage) return;
+    const bounds = [
+      ...modules.filter((module) => isOnActivePage(module.pageId)).map((module) => {
+        const template = resolvedTemplateMap.get(module.id) || templateMap.get(module.templateId);
+        if (!template) return { x: module.x, y: module.y, width: 0, height: 0 };
+        const radians = (module.rotation * Math.PI) / 180;
+        const width = Math.abs(Math.cos(radians)) * template.width + Math.abs(Math.sin(radians)) * template.height;
+        const height = Math.abs(Math.sin(radians)) * template.width + Math.abs(Math.cos(radians)) * template.height;
+        return { x: module.x + (template.width - width) / 2, y: module.y + (template.height - height) / 2, width, height };
+      }),
+      ...platforms.filter((platform) => isOnActivePage(platform.pageId)).map((platform) => ({ x: platform.x, y: platform.y, width: platform.width, height: platform.height })),
+      ...graphics.filter((graphic) => isOnActivePage(graphic.pageId)).map((graphic) => ({ x: graphic.x, y: graphic.y, width: graphic.width, height: graphic.height })),
+      ...labels.filter((label) => isOnActivePage(label.pageId)).map((label) => ({ x: label.x - 100, y: label.y - 48, width: 200, height: 96 })),
+      ...connections.filter((connection) => isOnActivePage(connection.pageId)).flatMap((connection) => connection.controlPoints.map((point) => ({ x: point.x - 32, y: point.y - 32, width: 64, height: 64 }))),
+    ];
+    const expanded = expandCanvasToFitBounds(activePage, bounds, Math.max(120, pageGridSize * 4));
+    if (expanded === activePage) return;
+    setPages((previous) => previous.map((page) => page.id === activePageId ? expanded : page));
+    setHasUnsavedChanges(true);
+  }, [activePage, activePageId, connections, graphics, isOnActivePage, labels, modules, pageGridSize, platforms, resolvedTemplateMap, templateMap]);
+
+  const selectedModules = useMemo(
+    () => modules.filter((m) => isOnActivePage(m.pageId) && selectedIds.includes(m.id)),
+    [modules, selectedIds, isOnActivePage],
+  );
+
+  const placedStationIds = useMemo(() => {
+    const set = new Set<string>();
+    modules
+      .filter((module) => isOnActivePage(module.pageId))
+      .forEach((module) => module.sourceStationIds.forEach((id) => set.add(id)));
+    return set;
+  }, [modules, isOnActivePage]);
+
+  const orderedRenderItems = useMemo(() => {
+    const items: CanvasRenderItem[] = [
+      ...connections.filter((item) => isOnActivePage(item.pageId)).map((item, creationIndex) => ({ kind: "connection" as const, item, creationIndex: item.createdOrder ?? creationIndex })),
+      ...backgroundImages.filter((item) => isOnActivePage(item.pageId)).map((item, creationIndex) => ({ kind: "background" as const, item, creationIndex: item.createdOrder ?? creationIndex })),
+      ...modules.filter((item) => isOnActivePage(item.pageId)).map((item, creationIndex) => ({ kind: "module" as const, item, creationIndex: item.createdOrder ?? creationIndex })),
+      ...platforms.filter((item) => isOnActivePage(item.pageId)).map((item, creationIndex) => ({ kind: "platform" as const, item, creationIndex: item.createdOrder ?? creationIndex })),
+      ...graphics.filter((item) => isOnActivePage(item.pageId)).map((item, creationIndex) => ({ kind: "graphic" as const, item, creationIndex: item.createdOrder ?? creationIndex })),
+      ...labels.filter((item) => isOnActivePage(item.pageId)).map((item, creationIndex) => ({ kind: "label" as const, item, creationIndex: item.createdOrder ?? creationIndex })),
+      ...transferGroups.filter((item) => isOnActivePage(item.pageId)).map((item, creationIndex) => ({ kind: "transfer" as const, item, creationIndex: item.createdOrder ?? creationIndex })),
+    ];
+    const ownedPlatformIndex = new Map<string, number>();
+    const platformCountByModule = new Map<string, number>();
+    for (const platform of platforms) {
+      if (!platform.moduleId) continue;
+      const index = platformCountByModule.get(platform.moduleId) ?? 0;
+      ownedPlatformIndex.set(platform.id, index);
+      platformCountByModule.set(platform.moduleId, index + 1);
+    }
+    const sortableItem = (entry: CanvasRenderItem) => ({
+      layerId: entry.item.layerId,
+      zIndex: entry.kind === "connection"
+        ? effectiveConnectionZIndex(entry.item as ModuleConnection, modules)
+        : entry.kind === "platform"
+          ? effectivePlatformZIndex(entry.item as PlatformObject, modules, ownedPlatformIndex.get(entry.item.id) ?? 0)
+        : entry.item.zIndex,
+      creationIndex: entry.creationIndex,
+    });
+    return items.sort((a, b) => compareRenderOrder(sortableItem(a), sortableItem(b), activeLayerRank, (item) => item.creationIndex));
+  }, [connections, backgroundImages, modules, platforms, graphics, labels, transferGroups, activeLayerRank, isOnActivePage]);
+
+  const suppressedTransferLabelIds = useMemo(
+    () => duplicateTransferStationLabelIds(labels, transferGroups),
+    [labels, transferGroups],
+  );
+
+  /** 线路颜色解析：为每个模块/连接/站台/标签预计算颜色规格，并收集渐变定义 */
+  const colorSpecs = useMemo(() => {
+    const moduleSpecs = new Map<string, ColorSpec>();
+    /** 每条轨道的 solid 颜色（与模板 tracks 顺序对齐） */
+    const trackColorSpecs = new Map<string, string[]>();
+    /** 每个模板站台的填充 spec（与模板 platforms 顺序对齐） */
+    const templatePlatformColorSpecs = new Map<string, (ColorSpec | undefined)[]>();
+    const connectionSpecs = new Map<string, ColorSpec>();
+    const platformSpecs = new Map<string, ColorSpec>();
+    /** 站台关联的线路名（用于把"岛式站台"等提示文字替换成线路名） */
+    const platformLineNamesMap = new Map<string, string[]>();
+    const labelSpecs = new Map<string, ColorSpec>();
+    const gradientDefs: GradientDef[] = [];
+    const moduleWidth = (modId: string) => {
+      const mod = modules.find((candidate) => candidate.id === modId);
+      return resolvedTemplateMap.get(modId)?.width ?? (mod ? templateMap.get(mod.templateId)?.width : undefined) ?? 160;
+    };
+    const moduleTrackBounds = (modId: string) => {
+      const template = resolvedTemplateMap.get(modId) || templateMap.get(modules.find((candidate) => candidate.id === modId)?.templateId || "");
+      return template ? templateTrackYBounds(template.tracks) : undefined;
+    };
+    for (const mod of modules) {
+      const template = resolvedTemplateMap.get(mod.id) || templateMap.get(mod.templateId);
+      const plan = resolveModuleColorPlan(mod, sourceLines, moduleWidth(mod.id), template?.tracks ?? [], template?.platforms ?? [], moduleTrackBounds(mod.id), template?.trackLinePattern);
+      moduleSpecs.set(mod.id, plan.sampleSpec);
+      trackColorSpecs.set(mod.id, plan.trackColors);
+      templatePlatformColorSpecs.set(mod.id, plan.templatePlatformSpecs);
+      if (plan.sampleSpec.kind === "gradient" && plan.sampleSpec.gradientDef) gradientDefs.push(plan.sampleSpec.gradientDef);
+      for (const platSpec of plan.templatePlatformSpecs) {
+        if (platSpec && platSpec.kind === "gradient" && platSpec.gradientDef) gradientDefs.push(platSpec.gradientDef);
+      }
+    }
+    // ── 道岔模块着色：从已连接的模块推导颜色（规则与普通连接相同） ──
+    // 两次遍历处理道岔链：第一次给连接着车站的道岔着色，第二次给连接着已着色道岔的道岔着色
+    for (let pass = 0; pass < 2; pass++) {
+    for (const mod of modules) {
+      const template = resolvedTemplateMap.get(mod.id) || templateMap.get(mod.templateId);
+      if (!template || template.category !== "turnout") continue;
+      // 已有线路绑定的模块跳过（优先使用 lineIds 指定的颜色）
+      if (mod.lineIds.length > 0) continue;
+      // 用户显式选择了 default/manual 颜色模式时跳过
+      const colorMode = mod.trackColorMode ?? "line";
+      if (colorMode !== "line") continue;
+      // 第二遍只处理尚未着色的道岔
+      if (pass > 0 && moduleSpecs.get(mod.id)?.css !== DEFAULT_TRACK_COLOR) continue;
+
+      // 收集每个端口从连接模块获取的颜色
+      const portColors = new Map<string, string>();
+      for (const conn of connections) {
+        const isFrom = conn.fromModuleId === mod.id;
+        const isTo = conn.toModuleId === mod.id;
+        if (!isFrom && !isTo) continue;
+
+        const myPortId = isFrom ? conn.fromPortId : conn.toPortId;
+        const otherModId = isFrom ? conn.toModuleId : conn.fromModuleId;
+        const otherSpec = moduleSpecs.get(otherModId);
+        if (!otherSpec) continue;
+
+        const otherMod = modules.find((m) => m.id === otherModId);
+        if (!otherMod) continue;
+        const otherTemplate = resolvedTemplateMap.get(otherMod.id) || templateMap.get(otherMod.templateId);
+        if (!otherTemplate) continue;
+
+        const otherPortId = isFrom ? conn.toPortId : conn.fromPortId;
+        const otherPort = otherTemplate.ports.find((p) => p.id === otherPortId);
+        if (!otherPort) continue;
+
+        const color = sampleSpecAt(otherSpec, otherPort.x, otherPort.y);
+        portColors.set(myPortId, color);
+      }
+
+      // 所有端口都是默认灰色 → 跳过
+      if ([...portColors.values()].every((c) => c.toLowerCase() === DEFAULT_TRACK_COLOR.toLowerCase())) continue;
+
+      // 逐轨着色：端点在端口附近的取端口颜色，两端异色则生成渐变
+      const newTrackColors: string[] = [];
+      for (let i = 0; i < template.tracks.length; i++) {
+        const track = template.tracks[i];
+        let startPort: typeof template.ports[0] | undefined;
+        let startDist = Infinity;
+        let endPort: typeof template.ports[0] | undefined;
+        let endDist = Infinity;
+        for (const port of template.ports) {
+          const d1 = Math.hypot(port.x - track.x1, port.y - track.y1);
+          if (d1 < startDist) { startPort = port; startDist = d1; }
+          const d2 = Math.hypot(port.x - track.x2, port.y - track.y2);
+          if (d2 < endDist) { endPort = port; endDist = d2; }
+        }
+        const startColor = startPort ? portColors.get(startPort.id) : undefined;
+        const endColor = endPort ? portColors.get(endPort.id) : undefined;
+
+        if (startColor && endColor && startColor.toLowerCase() !== endColor.toLowerCase()) {
+          const gradId = `grad-turnout-trk-${mod.id}-${i}`;
+          gradientDefs.push({
+            id: gradId,
+            x1: track.x1, y1: track.y1,
+            x2: track.x2, y2: track.y2,
+            stops: [
+              { offset: "0%", color: startColor },
+              { offset: "100%", color: endColor },
+            ],
+          });
+          newTrackColors.push(`url(#${gradId})`);
+        } else {
+          newTrackColors.push(startColor || endColor || DEFAULT_TRACK_COLOR);
+        }
+      }
+      trackColorSpecs.set(mod.id, newTrackColors);
+
+      // 更新模块级颜色规格（供连接采样和标签着色）
+      const uniqueColors = [...new Set(portColors.values())];
+      if (uniqueColors.length === 1) {
+        moduleSpecs.set(mod.id, { css: uniqueColors[0], kind: "solid" });
+      } else {
+        const coloredPorts = template.ports.filter((p) => portColors.has(p.id));
+        const xs = coloredPorts.map((p) => p.x);
+        const minX = Math.min(...xs);
+        const maxX = Math.max(...xs);
+        if (maxX > minX) {
+          const sorted = coloredPorts.slice().sort((a, b) => a.x - b.x);
+          const stops = sorted.map((p, idx) => ({
+            offset: `${Math.round((idx / (sorted.length - 1)) * 100)}%`,
+            color: portColors.get(p.id)!,
+          }));
+          const gradDef = {
+            id: `grad-turnout-${mod.id}`,
+            x1: minX, y1: template.height / 2,
+            x2: maxX, y2: template.height / 2,
+            stops,
+          };
+          gradientDefs.push(gradDef);
+          moduleSpecs.set(mod.id, { css: `url(#${gradDef.id})`, kind: "gradient" as const, gradientDef: gradDef });
+        }
+      }
+    }
+    }
+    for (const conn of connections) {
+      const endpoints = endpointsForConnection(conn, modules, resolvedTemplateMap);
+      if (!endpoints) {
+        connectionSpecs.set(conn.id, { css: DEFAULT_TRACK_COLOR, kind: "solid" });
+        continue;
+      }
+      const fromModule = modules.find((candidate) => candidate.id === conn.fromModuleId);
+      const toModule = modules.find((candidate) => candidate.id === conn.toModuleId);
+      const fromPort = fromModule
+        ? (resolvedTemplateMap.get(fromModule.id) || templateMap.get(fromModule.templateId))?.ports.find((candidate) => candidate.id === conn.fromPortId)
+        : undefined;
+      const toPort = toModule
+        ? (resolvedTemplateMap.get(toModule.id) || templateMap.get(toModule.templateId))?.ports.find((candidate) => candidate.id === conn.toPortId)
+        : undefined;
+      const fromSpec = fromModule ? moduleSpecs.get(fromModule.id) : undefined;
+      const toSpec = toModule ? moduleSpecs.get(toModule.id) : undefined;
+      const spec = resolveConnectionColor(
+        conn.colorMode,
+        conn.color,
+        fromSpec ? sampleSpecAt(fromSpec, fromPort?.x, fromPort?.y) : DEFAULT_TRACK_COLOR,
+        toSpec ? sampleSpecAt(toSpec, toPort?.x, toPort?.y) : DEFAULT_TRACK_COLOR,
+        endpoints.from,
+        endpoints.to,
+        conn.id,
+      );
+      connectionSpecs.set(conn.id, spec);
+      if (spec.kind === "gradient" && spec.gradientDef) gradientDefs.push(spec.gradientDef);
+    }
+    const modulePlatformsById = new Map<string, PlatformObject[]>();
+    for (const platform of platforms) {
+      if (platform.moduleId) {
+        const list = modulePlatformsById.get(platform.moduleId) || [];
+        list.push(platform);
+        modulePlatformsById.set(platform.moduleId, list);
+      }
+    }
+    for (const platform of platforms) {
+      const ownerMod = platform.moduleId ? modules.find((candidate) => candidate.id === platform.moduleId) : undefined;
+      const ownerTemplate = ownerMod ? (resolvedTemplateMap.get(ownerMod.id) || templateMap.get(ownerMod.templateId)) : undefined;
+      const spec = resolvePlatformFillColor(platform, modules, sourceLines, undefined, platform.moduleId ? modulePlatformsById.get(platform.moduleId) : undefined,
+        ownerTemplate?.tracks, ownerTemplate?.platforms, ownerTemplate?.trackLinePattern);
+      platformSpecs.set(platform.id, spec);
+      if (spec.kind === "gradient" && spec.gradientDef) gradientDefs.push(spec.gradientDef);
+      const lineNames = platformLineNames(platform, modules, sourceLines, platform.moduleId ? modulePlatformsById.get(platform.moduleId) : undefined,
+        ownerTemplate?.tracks, ownerTemplate?.platforms, ownerTemplate?.trackLinePattern);
+      if (lineNames) platformLineNamesMap.set(platform.id, lineNames);
+    }
+    for (const label of labels) {
+      const ownerMod = label.attachedToId ? modules.find((candidate) => candidate.id === label.attachedToId) : undefined;
+      const attachedSpec = label.attachedToId ? moduleSpecs.get(label.attachedToId) : undefined;
+      const linkedLine = label.sourceLineId ? sourceLines.find((line) => line.id === label.sourceLineId) : undefined;
+      const linkedLineSpec: ColorSpec | undefined = linkedLine?.lineColor
+        ? { css: linkedLine.lineColor, kind: "solid" }
+        : undefined;
+      labelSpecs.set(label.id, resolveLabelFillColor(label, linkedLineSpec || attachedSpec, undefined, ownerMod?.labelColorMode));
+    }
+    return { moduleSpecs, trackColorSpecs, templatePlatformColorSpecs, connectionSpecs, platformSpecs, platformLineNames: platformLineNamesMap, labelSpecs, gradientDefs };
+  }, [modules, connections, platforms, labels, sourceLines, resolvedTemplateMap, templateMap]);
+  /** 屏幕坐标 → 世界坐标 */
+  const toWorld = useCallback((clientX: number, clientY: number) => {
+    const svg = svgRef.current;
+    if (!svg) return { x: 0, y: 0 };
+    const rect = svg.getBoundingClientRect();
+    return {
+      x: (clientX - rect.left - viewport.panX) / viewport.scale,
+      y: (clientY - rect.top - viewport.panY) / viewport.scale,
+    };
+  }, [viewport]);
+
+  /** 计算可见区域的世界坐标范围 */
+  const visibleBounds = useMemo(() => {
+    const svg = svgRef.current;
+    const w = svg?.clientWidth || 800;
+    const h = svg?.clientHeight || 600;
+    return {
+      left: -viewport.panX / viewport.scale,
+      top: -viewport.panY / viewport.scale,
+      right: (w - viewport.panX) / viewport.scale,
+      bottom: (h - viewport.panY) / viewport.scale,
+    };
+  }, [viewport]);
+
+  /** 网格线 */
+  const gridLines = useMemo(() => {
+    if (!showGrid) return { v: [] as number[], h: [] as number[] };
+    const start = Math.max(0, Math.floor(visibleBounds.left / pageGridSize) * pageGridSize);
+    const end = Math.min(pageWidth, Math.ceil(visibleBounds.right / pageGridSize) * pageGridSize);
+    const top = Math.max(0, Math.floor(visibleBounds.top / pageGridSize) * pageGridSize);
+    const bot = Math.min(pageHeight, Math.ceil(visibleBounds.bottom / pageGridSize) * pageGridSize);
+    const v: number[] = [];
+    const h: number[] = [];
+    for (let x = start; x <= end; x += pageGridSize) v.push(x);
+    for (let y = top; y <= bot; y += pageGridSize) h.push(y);
+    return { v, h };
+  }, [showGrid, visibleBounds, pageGridSize, pageWidth, pageHeight]);
+
+  const activeFilterLineIds = useMemo(() => {
+    return [...expandServicePatternFilter(filterLineIds, activeServicePatternId ? [activeServicePatternId] : [], servicePatterns)];
+  }, [servicePatterns, activeServicePatternId, filterLineIds]);
+
+  /** 线路筛选：判断模块是否可见 */
+  const isModuleVisible = useCallback((mod: DiagramModule) => {
+    if (activeFilterLineIds.length === 0) return true;
+    if (mod.lineIds.length === 0) return true;
+    return mod.lineIds.some((id) => activeFilterLineIds.includes(id));
+  }, [activeFilterLineIds]);
+
+  /** 图层是否可见（树形：自身 + 所有祖先可见） */
+  const isLayerVisible = useCallback((layerId: string) => {
+    return isLayerTreeVisible(layers, layerId);
+  }, [layers]);
+
+  /** 图层是否锁定（树形：自身或任一祖先锁定） */
+  const isLayerLocked = useCallback((layerId: string) => {
+    return isLayerTreeLocked(layers, layerId);
+  }, [layers]);
+
+  function updateFilters(patch: Partial<FilterState>) {
+    history.captureSnapshot("修改筛选条件");
+    setFilterState((prev) => ({ ...prev, ...patch }));
+    setHasUnsavedChanges(true);
+  }
+
+  // ── 模块操作 ──
+
+  /** 放置模块 */
+  function placeModule(worldX: number, worldY: number, templateId = activeTemplateId, sourceStationId = pendingStationId) {
+    if (!templateId) return;
+    const template = templateMap.get(templateId);
+    if (!template) return;
+    const x = snapEnabled ? snapToGrid(worldX, pageGridSize) : Math.round(worldX);
+    const y = snapEnabled ? snapToGrid(worldY, pageGridSize) : Math.round(worldY);
+    // If binding to a station, auto-assign its lineId
+    const station = sourceStationId ? data?.stations.find((candidate) => candidate.id === sourceStationId) : undefined;
+    const stationLineId = station?.lineId;
+    const mod: DiagramModule = {
+      id: genId("mod"),
+      templateId,
+      name: template.name,
+      x,
+      y,
+      rotation: placementRotation,
+      mirrorX: placementMirrorX,
+      mirrorY: placementMirrorY,
+      lineIds: station ? Array.from(new Set([station.lineId, ...(station.throughLineIds || [])])) : [],
+      sourceStationIds: sourceStationId ? [sourceStationId] : [],
+      locked: false,
+      layerId: resolvePlacementLayer(defaultModuleLayerId(template, { lineIds: station ? [station.lineId] : [] }, data?.lines || sourceLines)),
+      zIndex: placementZIndex,
+      pageId: activePageId,
+      createdOrder: Date.now(),
+    };
+    // Also set customLabel to the station name if available
+    if (sourceStationId) {
+      if (station) mod.customLabel = station.nameZh;
+    }
+    // 初始化道岔参数默认值
+    if (template.params && template.params.length > 0) {
+      mod.customParams = Object.fromEntries(template.params.map(p => [p.key, p.default]));
+    }
+    if (snapEnabled) {
+      const aligned = alignModuleToExistingTracks(mod);
+      mod.x = aligned.x;
+      mod.y = aligned.y;
+    }
+    const moduleLocalPoint = (localX: number, localY: number) => {
+      // 镜像在模块局部坐标中先作用，再旋转到世界坐标（与渲染/端口一致）。
+      const mirroredX = mod.mirrorX ? template.width - localX : localX;
+      const mirroredY = mod.mirrorY ? template.height - localY : localY;
+      const radians = (mod.rotation * Math.PI) / 180;
+      const pivotX = mod.x + template.width / 2;
+      const pivotY = mod.y + template.height / 2;
+      const dx = mod.x + mirroredX - pivotX;
+      const dy = mod.y + mirroredY - pivotY;
+      return { x: pivotX + dx * Math.cos(radians) - dy * Math.sin(radians), y: pivotY + dx * Math.sin(radians) + dy * Math.cos(radians) };
+    };
+    // 捕获历史快照（放置模块 + 可能的自动连接作为一个事务）
+    history.captureSnapshot(`放置「${template.name}」`);
+    setModules((prev) => [...prev, mod]);
+    const newPlatforms: PlatformObject[] = template.platforms.map((platform, index) => {
+      const center = moduleLocalPoint(platform.x + platform.width / 2, platform.y + platform.height / 2);
+      return { id: genId("platform"), moduleId: mod.id, sourceStationId: sourceStationId || undefined, sourceLineId: stationLineId, platformType: "island", attachedTrackIds: [], x: center.x - platform.width / 2, y: center.y - platform.height / 2, width: platform.width, height: platform.height, rotation: mod.rotation, fill: "#D7B06A", label: platform.label, layerId: defaultPlatformLayerId(template.id), zIndexMode: "auto", zIndex: mod.zIndex + index, pageId: activePageId, createdOrder: Date.now(), visible: true, locked: false };
+    });
+    setPlatforms((prev) => [...prev, ...newPlatforms]);
+    if (station) {
+      const stationLabel = template.labels.find((label) => label.text === "站名");
+      const labelPoint = moduleLocalPoint(stationLabel?.x ?? template.width / 2, stationLabel?.y ?? -10);
+      const labelX = labelPoint.x;
+      const labelY = labelPoint.y;
+      const stationLabels: LabelObject[] = [{
+        id: genId("label"), text: station.nameZh, x: labelX, y: labelY,
+        fontSize: stationLabel?.fontSize || 13, anchor: "top", rotation: readableLabelRotation(mod.rotation), fill: stationLabel?.fill || "#202124", fontWeight: 700,
+        backgroundMask: true, maskStrokeWidth: 3, locked: false, visible: true, layerId: "layer-label", zIndex: labels.length,
+        pageId: activePageId, createdOrder: Date.now(), attachedToId: mod.id, positionMode: "attached", offsetX: labelX - mod.x, offsetY: labelY - mod.y,
+        sourceStationId: station.id, language: "zh",
+      }];
+      if (station.nameEn) {
+        // 英文站名放在模板设计的 "Station" 标签位置（站台下方），而不是 stationLabel.y + 16。
+        // 旧逻辑把英文名放在中文名下方 16px，恰好压在站台矩形上，导致"站点遮挡文字"。
+        const englishLabel = template.labels.find((label) => label.text === "Station");
+        const englishPoint = moduleLocalPoint(
+          englishLabel?.x ?? stationLabel?.x ?? template.width / 2,
+          englishLabel?.y ?? (stationLabel?.y ?? -10) + 16,
+        );
+        stationLabels.push({
+          ...stationLabels[0], id: genId("label"), text: station.nameEn, x: englishPoint.x, y: englishPoint.y, fontSize: Math.max(9, (stationLabel?.fontSize || 13) - 3), fontWeight: 400,
+          zIndex: labels.length + 1, createdOrder: Date.now() + 1, offsetX: englishPoint.x - mod.x, offsetY: englishPoint.y - mod.y, language: "en",
+        });
+      }
+      const stationGraphics: AttachedGraphic[] = [];
+      const iconAsset = findAssetByFilename(assets, station.icon);
+      if (iconAsset?.dataUrl) {
+        const graphicCenter = moduleLocalPoint(template.width / 2, -26);
+        const graphicX = graphicCenter.x - 16;
+        const graphicY = graphicCenter.y - 16;
+        stationGraphics.push({ id: genId("graphic"), assetId: iconAsset.id, attachedToId: mod.id, positionMode: "attached", offsetX: graphicX - mod.x, offsetY: graphicY - mod.y, x: graphicX, y: graphicY, width: 32, height: 32, rotation: mod.rotation, mirrorX: mod.mirrorX, mirrorY: mod.mirrorY, opacity: 1, layerId: "layer-icon", zIndex: graphics.length, pageId: activePageId, visible: true, locked: false, createdOrder: Date.now() });
+      }
+      // 新站名/图标与既有元素一起参与自动避让，避免图标遮挡站名（尤其换乘站），
+      // 平台作为固定障碍物参与，避免站名/图标压到站台上（"站点遮挡文字"）。
+      const avoidance = resolveLabelIconOverlaps({
+        modules: [...modules, mod],
+        labels: [...labels, ...stationLabels],
+        graphics: [...graphics, ...stationGraphics],
+        platforms: [...platforms, ...newPlatforms],
+        activePageId,
+        ignoredLabelIds: duplicateTransferStationLabelIds([...labels, ...stationLabels], transferGroupsRef.current),
+      });
+      setLabels(avoidance.labels);
+      setGraphics(avoidance.graphics);
+    }
+    setSelectedIds([mod.id]);
+    setHasUnsavedChanges(true);
+    setStatus(sourceStationId ? `已放置「${template.name}」并关联站点` : `已放置「${template.name}」`);
+    if (sourceStationId) {
+      const placementChangeIds = unresolvedChanges.filter((change) => change.entityType === "station" && change.entityId === sourceStationId && change.requiresPlacement).map((change) => change.id);
+      if (placementChangeIds.length) setUnresolvedChanges((prev) => updateSourceChangeStatus(prev, placementChangeIds, "accepted"));
+      setPendingPlacement(null);
+    }
+    setPendingStationId(null);
+
+    // 自动连接
+    if (autoConnect) {
+      tryAutoConnect(mod, template);
+    }
+
+    // 非连续放置模式时，放置后切回默认工具（自动）
+    if (!continuousPlace) {
+      setActiveTool("auto");
+      setActiveTemplateId(null);
+    }
+  }
+
+  /** 端口是否相向：离开方向不能背离目标，到达方向不能背离起点。
+   *  允许 90° 转弯等斜向端口，但拒绝背对背端口（会逼出 U 形回折导致交叉）。 */
+  function portsFaceEachOther(
+    from: { x: number; y: number; direction: number },
+    to: { x: number; y: number; direction: number },
+  ): boolean {
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const chordLength = Math.hypot(dx, dy);
+    if (chordLength < 1e-6) return true;
+    const chordX = dx / chordLength;
+    const chordY = dy / chordLength;
+    const unit = (angle: number) => {
+      const radians = (angle * Math.PI) / 180;
+      return { x: Math.cos(radians), y: Math.sin(radians) };
+    };
+    const fromUnit = unit(from.direction);
+    const toUnit = unit(to.direction);
+    // 离开方向沿弦正向的投影：>0 朝目标前进；明显掉头（< -0.6）拒绝。
+    const forward = fromUnit.x * chordX + fromUnit.y * chordY;
+    // 到达方向沿反向弦的投影：>0 朝起点方向；明显掉头（< -0.6）拒绝。
+    const backward = toUnit.x * -chordX + toUnit.y * -chordY;
+    return forward > -0.6 && backward > -0.6;
+  }
+
+  /** 端口对连线在跨轴方向的偏移（横向端口取 y 差、纵向端口取 x 差）；两端轴向不同则无法判定。 */
+  function crossAxisOffset(
+    a: { x: number; y: number; direction: number },
+    b: { x: number; y: number; direction: number },
+  ): number | null {
+    const axisOf = (direction: number) => {
+      const normalized = ((direction % 360) + 360) % 360;
+      return normalized === 90 || normalized === 270 ? "vertical" : "horizontal";
+    };
+    const axis = axisOf(a.direction);
+    if (axisOf(b.direction) !== axis) return null;
+    return axis === "vertical" ? b.x - a.x : b.y - a.y;
+  }
+
+  /** 两条连接弦（直线段）是否相交，含端点恰好落在对方线段上的触碰。 */
+  function segmentsCross(
+    a: { x: number; y: number },
+    b: { x: number; y: number },
+    c: { x: number; y: number },
+    d: { x: number; y: number },
+  ): boolean {
+    const orient = (p: { x: number; y: number }, q: { x: number; y: number }, r: { x: number; y: number }) =>
+      (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
+    const onSeg = (p: { x: number; y: number }, q: { x: number; y: number }, r: { x: number; y: number }) =>
+      q.x <= Math.max(p.x, r.x) && q.x >= Math.min(p.x, r.x) && q.y <= Math.max(p.y, r.y) && q.y >= Math.min(p.y, r.y);
+    const o1 = orient(a, b, c);
+    const o2 = orient(a, b, d);
+    const o3 = orient(c, d, a);
+    const o4 = orient(c, d, b);
+    if ((o1 > 0) !== (o2 > 0) && (o3 > 0) !== (o4 > 0)) return true;
+    if ((o1 === 0 && onSeg(a, c, b)) || (o2 === 0 && onSeg(a, d, b)) || (o3 === 0 && onSeg(c, a, d)) || (o4 === 0 && onSeg(c, b, d))) return true;
+    return false;
+  }
+
+  /** 连接在给定连接集合上下文中的渲染路径（与画布显示逻辑一致），供自动连线的渲染级交叉检测复用。 */
+  function renderedPathFor(
+    conn: ModuleConnection,
+    conns: ModuleConnection[],
+    mods: DiagramModule[],
+    tpls: Map<string, ModuleTemplate>,
+  ): string | null {
+    const geometry = geometryForConnection(conn, conns, mods, tpls);
+    const from = getConnectionEndpoint(conn.fromModuleId, conn.fromPortId, mods, tpls);
+    const to = getConnectionEndpoint(conn.toModuleId, conn.toPortId, mods, tpls);
+    if (!from || !to) return null;
+    const fromPos = worldPortPosition(from.module, from.template, from.portId);
+    const toPos = worldPortPosition(to.module, to.template, to.portId);
+    const endpoints = geometry || {
+      from: { x: fromPos.x, y: fromPos.y },
+      to: { x: toPos.x, y: toPos.y },
+      fromDir: fromPos.direction,
+      toDir: toPos.direction,
+    };
+    const controlPoints = geometry?.controlPoints || conn.controlPoints;
+    const pairedConnection = findPairedConnection(conn, conns, mods, tpls);
+    const pairedEndpoints = pairedConnection ? endpointsForConnection(pairedConnection, mods, tpls) : undefined;
+    const pairedOffsetPath = conn.autoCurve !== false && pairedConnection?.autoCurve !== false && pairedEndpoints
+      ? buildPairedOffsetPathD(endpoints, pairedEndpoints)
+      : null;
+    if (pairedOffsetPath) return pairedOffsetPath;
+    if (controlPoints.length > 0) {
+      return buildControlPointPathD(endpoints.from, endpoints.to, controlPoints, endpoints.fromDir, endpoints.toDir);
+    }
+    return `M${endpoints.from.x},${endpoints.from.y} L${endpoints.to.x},${endpoints.to.y}`;
+  }
+
+  /** 尝试自动连接到附近模块（相向端口优先成双连接，双线整对一起连） */
+  function tryAutoConnect(newMod: DiagramModule, template: ModuleTemplate) {
+    const connectionModules = [...modules, newMod];
+    const connectionTemplates = resolveTemplatesFor(connectionModules);
+    const newTemplate = connectionTemplates.get(newMod.id) || template;
+    const createdConnections: ModuleConnection[] = [];
+    let connectedToName = "";
+
+    /** 查找“补齐轨道”的端口：在 from 模块的端口里，找能连到 to 模块指定端口、相向且最近的非占位端口（排除 fromPortId）。 */
+    function findCompletingPort(
+      fromMod: DiagramModule,
+      fromTemplate: ModuleTemplate,
+      toMod: DiagramModule,
+      toTemplate: ModuleTemplate,
+      toPort: ModulePort,
+      fromPortId: string,
+    ): ModulePort | null {
+      const toWorld = worldPortPosition(toMod, toTemplate, toPort.id);
+      let best: ModulePort | null = null;
+      let bestDistance = Infinity;
+      for (const port of fromTemplate.ports) {
+        if (port.id === fromPortId) continue;
+        const portWorld = worldPortPosition(fromMod, fromTemplate, port.id);
+        const distance = Math.hypot(portWorld.x - toWorld.x, portWorld.y - toWorld.y);
+        if (distance >= PORT_SNAP_RADIUS * 3) continue;
+        if (!portsFaceEachOther(portWorld, toWorld)) continue;
+        const fromEndpoint = getConnectionEndpoint(fromMod.id, port.id, connectionModules, connectionTemplates);
+        const toEndpoint = getConnectionEndpoint(toMod.id, toPort.id, connectionModules, connectionTemplates);
+        if (!fromEndpoint || !toEndpoint) continue;
+        if (!validateConnection(fromEndpoint, toEndpoint, [...connections, ...createdConnections]).valid) continue;
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          best = port;
+        }
+      }
+      return best;
+    }
+
+    for (const other of modules) {
+      if (other.id === newMod.id) continue;
+      if (!isOnActivePage(other.pageId)) continue;
+      const otherTemplate = connectionTemplates.get(other.id) || templateMap.get(other.templateId);
+      if (!otherTemplate) continue;
+
+      // 收集所有相向且在吸附范围内的候选端口对。
+      const candidates: {
+        from: NonNullable<ReturnType<typeof getConnectionEndpoint>>;
+        to: NonNullable<ReturnType<typeof getConnectionEndpoint>>;
+        distance: number;
+        /** 双线整对是否“并行不汇聚”（候选 + 配对端口的跨轴偏移同号/近乎零），即直线连接成立。 */
+        goodDouble: boolean;
+        /** 双线整对的两根轨道是否在中间相交叉（弦相交或相切）。转角/翻转时交叉角色的弦呈 X 形或一端搭在对侧弦上，
+         *  视觉上两根轨道交叉，应避免优先选择；并行双线（含 180° 换轨的直线连接）弦不相交。 */
+        braided: boolean;
+        npWorld: { x: number; y: number };
+        opWorld: { x: number; y: number };
+      }[] = [];
+      for (const np of newTemplate.ports) {
+        const npWorld = worldPortPosition(newMod, newTemplate, np.id);
+        for (const op of otherTemplate.ports) {
+          const opWorld = worldPortPosition(other, otherTemplate, op.id);
+          const distance = Math.hypot(npWorld.x - opWorld.x, npWorld.y - opWorld.y);
+          if (distance >= PORT_SNAP_RADIUS * 3) continue;
+          if (!portsFaceEachOther(npWorld, opWorld)) continue;
+          const from = getConnectionEndpoint(newMod.id, np.id, connectionModules, connectionTemplates);
+          const to = getConnectionEndpoint(other.id, op.id, connectionModules, connectionTemplates);
+          if (!from || !to) continue;
+          if (!validateConnection(from, to, [...connections, ...createdConnections]).valid) continue;
+          // 双线整对是否直线连接：两端配对端口相向可连，且两根轨道的跨轴偏移一致
+          // （同号=两根平行不交汇；180° 翻转模块因上下行换位，直线连接恰好是交叉角色）。
+          const npPartner = findDoubleTrackPartner(newTemplate, np);
+          const opPartner = findDoubleTrackPartner(otherTemplate, op);
+          let goodDouble = false;
+          let braided = false;
+          const npPartnerWorld = npPartner ? worldPortPosition(newMod, newTemplate, npPartner.id) : null;
+          const opPartnerWorld = opPartner ? worldPortPosition(other, otherTemplate, opPartner.id) : null;
+          if (npPartner && opPartner) {
+            const npPartnerEndpoint = getConnectionEndpoint(newMod.id, npPartner.id, connectionModules, connectionTemplates);
+            const opPartnerEndpoint = getConnectionEndpoint(other.id, opPartner.id, connectionModules, connectionTemplates);
+            if (npPartnerEndpoint && opPartnerEndpoint
+              && Math.hypot(npPartnerWorld!.x - opPartnerWorld!.x, npPartnerWorld!.y - opPartnerWorld!.y) < PORT_SNAP_RADIUS * 3
+              && portsFaceEachOther(npPartnerWorld!, opPartnerWorld!)
+              && validateConnection(npPartnerEndpoint, opPartnerEndpoint, [...connections, ...createdConnections]).valid) {
+              const offset1 = crossAxisOffset(npWorld, opWorld);
+              const offset2 = crossAxisOffset(npPartnerWorld!, opPartnerWorld!);
+              goodDouble = offset1 === null || offset2 === null
+                || Math.sign(offset1) === Math.sign(offset2) || Math.abs(offset1) < 4 || Math.abs(offset2) < 4;
+              braided = segmentsCross(npWorld, opWorld, npPartnerWorld!, opPartnerWorld!);
+            }
+          } else if (npPartner || opPartner) {
+            // 只有一侧有双线配对端口（如站台的 R_up/R_dn），另一侧是道岔主线/支线这样的非配对端口。
+            // 补齐轨道由未配对侧最近、相向可连的端口决定；若补齐弦与当前弦相交，先选当前候选会把
+            // 配对钉死成视觉交叉，故标 braided，让不交叉的组合（主线接下行、支线接上行）优先。
+            const completing = npPartner
+              ? findCompletingPort(other, otherTemplate, newMod, newTemplate, npPartner, op.id)
+              : findCompletingPort(newMod, newTemplate, other, otherTemplate, opPartner!, np.id);
+            if (completing) {
+              const completingWorld = npPartner
+                ? worldPortPosition(other, otherTemplate, completing.id)
+                : worldPortPosition(newMod, newTemplate, completing.id);
+              braided = segmentsCross(npWorld, opWorld, completingWorld, (npPartner ? npPartnerWorld : opPartnerWorld)!);
+            }
+          }
+          candidates.push({ from, to, distance, goodDouble, braided, npWorld, opWorld });
+        }
+      }
+      if (candidates.length === 0) continue;
+      // 优先连“并行不相交的双线整对”（覆盖 180° 翻转后的换轨直线连接与转角平行转向），
+      // 其次直线整对，其余按距离兜底。交叉的整对（弦相交叉）最后，避免视觉上两根轨道交织。
+      candidates.sort((a, b) => {
+        if (a.braided !== b.braided) return a.braided ? 1 : -1;
+        if (a.goodDouble !== b.goodDouble) return a.goodDouble ? -1 : 1;
+        return a.distance - b.distance;
+      });
+
+      // 渲染级交叉避让：新候选先按画布显示逻辑渲染成路径，若与任何已保留的轨道相交则跳过。
+      // 这保证一次自动连线产出的连接集两两不相交（"绝不出交叉"）——干净连接照常保留，会交叉
+      // 的那根单独丢弃。比弦相交检查更准确：曲线能从双轨间隙穿过时不误杀，弦不相交但曲线
+      // 相交的却能抓住。
+      const createdPaths: (string | null)[] = [];
+
+      for (const candidate of candidates) {
+        if (!validateConnection(candidate.from, candidate.to, [...connections, ...createdConnections]).valid) continue;
+        const conn = makeConnection(candidate.from, candidate.to, connectionModules);
+        // 双线整对连接：若两端都有配对的 up/dn 端口且相向，则立刻把另一根也连上。
+        const fromPartner = findDoubleTrackPartner(newTemplate, candidate.from.port);
+        const toPartner = findDoubleTrackPartner(otherTemplate, candidate.to.port);
+        let partnerConn: ModuleConnection | null = null;
+        if (fromPartner && toPartner) {
+          const fromPartnerEndpoint = getConnectionEndpoint(newMod.id, fromPartner.id, connectionModules, connectionTemplates);
+          const toPartnerEndpoint = getConnectionEndpoint(other.id, toPartner.id, connectionModules, connectionTemplates);
+          const fromPartnerWorld = worldPortPosition(newMod, newTemplate, fromPartner.id);
+          const toPartnerWorld = worldPortPosition(other, otherTemplate, toPartner.id);
+          if (fromPartnerEndpoint && toPartnerEndpoint
+            && Math.hypot(fromPartnerWorld.x - toPartnerWorld.x, fromPartnerWorld.y - toPartnerWorld.y) < PORT_SNAP_RADIUS * 3
+            && portsFaceEachOther(fromPartnerWorld, toPartnerWorld)
+            && validateConnection(fromPartnerEndpoint, toPartnerEndpoint, [...connections, ...createdConnections]).valid) {
+            partnerConn = makeConnection(fromPartnerEndpoint, toPartnerEndpoint, connectionModules);
+          }
+        }
+        // 在"已保留 + 本候选(+配对)"的最终上下文里渲染本候选，交叉检测结果与画布显示一致。
+        const tentative = [...connections, ...createdConnections, conn];
+        if (partnerConn) tentative.push(partnerConn);
+        const path = renderedPathFor(conn, tentative, connectionModules, connectionTemplates);
+        const partnerPath = partnerConn ? renderedPathFor(partnerConn, tentative, connectionModules, connectionTemplates) : null;
+        if ((path && createdPaths.some((existing) => existing && pathsCross(existing, path)))
+          || (partnerPath && createdPaths.some((existing) => existing && pathsCross(existing, partnerPath)))
+          // 配对两根自身也相交时（弦不相交但曲线相交），整对丢弃——否则第一对会因
+          // createdPaths 为空而漏检。
+          || (path && partnerPath && pathsCross(path, partnerPath))) {
+          continue; // 会交叉 → 跳过，保留干净子集
+        }
+        createdConnections.push(conn);
+        createdPaths.push(path);
+        connectedToName = other.name;
+        if (partnerConn) {
+          createdConnections.push(partnerConn);
+          createdPaths.push(partnerPath);
+        }
+      }
+    }
+
+    if (createdConnections.length > 0) {
+      setConnections((prev) => [...prev, ...createdConnections]);
+      setStatus(`已自动连接「${newMod.name}」→「${connectedToName}」（${createdConnections.length} 条轨道）`);
+    }
+  }
+
+  /** 删除选中模块或标签 */
+  function toggleOwnerModuleSelection(ownerModuleId: string) {
+    const childOwners = [
+      ...platforms.map((platform) => ({ id: platform.id, ownerModuleId: platform.moduleId })),
+      ...labels.map((label) => ({ id: label.id, ownerModuleId: label.positionMode === "attached" ? label.attachedToId : undefined })),
+      ...graphics.map((graphic) => ({ id: graphic.id, ownerModuleId: graphic.positionMode === "attached" ? graphic.attachedToId : undefined })),
+    ];
+    setSelectedIds((prev) => toggleOwnedModuleSelection(prev, ownerModuleId, childOwners));
+  }
+
+  function deleteSelected() {
+    if (!selectedIds.length) return;
+    const toDelete = new Set(selectedIds);
+    // 检查是否有选中的模块
+    const hasModules = modules.some((m) => toDelete.has(m.id));
+    const hasLabels = labels.some((l) => toDelete.has(l.id));
+    history.captureSnapshot(`删除${selectedIds.length > 1 ? `${selectedIds.length}个对象` : "对象"}`);
+    if (hasModules) {
+      setModules((prev) => prev.filter((m) => !toDelete.has(m.id)));
+      setConnections((prev) => prev.filter((c) => !toDelete.has(c.fromModuleId) && !toDelete.has(c.toModuleId)));
+    }
+    if (hasLabels || hasModules) setLabels((prev) => prev.filter((label) => !toDelete.has(label.id) && !toDelete.has(label.attachedToId || "")));
+    // 删除背景图
+    setBackgroundImages((prev) => prev.filter((b) => !toDelete.has(b.id)));
+    setPlatforms((prev) => prev.filter((platform) => !toDelete.has(platform.id) && !toDelete.has(platform.moduleId || "")));
+    setGraphics((prev) => prev.filter((graphic) => !toDelete.has(graphic.id) && !toDelete.has(graphic.attachedToId || "")));
+    // 删除换乘组，并清理成员模块已删除的引用
+    setTransferGroups((prev) => prev
+      .filter((g) => !toDelete.has(g.id))
+      .map((g) => g.moduleIds.some((mid) => toDelete.has(mid))
+        ? { ...g, moduleIds: g.moduleIds.filter((mid) => !toDelete.has(mid)) }
+        : g));
+    setSelectedIds([]);
+    setHasUnsavedChanges(true);
+    setStatus("已删除选中对象");
+  }
+
+  /** 更新模块属性（捕获历史快照，用于非高频操作如旋转、锁定、图层切换） */
+  function updateModule(id: string, patch: Partial<DiagramModule>, operationName?: string) {
+    const current = modules.find((item) => item.id === id);
+    if (!current || isLayerLocked(current.layerId)) {
+      setStatus("所属图层已锁定，无法修改模块");
+      return;
+    }
+    if (patch.layerId === undefined && (patch.templateId !== undefined || patch.lineIds !== undefined)) {
+      const currentTemplate = templateMap.get(current.templateId);
+      const nextTemplate = templateMap.get(patch.templateId ?? current.templateId);
+      const currentDefaultLayer = defaultModuleLayerId(currentTemplate, current, sourceLines);
+      if (current.layerId === currentDefaultLayer) {
+        patch = { ...patch, layerId: defaultModuleLayerId(nextTemplate, { lineIds: patch.lineIds ?? current.lineIds }, sourceLines) };
+      }
+    }
+    const opName = operationName || "修改属性";
+    history.captureSnapshot(opName);
+    const updatedModules = modules.map((module) => (module.id === id ? { ...module, ...patch } : module));
+    const updatedModule = updatedModules.find((module) => module.id === id)!;
+    setModules(updatedModules);
+    let nextLabels = labels;
+    let nextGraphics = graphics;
+    let nextPlatforms = platforms;
+    let labelsOrGraphicsChanged = false;
+    if (typeof patch.rotation === "number") {
+      const template = resolvedTemplateMap.get(current.id) || templateMap.get(current.templateId);
+      if (template) {
+        const rotated = rotateModuleOwnedObjects({ module: current, template, nextRotation: patch.rotation, platforms, labels, graphics });
+        setPlatforms(rotated.platforms);
+        nextPlatforms = rotated.platforms;
+        nextLabels = rotated.labels;
+        nextGraphics = rotated.graphics;
+        labelsOrGraphicsChanged = true;
+      }
+    }
+    if (typeof patch.mirrorX === "boolean" || typeof patch.mirrorY === "boolean") {
+      const template = resolvedTemplateMap.get(current.id) || templateMap.get(current.templateId);
+      if (template) {
+        const mirrored = mirrorModuleOwnedObjects({
+          module: current,
+          template,
+          nextMirrorX: patch.mirrorX ?? !!current.mirrorX,
+          nextMirrorY: patch.mirrorY ?? !!current.mirrorY,
+          platforms: nextPlatforms,
+          labels: nextLabels,
+          graphics: nextGraphics,
+        });
+        setPlatforms(mirrored.platforms);
+        nextPlatforms = mirrored.platforms;
+        nextLabels = mirrored.labels;
+        nextGraphics = mirrored.graphics;
+        labelsOrGraphicsChanged = true;
+      }
+    }
+    if (patch.customParams) {
+      const previousTemplate = resolvedTemplateMap.get(current.id) || templateMap.get(current.templateId);
+      const nextTemplate = resolveTemplatesFor(updatedModules).get(id) || templateMap.get(updatedModule.templateId);
+      if (previousTemplate?.platforms.length && nextTemplate?.platforms.length) {
+        const radians = (updatedModule.rotation * Math.PI) / 180;
+        const pivot = { x: updatedModule.x + nextTemplate.width / 2, y: updatedModule.y + nextTemplate.height / 2 };
+        const rotateLocalCenter = (layout: { x: number; y: number; width: number; height: number }) => {
+          const x = updatedModule.x + layout.x + layout.width / 2;
+          const y = updatedModule.y + layout.y + layout.height / 2;
+          const dx = x - pivot.x;
+          const dy = y - pivot.y;
+          return { x: pivot.x + dx * Math.cos(radians) - dy * Math.sin(radians), y: pivot.y + dx * Math.sin(radians) + dy * Math.cos(radians) };
+        };
+        let platformIndex = 0;
+        nextPlatforms = nextPlatforms.map((platform) => {
+          if (platform.moduleId !== id) return platform;
+          const layout = nextTemplate.platforms[platformIndex++];
+          if (!layout) return platform;
+          const center = rotateLocalCenter(layout);
+          return {
+            ...platform,
+            x: center.x - layout.width / 2,
+            y: center.y - layout.height / 2,
+            width: layout.width,
+            height: layout.height,
+            rotation: updatedModule.rotation,
+          };
+        });
+        setPlatforms(nextPlatforms);
+      }
+    }
+    if (patch.templateId && patch.templateId !== current.templateId) {
+      // 模板切换：站台/站名/图标按新模板重建，否则切换只变轨道、站台不更新（看起来"没有效果"）。
+      const nextTemplate = resolveTemplatesFor(updatedModules).get(id) || templateMap.get(updatedModule.templateId);
+      if (nextTemplate) {
+        const previousTemplate = resolvedTemplateMap.get(current.id) || templateMap.get(current.templateId);
+        const relaid = relayoutModuleOwnedObjects({
+          module: updatedModule,
+          nextTemplate,
+          previousTemplate,
+          platforms,
+          labels,
+          graphics,
+          nextId: genId,
+        });
+        setPlatforms(relaid.platforms);
+        nextPlatforms = relaid.platforms;
+        nextLabels = relaid.labels;
+        nextGraphics = relaid.graphics;
+        labelsOrGraphicsChanged = true;
+      }
+    }
+    if (typeof patch.x === "number" || typeof patch.y === "number") {
+      const dx = (patch.x ?? current.x) - current.x; const dy = (patch.y ?? current.y) - current.y;
+      nextLabels = nextLabels.map((label) => label.positionMode === "attached" && label.attachedToId === id ? { ...label, x: label.x + dx, y: label.y + dy } : label);
+      nextGraphics = nextGraphics.map((graphic) => graphic.positionMode === "attached" && graphic.attachedToId === id ? { ...graphic, x: graphic.x + dx, y: graphic.y + dy } : graphic);
+      nextPlatforms = nextPlatforms.map((platform) => platform.moduleId === id ? { ...platform, x: platform.x + dx, y: platform.y + dy } : platform);
+      setPlatforms(nextPlatforms);
+      labelsOrGraphicsChanged = true;
+    }
+    if (labelsOrGraphicsChanged) {
+      // 模块几何变化后站名/图标可能相互遮挡（尤其换乘站），重新求解避让。
+      // 平台作为固定障碍物参与，避免站名/图标压到站台上。
+      const avoidance = resolveLabelIconOverlaps({ modules: updatedModules, labels: nextLabels, graphics: nextGraphics, platforms: nextPlatforms, activePageId, ignoredLabelIds: duplicateTransferStationLabelIds(nextLabels, transferGroupsRef.current) });
+      setLabels(avoidance.labels);
+      setGraphics(avoidance.graphics);
+    }
+    // 模块 zIndex 变化时同步站台的相对层级；图层本身不再同步，因为轨道与站台
+    // 分属不同的语义图层，强制同步会把站台重新塞回轨道图层。
+    if (typeof patch.zIndex === "number" && patch.zIndex !== current.zIndex) {
+      nextPlatforms = shiftOwnedPlatformZIndex(nextPlatforms, id, patch.zIndex - current.zIndex);
+      setPlatforms(nextPlatforms);
+    }
+    setConnections((prev) => {
+      const automaticallyLayered = patch.lineIds === undefined ? prev : prev.map((connection) => {
+        if (connection.layerId !== "layer-track-main" && connection.layerId !== "layer-track-tram") return connection;
+        if (connection.fromModuleId !== id && connection.toModuleId !== id) return connection;
+        return {
+          ...connection,
+          layerId: defaultConnectionLayerId(
+            updatedModules.find((module) => module.id === connection.fromModuleId),
+            updatedModules.find((module) => module.id === connection.toModuleId),
+            sourceLines,
+          ),
+        };
+      });
+      return synchronizeConnectionTracks(automaticallyLayered, updatedModules, resolveTemplatesFor(updatedModules));
+    });
+    setHasUnsavedChanges(true);
+  }
+
+  function updatePlatform(id: string, patch: Partial<PlatformObject>, operationName = "调整站台") {
+    const current = platforms.find((platform) => platform.id === id);
+    if (!current || isLayerLocked(current.layerId)) return;
+    history.captureSnapshot(operationName);
+    setPlatforms((prev) => prev.map((platform) => platform.id === id ? { ...platform, ...patch } : platform));
+    setHasUnsavedChanges(true);
+  }
+
+  function deletePlatform(id: string) {
+    history.captureSnapshot("删除站台");
+    setPlatforms((prev) => prev.filter((platform) => platform.id !== id));
+    setSelectedIds((prev) => prev.filter((selectedId) => selectedId !== id));
+    setHasUnsavedChanges(true);
+  }
+
+  function updateGraphic(id: string, patch: Partial<AttachedGraphic>, operationName = "修改图标") {
+    const current = graphics.find((graphic) => graphic.id === id);
+    if (!current || isLayerLocked(current.layerId)) return;
+    const next: AttachedGraphic = { ...current, ...patch };
+    if (next.positionMode === "independent") {
+      next.attachedToId = undefined;
+      next.offsetX = 0;
+      next.offsetY = 0;
+    } else {
+      const owner = modules.find((module) => module.id === next.attachedToId);
+      if (owner) {
+        next.offsetX = next.x - owner.x;
+        next.offsetY = next.y - owner.y;
+      }
+    }
+    history.captureSnapshot(operationName);
+    setGraphics((prev) => prev.map((graphic) => graphic.id === id ? next : graphic));
+    setHasUnsavedChanges(true);
+  }
+
+  // ── 背景图操作 ──
+
+  /** 导入背景图文件 */
+  function handleBgImageImport(file: File) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const src = reader.result as string;
+      const img = new Image();
+      img.onload = () => {
+        const bgObj: BackgroundImageObject = {
+          id: genId("bgimg"),
+          src,
+          name: file.name,
+          x: snapToGrid(-viewport.panX / viewport.scale + 100, pageGridSize),
+          y: snapToGrid(-viewport.panY / viewport.scale + 60, pageGridSize),
+          naturalWidth: img.naturalWidth,
+          naturalHeight: img.naturalHeight,
+          previewSrc: createBackgroundPreview(img),
+          scale: Math.min(1, 800 / img.naturalWidth),
+          rotation: 0,
+          opacity: tracingMode ? 0.4 : 0.6,
+          locked: false,
+          visible: true,
+          layerId: resolvePlacementLayer("layer-bg"),
+          zIndex: placementZIndex,
+          pageId: activePageId,
+          createdOrder: Date.now(),
+        };
+        history.captureSnapshot(`导入背景图「${file.name}」`);
+        setBackgroundImages((prev) => [...prev, bgObj]);
+        setSelectedIds([bgObj.id]);
+        setHasUnsavedChanges(true);
+        setStatus(`已导入背景图「${file.name}」`);
+      };
+      img.src = src;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  /** 背景图文件输入变化 */
+  function handleBgImageInputChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (file) handleBgImageImport(file);
+    if (bgImageInputRef.current) bgImageInputRef.current.value = "";
+  }
+
+  function handleReplaceBackgroundInput(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    const target = selectedBgImage;
+    if (!file || !target) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const src = String(reader.result || "");
+      const image = new Image();
+      image.onload = () => updateBgImage(target.id, { src, previewSrc: createBackgroundPreview(image), name: file.name, naturalWidth: image.naturalWidth, naturalHeight: image.naturalHeight }, "替换背景图");
+      image.src = src;
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  }
+
+  function mergeImportedAssets(imported: AssetRecord[]) {
+    if (!imported.length) { setStatus("没有找到可导入的图标文件"); return; }
+    history.captureSnapshot("导入图标资源");
+    const byId = new Map(assets.map((asset) => [asset.id, asset]));
+    imported.forEach((asset) => byId.set(asset.id, asset));
+    const mergedAssets = [...byId.values()];
+    setAssets(mergedAssets);
+    if (data) {
+      setGraphics((prev) => {
+        const next = [...prev];
+        for (const diagramModule of modules) {
+          const station = data.stations.find((candidate) => diagramModule.sourceStationIds.includes(candidate.id));
+          const asset = findAssetByFilename(mergedAssets, station?.icon);
+          if (!asset?.dataUrl || next.some((graphic) => graphic.attachedToId === diagramModule.id && graphic.assetId === asset.id)) continue;
+          const template = templateMap.get(diagramModule.templateId);
+          const x = diagramModule.x + (template?.width || 64) / 2 - 16;
+          const y = diagramModule.y - 42;
+          next.push({ id: genId("graphic"), assetId: asset.id, attachedToId: diagramModule.id, positionMode: "attached", offsetX: x - diagramModule.x, offsetY: y - diagramModule.y, x, y, width: 32, height: 32, rotation: 0, opacity: 1, layerId: "layer-icon", zIndex: next.length, pageId: diagramModule.pageId, visible: true, locked: false, createdOrder: Date.now() });
+        }
+        return next;
+      });
+    }
+    setHasUnsavedChanges(true);
+    setStatus(`已导入 ${imported.length} 个图标资源`);
+  }
+
+  async function handleIconArchiveInput(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (file) mergeImportedAssets(importIconArchive(new Uint8Array(await file.arrayBuffer())));
+    e.target.value = "";
+  }
+
+  async function handleIconDirectoryInput(e: React.ChangeEvent<HTMLInputElement>) {
+    mergeImportedAssets(await importIconFiles(Array.from(e.target.files || [])));
+    e.target.value = "";
+  }
+
+  function placeGraphic(asset: AssetRecord) {
+    if (!asset.dataUrl) { setStatus(`图标资源「${asset.name}」缺失`); return; }
+    const owner = selectedModules[0];
+    const x = owner ? owner.x + 20 : Math.max(0, -viewport.panX / viewport.scale + 120);
+    const y = owner ? owner.y + 20 : Math.max(0, -viewport.panY / viewport.scale + 120);
+    const graphic: AttachedGraphic = { id: genId("graphic"), assetId: asset.id, attachedToId: owner?.id, positionMode: owner ? "attached" : "independent", offsetX: owner ? x - owner.x : 0, offsetY: owner ? y - owner.y : 0, x, y, width: 32, height: 32, rotation: 0, opacity: 1, layerId: resolvePlacementLayer(defaultGraphicLayerId({ attachedToId: owner?.id })), zIndex: placementZIndex, pageId: activePageId, visible: true, locked: false, createdOrder: Date.now() };
+    history.captureSnapshot("放置图标");
+    setGraphics((prev) => [...prev, graphic]);
+    setSelectedIds([graphic.id]);
+    setHasUnsavedChanges(true);
+  }
+
+  function deleteAsset(asset: AssetRecord) {
+    if (graphics.some((graphic) => graphic.assetId === asset.id)) {
+      setStatus(`图标资源「${asset.name}」仍在使用，请先删除对应图标`);
+      return;
+    }
+    history.captureSnapshot("删除图标资源");
+    setAssets((prev) => prev.filter((candidate) => candidate.id !== asset.id));
+    setHasUnsavedChanges(true);
+    setStatus(`已删除图标资源「${asset.name}」`);
+  }
+
+  /** 更新背景图属性 */
+  function updateBgImage(id: string, patch: Partial<BackgroundImageObject>, operationName?: string) {
+    const current = backgroundImages.find((item) => item.id === id);
+    if (!current || isLayerLocked(current.layerId)) {
+      setStatus("所属图层已锁定，无法修改背景图");
+      return;
+    }
+    // 锁定背景图 = 锁定全部参数（大小、位置等）。解锁按钮本身不受限制。
+    const isUnlockOnly = Object.keys(patch).length === 1 && "locked" in patch;
+    if (current.locked && !isUnlockOnly) {
+      setStatus("背景图已锁定，全部参数（大小/位置等）不可修改，请先解锁");
+      return;
+    }
+    history.captureSnapshot(operationName || "修改背景图");
+    setBackgroundImages((prev) => prev.map((b) => (b.id === id ? { ...b, ...patch } : b)));
+    setHasUnsavedChanges(true);
+  }
+
+  /** 删除背景图 */
+  function deleteBgImage(id: string) {
+    history.captureSnapshot("删除背景图");
+    setBackgroundImages((prev) => prev.filter((b) => b.id !== id));
+    setSelectedIds((prev) => prev.filter((sid) => sid !== id));
+    setHasUnsavedChanges(true);
+    setStatus("已删除背景图");
+  }
+
+  /** 切换描图模式 */
+  function toggleTracingMode() {
+    setTracingMode((prev) => {
+      const next = !prev;
+      if (next) {
+        // 描图模式：降低所有背景图不透明度
+        setBackgroundImages((prevImgs) => prevImgs.map((b) => ({ ...b, opacity: 0.35 })));
+      } else {
+        // 退出描图模式：恢复正常不透明度
+        setBackgroundImages((prevImgs) => prevImgs.map((b) => ({ ...b, opacity: 0.6 })));
+      }
+      setStatus(next ? "已进入描图模式" : "已退出描图模式");
+      return next;
+    });
+  }
+
+  /** 背景图鼠标按下 */
+  function handleBgImageMouseDown(e: React.MouseEvent, bgImg: BackgroundImageObject) {
+    e.stopPropagation();
+    // 锁定（或所在图层锁定）的背景图由 CSS pointer-events:none 透传到画布，
+    // 框选、平移等操作在它上面照常进行；解锁通过图片中心的 🔓 角标。
+    if (bgImg.locked || isLayerLocked(bgImg.layerId)) return;
+    if (activeTool === "pan") return;
+    if (!selectedIds.includes(bgImg.id)) {
+      setSelectedIds([bgImg.id]);
+    }
+    // 已选中：不定向取消选中，若拖拽则保持选中，若未拖拽则在 mouseup 时取消
+    if (beginSelectionDrag(e, bgImg.id)) return;
+    history.captureSnapshot("移动背景图");
+    dragRef.current = {
+      type: "bgImage",
+      bgImageId: bgImg.id,
+      wasSelected: selectedIds.includes(bgImg.id),
+      startSX: e.clientX,
+      startSY: e.clientY,
+      startMX: bgImg.x,
+      startMY: bgImg.y,
+      startPX: 0,
+      startPY: 0,
+      moved: false,
+    };
+  }
+
+  // ── 标签操作 ──
+
+  /** 放置标签（画布点击时调用） */
+  function placeLabel(worldX: number, worldY: number) {
+    const x = snapEnabled ? snapToGrid(worldX, pageGridSize) : Math.round(worldX);
+    const y = snapEnabled ? snapToGrid(worldY, pageGridSize) : Math.round(worldY);
+    const label: LabelObject = {
+      id: genId("label"),
+      text: "新标签",
+      x,
+      y,
+      fontSize: 14,
+      anchor: "bottom",
+      rotation: 0,
+      fill: "#202124",
+      fontWeight: 700,
+      backgroundMask: false,
+      maskStrokeWidth: 2,
+      outlineColor: "#ffffff",
+      backgroundEnabled: false,
+      backgroundColor: "#ffffff",
+      backgroundPadding: 4,
+      colorMode: "default",
+      positionMode: "independent",
+      locked: false,
+      visible: true,
+      layerId: resolvePlacementLayer(defaultLabelLayerId({})),
+      zIndex: placementZIndex,
+      pageId: activePageId,
+      createdOrder: Date.now(),
+    };
+    history.captureSnapshot("放置标签");
+    setLabels((prev) => [...prev, label]);
+    setSelectedIds([label.id]);
+    setHasUnsavedChanges(true);
+    setStatus("已放置标签，双击编辑文字");
+    setActiveTool("auto");
+  }
+
+  // ── 元件库矢量图形 / 编号操作 ──
+
+  /** 选中元件库"基础元素/工程图标"形状卡片 */
+  function selectShape(shapeType: GraphicShapeType) {
+    setSelectedIds([]);
+    setActiveTemplateId(null);
+    setPendingElement({ kind: "shape", shapeType });
+    setActiveTool("shape");
+    setStatus(`已选择${SHAPE_META[shapeType].label}，点击画布放置`);
+  }
+
+  /** 选中元件库"编号"卡片 */
+  function selectNumber(numeralType: "track" | "switch") {
+    setSelectedIds([]);
+    setActiveTemplateId(null);
+    setPendingElement({ kind: "number", numeralType });
+    setActiveTool("shape");
+    setStatus(numeralType === "track" ? "已选择股道编号，点击画布放置" : "已选择道岔编号，点击画布放置");
+  }
+
+  /** 放置矢量形状 / 信号机 */
+  function placeShape(worldX: number, worldY: number) {
+    const pending = pendingElement;
+    if (!pending || pending.kind !== "shape") return;
+    const meta = SHAPE_META[pending.shapeType];
+    const x = snapEnabled ? snapToGrid(worldX, pageGridSize) : Math.round(worldX);
+    const y = snapEnabled ? snapToGrid(worldY, pageGridSize) : Math.round(worldY);
+    const graphic: AttachedGraphic = {
+      id: genId("graphic"),
+      assetId: undefined,
+      shapeType: pending.shapeType,
+      fill: meta.defaultFill,
+      stroke: meta.defaultStroke,
+      positionMode: "independent",
+      x,
+      y,
+      width: meta.width,
+      height: meta.height,
+      rotation: 0,
+      mirrorX: placementMirrorX,
+      mirrorY: placementMirrorY,
+      opacity: 1,
+      layerId: resolvePlacementLayer(defaultGraphicLayerId({ shapeType: pending.shapeType })),
+      zIndex: placementZIndex,
+      pageId: activePageId,
+      offsetX: 0,
+      offsetY: 0,
+      visible: true,
+      locked: false,
+      createdOrder: Date.now(),
+    };
+    history.captureSnapshot(`放置${meta.label}`);
+    setGraphics((prev) => [...prev, graphic]);
+    setSelectedIds([graphic.id]);
+    setHasUnsavedChanges(true);
+    setStatus(`已放置${meta.label}`);
+    if (!continuousPlace) {
+      setActiveTool("auto");
+      setPendingElement(null);
+    }
+  }
+
+  /** 放置编号标注（股道/道岔）；数字自动递增 */
+  function placeNumber(worldX: number, worldY: number) {
+    const pending = pendingElement;
+    if (!pending || pending.kind !== "number") return;
+    const existing = labels.filter((label) => label.numeralType === pending.numeralType);
+    const nextNum = existing.length ? Math.max(...existing.map((label) => parseInt(label.text, 10) || 0)) + 1 : 1;
+    const x = snapEnabled ? snapToGrid(worldX, pageGridSize) : Math.round(worldX);
+    const y = snapEnabled ? snapToGrid(worldY, pageGridSize) : Math.round(worldY);
+    const label: LabelObject = {
+      id: genId("label"),
+      text: String(nextNum),
+      x,
+      y,
+      fontSize: 16,
+      anchor: "bottom",
+      rotation: 0,
+      fill: "#202124",
+      fontWeight: 700,
+      backgroundMask: false,
+      maskStrokeWidth: 2,
+      outlineColor: "#ffffff",
+      backgroundEnabled: false,
+      backgroundColor: "#ffffff",
+      backgroundPadding: 4,
+      colorMode: "default",
+      positionMode: "independent",
+      numeralType: pending.numeralType,
+      language: "neutral",
+      locked: false,
+      visible: true,
+      layerId: resolvePlacementLayer(defaultLabelLayerId({ numeralType: pending.numeralType })),
+      zIndex: placementZIndex,
+      pageId: activePageId,
+      createdOrder: Date.now(),
+    };
+    history.captureSnapshot(`放置${pending.numeralType === "track" ? "股道编号" : "道岔编号"}`);
+    setLabels((prev) => [...prev, label]);
+    setSelectedIds([label.id]);
+    setHasUnsavedChanges(true);
+    setStatus(pending.numeralType === "track" ? `已放置股道编号 ${nextNum}道` : `已放置道岔编号 ${nextNum}#`);
+    if (!continuousPlace) {
+      setActiveTool("auto");
+      setPendingElement(null);
+    }
+  }
+
+  /** 更新标签属性 */
+  function updateLabel(id: string, patch: Partial<LabelObject>, operationName?: string) {
+    const current = labels.find((item) => item.id === id);
+    if (!current || isLayerLocked(current.layerId)) {
+      setStatus("所属图层已锁定，无法修改标签");
+      return;
+    }
+    const next: LabelObject = { ...current, ...patch };
+    if ((next.positionMode || (next.attachedToId ? "attached" : "independent")) === "independent") {
+      next.positionMode = "independent";
+      next.attachedToId = undefined;
+      next.offsetX = 0;
+      next.offsetY = 0;
+    } else {
+      next.positionMode = "attached";
+      const owner = modules.find((module) => module.id === next.attachedToId);
+      if (owner) {
+        next.offsetX = next.x - owner.x;
+        next.offsetY = next.y - owner.y;
+      }
+    }
+    history.captureSnapshot(operationName || "修改标签");
+    setLabels((prev) => prev.map((label) => (label.id === id ? next : label)));
+    setHasUnsavedChanges(true);
+  }
+
+  /** 删除标签 */
+  function deleteLabel(id: string) {
+    history.captureSnapshot("删除标签");
+    setLabels((prev) => prev.filter((l) => l.id !== id));
+    setSelectedIds((prev) => prev.filter((sid) => sid !== id));
+    setHasUnsavedChanges(true);
+    setStatus("已删除标签");
+  }
+
+  /** 标签鼠标按下 */
+  function handleLabelMouseDown(e: React.MouseEvent, label: LabelObject) {
+    e.stopPropagation();
+    if (label.locked || isLayerLocked(label.layerId)) return;
+    if (activeTool === "pan") return;
+    if ((e.shiftKey || e.ctrlKey || e.metaKey) && label.positionMode === "attached" && label.attachedToId && modules.some((module) => module.id === label.attachedToId)) {
+      toggleOwnerModuleSelection(label.attachedToId);
+      return;
+    }
+    if (!selectedIds.includes(label.id)) {
+      setSelectedIds([label.id]);
+    }
+    // 已选中：不定向取消选中，若拖拽则保持选中，若未拖拽则在 mouseup 时取消
+    if (beginSelectionDrag(e, label.id)) return;
+    history.captureSnapshot("移动标签");
+    dragRef.current = {
+      type: "label",
+      labelId: label.id,
+      wasSelected: selectedIds.includes(label.id),
+      startSX: e.clientX,
+      startSY: e.clientY,
+      startMX: label.x,
+      startMY: label.y,
+      startPX: 0,
+      startPY: 0,
+      moved: false,
+    };
+  }
+
+  /** 标签双击编辑 */
+  function handleLabelDoubleClick(e: React.MouseEvent, label: LabelObject) {
+    e.stopPropagation();
+    const newText = window.prompt("编辑标签文字", label.text);
+    if (newText !== null && newText !== label.text) {
+      updateLabel(label.id, { text: newText }, "编辑标签文字");
+    }
+  }
+
+  // ── 图层操作 ──
+
+  // ── 连接操作 ──
+
+  /** 更新连接属性（交叉类型等） */
+  function updateConnection(id: string, patch: Partial<ModuleConnection>, operationName?: string) {
+    const current = connections.find((item) => item.id === id);
+    if (!current || isLayerLocked(current.layerId)) {
+      setStatus("所属图层已锁定，无法修改连接");
+      return;
+    }
+    history.captureSnapshot(operationName || "修改连接");
+    setConnections((prev) => prev.map((c) => (c.id === id ? { ...c, ...patch } : c)));
+    setHasUnsavedChanges(true);
+  }
+
+  /** 设置连接线型；双线配对的两股道一起切换（渲染按配对交叉绘制，单股修改会导致虚实不一致）。 */
+  function setConnectionLineStyle(id: string, lineStyle: "solid" | "dashed") {
+    const current = connections.find((item) => item.id === id);
+    if (!current || isLayerLocked(current.layerId)) {
+      setStatus("所属图层已锁定，无法修改连接");
+      return;
+    }
+    const paired = findPairedRail(current, connections);
+    history.captureSnapshot(`设置线型为${lineStyle === "dashed" ? "虚线" : "实线"}`);
+    setConnections((prev) => prev.map((c) => {
+      if (c.id === id || (paired && c.id === paired.id)) return { ...c, lineStyle };
+      return c;
+    }));
+    setHasUnsavedChanges(true);
+  }
+
+  /** 在连接轨道上添加交叉点（取点击位置最近的轨道段）。 */
+  function addCrossingPoint(connId: string, worldX: number, worldY: number) {
+    const conn = connections.find((item) => item.id === connId);
+    if (!conn || isLayerLocked(conn.layerId)) return;
+    const tracks = rebuildConnectionTrackCache(conn);
+    if (tracks.length === 0) return;
+
+    let bestTrack = tracks[0];
+    let bestT = 0;
+    let bestDist = Infinity;
+    for (const track of tracks) {
+      const dx = track.x2 - track.x1;
+      const dy = track.y2 - track.y1;
+      const lenSq = dx * dx + dy * dy;
+      if (lenSq < 1) continue;
+      const t = Math.max(0, Math.min(1, ((worldX - track.x1) * dx + (worldY - track.y1) * dy) / lenSq));
+      const px = track.x1 + t * dx;
+      const py = track.y1 + t * dy;
+      const dist = Math.hypot(worldX - px, worldY - py);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestTrack = track;
+        bestT = t;
+      }
+    }
+
+    const x = bestTrack.x1 + bestT * (bestTrack.x2 - bestTrack.x1);
+    const y = bestTrack.y1 + bestT * (bestTrack.y2 - bestTrack.y1);
+    history.captureSnapshot("添加交叉点");
+    setConnections((prev) => prev.map((item) => item.id === connId
+      ? { ...item, crossingPoints: [...item.crossingPoints, { x, y, t: bestT }] }
+      : item));
+    setHasUnsavedChanges(true);
+    setStatus("已添加交叉点");
+  }
+
+  /** 切换连接的交叉类型 plain → gap → bridge → plain */
+  function cycleCrossingType(connId: string) {
+    const conn = connections.find((c) => c.id === connId);
+    if (!conn) return;
+    const order: CrossingType[] = ["plain", "gap", "bridge"];
+    const currentIdx = order.indexOf(conn.crossingType);
+    const nextType = order[(currentIdx + 1) % order.length];
+    updateConnection(connId, { crossingType: nextType }, `切换交叉类型为${nextType === "plain" ? "平面" : nextType === "gap" ? "断开" : "桥梁"}`);
+    setStatus(`交叉类型：${nextType === "plain" ? "平面交叉" : nextType === "gap" ? "断开" : "桥梁跨越"}`);
+  }
+
+  /** 连接鼠标按下（选中连接） */
+  function handleConnectionMouseDown(e: React.MouseEvent, conn: ModuleConnection) {
+    e.stopPropagation();
+    if (activeTool === "pan" || isLayerLocked(conn.layerId)) return;
+    if (selectedIds.includes(conn.id)) {
+      setSelectedIds([]);
+      setStatus("已取消选中");
+      return;
+    }
+    setSelectedIds([conn.id]);
+    setStatus(`已选中连接 ${conn.id.slice(-6)}，双击切换交叉类型`);
+  }
+
+  /** 连接双击：切换交叉类型 */
+  function handleConnectionDoubleClick(e: React.MouseEvent, conn: ModuleConnection) {
+    e.stopPropagation();
+    cycleCrossingType(conn.id);
+  }
+
+  /** 删除连接的交叉点 */
+  function removeCrossingPoint(connId: string, index: number) {
+    const conn = connections.find((item) => item.id === connId);
+    if (!conn || isLayerLocked(conn.layerId)) return;
+    history.captureSnapshot("删除交叉点");
+    setConnections((prev) => prev.map((c) =>
+      c.id === connId
+        ? { ...c, crossingPoints: c.crossingPoints.filter((_, i) => i !== index) }
+        : c,
+    ));
+    setHasUnsavedChanges(true);
+  }
+
+  // ── 语义化轨道模型：控制点编辑 ──
+
+  /** 计算连接两端端口的世界坐标 */
+  function getConnectionEndpoints(conn: ModuleConnection): {
+    from: { x: number; y: number };
+    to: { x: number; y: number };
+    fromDir: number;
+    toDir: number;
+  } | null {
+    const from = getConnectionEndpoint(conn.fromModuleId, conn.fromPortId, modules, resolvedTemplateMap);
+    const to = getConnectionEndpoint(conn.toModuleId, conn.toPortId, modules, resolvedTemplateMap);
+    if (!from || !to) return null;
+    const fp = worldPortPosition(from.module, from.template, from.portId);
+    const tp = worldPortPosition(to.module, to.template, to.portId);
+    const fromDir = fp.direction;
+    const toDir = tp.direction;
+    return { from: { x: fp.x, y: fp.y }, to: { x: tp.x, y: tp.y }, fromDir, toDir };
+  }
+
+  /** Curve endpoints derived from two chosen ports. */
+  function curveEndpointsFor(
+    from: NonNullable<ReturnType<typeof getConnectionEndpoint>>,
+    to: NonNullable<ReturnType<typeof getConnectionEndpoint>>,
+  ): PairedCurveEndpoints {
+    const fromPos = worldPortPosition(from.module, from.template, from.portId);
+    const toPos = worldPortPosition(to.module, to.template, to.portId);
+    return {
+      from: { x: fromPos.x, y: fromPos.y },
+      to: { x: toPos.x, y: toPos.y },
+      fromDir: fromPos.direction,
+      toDir: toPos.direction,
+    };
+  }
+
+  /** Endpoints of a connection's double-track partner, when one exists. */
+  function pairedEndpointsFor(
+    conn: ModuleConnection,
+    candidates: ModuleConnection[],
+    sourceModules: DiagramModule[],
+    sourceTemplates: Map<string, ModuleTemplate>,
+  ): PairedCurveEndpoints | undefined {
+    const partner = findPairedConnection(conn, candidates, sourceModules, sourceTemplates);
+    if (!partner) return undefined;
+    return endpointsForConnection(partner, sourceModules, sourceTemplates) ?? undefined;
+  }
+
+  /** Geometry resolved together with the double-track partner so the pair stays parallel. */
+  function geometryForConnection(
+    conn: ModuleConnection,
+    candidates: ModuleConnection[],
+    sourceModules: DiagramModule[],
+    sourceTemplates: Map<string, ModuleTemplate>,
+  ): ConnectionGeometry | null {
+    return getConnectionGeometry(conn, sourceModules, sourceTemplates, pairedEndpointsFor(conn, candidates, sourceModules, sourceTemplates));
+  }
+
+  /** Rebuild from authoritative ports on every render, so endpoints follow a drag immediately. */
+  function rebuildConnectionTrackCache(conn: ModuleConnection) {
+    return geometryForConnection(conn, connections, modules, resolvedTemplateMap)?.tracks || conn.tracks;
+  }
+
+  type ConnectionFrame = {
+    from: { x: number; y: number };
+    to: { x: number; y: number };
+  };
+
+  function frameVector(frame: ConnectionFrame) {
+    const dx = frame.to.x - frame.from.x;
+    const dy = frame.to.y - frame.from.y;
+    const length = Math.hypot(dx, dy) || 1;
+    return {
+      length,
+      tangent: { x: dx / length, y: dy / length },
+      normal: { x: -dy / length, y: dx / length },
+    };
+  }
+
+  function mirrorPointAcrossPairedFrames(
+    point: { x: number; y: number },
+    source: ConnectionFrame,
+    target: ConnectionFrame,
+  ) {
+    const sourceVector = frameVector(source);
+    const targetVector = frameVector(target);
+    const relative = { x: point.x - source.from.x, y: point.y - source.from.y };
+    const along = (relative.x * sourceVector.tangent.x + relative.y * sourceVector.tangent.y) / sourceVector.length;
+    const lateral = relative.x * sourceVector.normal.x + relative.y * sourceVector.normal.y;
+    return {
+      x: target.from.x + targetVector.tangent.x * targetVector.length * along + targetVector.normal.x * lateral,
+      y: target.from.y + targetVector.tangent.y * targetVector.length * along + targetVector.normal.y * lateral,
+    };
+  }
+
+  function mirrorVectorAcrossPairedFrames(
+    vector: { x: number; y: number },
+    source: ConnectionFrame,
+    target: ConnectionFrame,
+  ) {
+    const sourceVector = frameVector(source);
+    const targetVector = frameVector(target);
+    const along = vector.x * sourceVector.tangent.x + vector.y * sourceVector.tangent.y;
+    const lateral = vector.x * sourceVector.normal.x + vector.y * sourceVector.normal.y;
+    return {
+      x: targetVector.tangent.x * along + targetVector.normal.x * lateral,
+      y: targetVector.tangent.y * along + targetVector.normal.y * lateral,
+    };
+  }
+
+  function mirrorControlPoints(
+    sourcePoints: TrackControlPoint[],
+    sourceFrame: ConnectionFrame,
+    targetFrame: ConnectionFrame,
+    existingTargetPoints: TrackControlPoint[],
+  ): TrackControlPoint[] {
+    return sourcePoints.map((point, index) => {
+      const position = mirrorPointAcrossPairedFrames(point, sourceFrame, targetFrame);
+      const handle = mirrorVectorAcrossPairedFrames({ x: point.handleX, y: point.handleY }, sourceFrame, targetFrame);
+      const tangent = typeof point.tangentDirection === "number"
+        ? mirrorVectorAcrossPairedFrames({ x: Math.cos((point.tangentDirection * Math.PI) / 180), y: Math.sin((point.tangentDirection * Math.PI) / 180) }, sourceFrame, targetFrame)
+        : null;
+      return {
+        ...point,
+        id: existingTargetPoints[index]?.id || genId("cp"),
+        x: position.x,
+        y: position.y,
+        handleX: handle.x,
+        handleY: handle.y,
+        tangentDirection: tangent ? (Math.atan2(tangent.y, tangent.x) * 180) / Math.PI : undefined,
+      };
+    });
+  }
+
+  function findPairedRail(connection: ModuleConnection, candidates: ModuleConnection[]): ModuleConnection | undefined {
+    if (connection.pairedConnectionId) {
+      return candidates.find((candidate) => candidate.id === connection.pairedConnectionId);
+    }
+    const templates = resolveTemplatesFor(modulesRef.current);
+    const from = getConnectionEndpoint(connection.fromModuleId, connection.fromPortId, modulesRef.current, templates);
+    const to = getConnectionEndpoint(connection.toModuleId, connection.toPortId, modulesRef.current, templates);
+    if (!from || !to) return undefined;
+    const fromPartner = findDoubleTrackPartner(from.template, from.port);
+    const toPartner = findDoubleTrackPartner(to.template, to.port);
+    if (!fromPartner || !toPartner) return undefined;
+    return candidates.find((candidate) =>
+      candidate.fromModuleId === connection.fromModuleId
+      && candidate.fromPortId === fromPartner.id
+      && candidate.toModuleId === connection.toModuleId
+      && candidate.toPortId === toPartner.id
+      && (!candidate.pairedConnectionId || candidate.pairedConnectionId === connection.id),
+    );
+  }
+
+  /** Applies a curve edit to both rails of a newly-created double-track pair. */
+  function updateConnectionAndPairedRail(
+    previous: ModuleConnection[],
+    connectionId: string,
+    update: (connection: ModuleConnection) => ModuleConnection,
+  ): ModuleConnection[] {
+    const source = previous.find((connection) => connection.id === connectionId);
+    if (!source) return previous;
+    const paired = findPairedRail(source, previous);
+    const changed = paired ? { ...update(source), pairedConnectionId: paired.id } : update(source);
+    const templates = resolveTemplatesFor(modulesRef.current);
+    const sourceGeometry = geometryForConnection(changed, previous, modulesRef.current, templates);
+    const updatedSource = sourceGeometry
+      ? { ...changed, controlPoints: sourceGeometry.controlPoints, tracks: sourceGeometry.tracks }
+      : changed;
+    if (!paired) {
+      return previous.map((connection) => connection.id === source.id ? updatedSource : connection);
+    }
+
+    const pairedGeometry = geometryForConnection(paired, previous, modulesRef.current, templates);
+    if (!sourceGeometry || !pairedGeometry || updatedSource.autoCurve !== false) {
+      // Automatic mode is regenerated independently from each rail's live ports.
+      return previous.map((connection) => {
+        if (connection.id === source.id) return updatedSource;
+        if (connection.id === paired.id) {
+          const refreshed = geometryForConnection({ ...connection, autoCurve: updatedSource.autoCurve }, previous, modulesRef.current, templates);
+          return refreshed
+            ? { ...connection, pairedConnectionId: source.id, autoCurve: updatedSource.autoCurve, controlPoints: refreshed.controlPoints, tracks: refreshed.tracks }
+            : { ...connection, pairedConnectionId: source.id, autoCurve: updatedSource.autoCurve };
+        }
+        return connection;
+      });
+    }
+
+    const mirroredPoints = mirrorControlPoints(
+      updatedSource.controlPoints,
+      sourceGeometry,
+      pairedGeometry,
+      paired.controlPoints,
+    );
+    const pairedDraft = { ...paired, pairedConnectionId: source.id, autoCurve: false, controlPoints: mirroredPoints };
+    const updatedPairedGeometry = geometryForConnection(pairedDraft, previous, modulesRef.current, templates);
+    const updatedPaired = updatedPairedGeometry
+      ? { ...pairedDraft, controlPoints: updatedPairedGeometry.controlPoints, tracks: updatedPairedGeometry.tracks }
+      : pairedDraft;
+    return previous.map((connection) => {
+      if (connection.id === source.id) return updatedSource;
+      if (connection.id === paired.id) return updatedPaired;
+      return connection;
+    });
+  }
+
+  /** 在连接轨道上指定位置插入控制点（按路径顺序排序） */
+  function addControlPointAt(connId: string, worldX: number, worldY: number) {
+    const conn = connections.find((c) => c.id === connId);
+    if (!conn || isLayerLocked(conn.layerId)) return;
+    const ends = getConnectionEndpoints(conn);
+    if (!ends) return;
+    const currentPoints = geometryForConnection(conn, connections, modules, resolvedTemplateMap)?.controlPoints || conn.controlPoints;
+    const pts = [ends.from, ...currentPoints, ends.to];
+    let bestIdx = 0;
+    let bestDist = Infinity;
+    let bestProj = { x: pts[0].x, y: pts[0].y };
+    let bestTangent = { x: 1, y: 0 };
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i];
+      const b = pts[i + 1];
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const lenSq = dx * dx + dy * dy;
+      const t = lenSq > 1 ? Math.max(0, Math.min(1, ((worldX - a.x) * dx + (worldY - a.y) * dy) / lenSq)) : 0;
+      const px = a.x + t * dx;
+      const py = a.y + t * dy;
+      const dist = Math.hypot(worldX - px, worldY - py);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestIdx = i;
+        bestProj = { x: px, y: py };
+        const length = Math.hypot(dx, dy) || 1;
+        bestTangent = { x: dx / length, y: dy / length };
+      }
+    }
+    const newCp: TrackControlPoint = {
+      id: genId("cp"),
+      x: snapEnabled ? snapToGrid(bestProj.x, pageGridSize) : Math.round(bestProj.x),
+      y: snapEnabled ? snapToGrid(bestProj.y, pageGridSize) : Math.round(bestProj.y),
+      curved: true,
+      handleX: bestTangent.x * 18,
+      handleY: bestTangent.y * 18,
+      directionOnly: true,
+      tangentDirection: Math.atan2(bestTangent.y, bestTangent.x) * 180 / Math.PI,
+    };
+    // 约束插入位置：不可插入到隐式锚点之前或之后
+    const firstCP = currentPoints[0];
+    const lastCP = currentPoints[currentPoints.length - 1];
+    const minIdx = firstCP?.implicit ? 1 : 0;
+    const maxIdx = lastCP?.implicit ? currentPoints.length - 1 : currentPoints.length;
+    const insertIdx = Math.max(minIdx, Math.min(bestIdx, maxIdx));
+
+    history.captureSnapshot("添加轨道节点");
+    setConnections((prev) => updateConnectionAndPairedRail(prev, connId, (c) => {
+      const cps = [...currentPoints];
+      cps.splice(insertIdx, 0, newCp);
+      return { ...c, autoCurve: false, controlPoints: cps };
+    }));
+    setHasUnsavedChanges(true);
+    setStatus("已添加轨道节点");
+  }
+
+  /** 在最长段中点插入控制点（属性面板按钮） */
+  function addControlPointMidpoint(connId: string) {
+    const conn = connections.find((c) => c.id === connId);
+    if (!conn || isLayerLocked(conn.layerId)) return;
+    const ends = getConnectionEndpoints(conn);
+    if (!ends) return;
+    const currentPoints = geometryForConnection(conn, connections, modules, resolvedTemplateMap)?.controlPoints || conn.controlPoints;
+    const pts = [ends.from, ...currentPoints, ends.to];
+    let bestLen = -1;
+    let mid = { x: pts[0].x, y: pts[0].y };
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i];
+      const b = pts[i + 1];
+      const len = Math.hypot(b.x - a.x, b.y - a.y);
+      if (len > bestLen) {
+        bestLen = len;
+        mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      }
+    }
+    addControlPointAt(connId, mid.x, mid.y);
+  }
+
+  /** 删除控制点（隐式锚点不可删除） */
+  function removeControlPoint(connId: string, cpId: string) {
+    const conn = connections.find((c) => c.id === connId);
+    if (!conn || isLayerLocked(conn.layerId)) return;
+    const target = conn.controlPoints.find((p) => p.id === cpId);
+    if (!target || target.implicit) return; // 不可删除隐式锚点
+    const ends = getConnectionEndpoints(conn);
+    if (!ends) return;
+    history.captureSnapshot("删除轨道节点");
+    setConnections((prev) => updateConnectionAndPairedRail(prev, connId, (c) => ({
+      ...c,
+      autoCurve: false,
+      controlPoints: c.controlPoints.filter((p) => p.id !== cpId),
+    })));
+    setHasUnsavedChanges(true);
+    setStatus("已删除轨道节点");
+  }
+
+  /** 清除所有控制点（拉直） */
+  function straightenConnection(connId: string) {
+    const conn = connections.find((c) => c.id === connId);
+    if (!conn || conn.controlPoints.length === 0 || isLayerLocked(conn.layerId)) return;
+    const ends = getConnectionEndpoints(conn);
+    if (!ends) return;
+    history.captureSnapshot("拉直轨道");
+    setConnections((prev) => updateConnectionAndPairedRail(prev, connId, (c) => ({
+      ...c,
+      autoCurve: false,
+      controlPoints: [],
+    })));
+    setHasUnsavedChanges(true);
+    setStatus("已拉直轨道");
+  }
+
+  /** 重新为该连接生成自动贝塞尔控制点（基于端口位置） */
+  function regenerateAutoControlPoints(connId: string) {
+    const conn = connections.find((c) => c.id === connId);
+    if (!conn || isLayerLocked(conn.layerId)) return;
+    const ends = getConnectionEndpoints(conn);
+    if (!ends) return;
+    const fromDir = ends.fromDir;
+    const toDir = ends.toDir;
+    const newCps = createAutoControlPoints(ends.from, ends.to, fromDir, toDir, {
+      from: `${conn.fromModuleId}:${conn.fromPortId}:endpoint-from`,
+      middle: `${conn.fromModuleId}:${conn.fromPortId}:${conn.toModuleId}:${conn.toPortId}:middle`,
+      to: `${conn.toModuleId}:${conn.toPortId}:endpoint-to`,
+    });
+    history.captureSnapshot(newCps.length > 0 ? "重新生成自动曲线" : "切换为直线连接");
+    setConnections((prev) => updateConnectionAndPairedRail(prev, connId, (c) => ({
+      ...c,
+      autoCurve: true,
+      controlPoints: newCps,
+    })));
+    setHasUnsavedChanges(true);
+    setStatus(newCps.length > 0 ? "已重新生成自动曲线" : "已清除控制点（直线连接）");
+  }
+
+  /** 切换控制点曲率（双击节点） */
+  function toggleControlPointCurve(connId: string, cpId: string) {
+    const conn = connections.find((c) => c.id === connId);
+    if (!conn || isLayerLocked(conn.layerId)) return;
+    const ends = getConnectionEndpoints(conn);
+    if (!ends) return;
+    const cp = conn.controlPoints.find((p) => p.id === cpId);
+    if (!cp) return;
+    history.captureSnapshot(cp.curved ? "取消节点曲率" : "启用节点曲率");
+    setConnections((prev) => updateConnectionAndPairedRail(prev, connId, (c) => {
+      const cps = c.controlPoints.map((p) => {
+        if (p.id !== cpId) return p;
+        if (p.curved) {
+          return { ...p, curved: false, handleX: 0, handleY: 0, directionOnly: false, tangentDirection: undefined };
+        }
+        // 启用曲率：手柄指向下一节点，让曲线平滑进入当前 CP
+        const idx = c.controlPoints.findIndex((q) => q.id === cpId);
+        const next = idx + 1 < c.controlPoints.length ? c.controlPoints[idx + 1] : ends.to;
+        const dx = next.x - p.x;
+        const dy = next.y - p.y;
+        const len = Math.hypot(dx, dy) || 1;
+        const hMag = Math.min(len * 0.3, 80);
+          return { ...p, curved: true, handleX: (dx / len) * hMag, handleY: (dy / len) * hMag, directionOnly: true, tangentDirection: Math.atan2(dy, dx) * 180 / Math.PI };
+      });
+      return { ...c, autoCurve: false, controlPoints: cps };
+    }));
+    setHasUnsavedChanges(true);
+    setStatus(conn.controlPoints.find((p) => p.id === cpId)?.curved ? "已取消节点曲率" : "已启用节点曲率");
+  }
+
+  /** 控制点节点鼠标按下：开始拖拽 */
+  function handleControlPointMouseDown(e: React.MouseEvent, connId: string, cpId: string) {
+    e.stopPropagation();
+    if (activeTool === "pan") return;
+    if (isLayerLocked(connections.find((item) => item.id === connId)?.layerId || "")) return;
+    history.captureSnapshot("移动轨道节点");
+    const conn = connections.find((c) => c.id === connId);
+    const geometry = conn ? geometryForConnection(conn, connections, modules, resolvedTemplateMap) : null;
+    const cp = geometry?.controlPoints.find((p) => p.id === cpId) || conn?.controlPoints.find((p) => p.id === cpId);
+    dragRef.current = {
+      type: "controlPoint",
+      connId,
+      cpId,
+      startSX: e.clientX,
+      startSY: e.clientY,
+      startMX: cp?.x || 0,
+      startMY: cp?.y || 0,
+      startPX: 0,
+      startPY: 0,
+      moved: false,
+    };
+  }
+
+  /** 曲率手柄鼠标按下：开始拖拽手柄 */
+  function handleControlPointHandleMouseDown(e: React.MouseEvent, connId: string, cpId: string) {
+    e.stopPropagation();
+    if (activeTool === "pan") return;
+    if (isLayerLocked(connections.find((item) => item.id === connId)?.layerId || "")) return;
+    history.captureSnapshot("调整轨道曲率");
+    const conn = connections.find((c) => c.id === connId);
+    const geometry = conn ? geometryForConnection(conn, connections, modules, resolvedTemplateMap) : null;
+    const cp = geometry?.controlPoints.find((p) => p.id === cpId) || conn?.controlPoints.find((p) => p.id === cpId);
+    dragRef.current = {
+      type: "controlPointHandle",
+      connId,
+      cpId,
+      startSX: e.clientX,
+      startSY: e.clientY,
+      startMX: cp?.x || 0,
+      startMY: cp?.y || 0,
+      startHX: cp?.handleX || 0,
+      startHY: cp?.handleY || 0,
+      startPX: 0,
+      startPY: 0,
+      moved: false,
+    };
+  }
+
+  /** 控制点双击：切换曲率 */
+  function handleControlPointDoubleClick(e: React.MouseEvent, connId: string, cpId: string) {
+    e.stopPropagation();
+    toggleControlPointCurve(connId, cpId);
+  }
+
+  /** 轨道段点击：Alt 添加控制点，Shift+Alt 添加交叉点。 */
+  function handleTrackClick(e: React.MouseEvent, conn: ModuleConnection) {
+    if (!e.altKey) return;
+    e.stopPropagation();
+    e.preventDefault();
+    const w = toWorld(e.clientX, e.clientY);
+    if (e.shiftKey) addCrossingPoint(conn.id, w.x, w.y);
+    else addControlPointAt(conn.id, w.x, w.y);
+  }
+
+  // ── 换乘组合 ──
+
+  /** 从选中模块创建换乘组 */
+  function createTransferGroupFromSelection() {
+    const selMods = modules.filter((m) => selectedIds.includes(m.id));
+    if (selMods.length < 2) {
+      setStatus("需要至少选择 2 个模块来创建换乘组");
+      return;
+    }
+    const lineIds = [...new Set(selMods.flatMap((m) => m.lineIds).filter(Boolean))];
+    const group: TransferGroup = {
+      id: genId("tgrp"),
+      name: "换乘站",
+      moduleIds: selMods.map((m) => m.id),
+      lineIds,
+      sourceStationIds: [...new Set(selMods.flatMap((module) => module.sourceStationIds))],
+      layerId: "layer-transfer",
+      zIndex: transferGroups.length,
+      visible: true,
+      locked: false,
+      pageId: activePageId,
+      createdOrder: Date.now(),
+    };
+    history.captureSnapshot("创建换乘组");
+    setTransferGroups((prev) => [...prev, group]);
+    setSelectedIds([group.id]);
+    setHasUnsavedChanges(true);
+    setStatus(`已创建换乘组「${group.name}」`);
+  }
+
+  /** 更新换乘组属性 */
+  function updateTransferGroup(id: string, patch: Partial<TransferGroup>, operationName?: string) {
+    const current = transferGroups.find((item) => item.id === id);
+    if (!current || isLayerLocked(current.layerId)) {
+      setStatus("所属图层已锁定，无法修改换乘组");
+      return;
+    }
+    history.captureSnapshot(operationName || "修改换乘组");
+    setTransferGroups((prev) => prev.map((group) => {
+      if (group.id !== id) return group;
+      return { ...group, ...patch };
+    }));
+    setHasUnsavedChanges(true);
+  }
+
+  /** 从换乘组移除模块 */
+  function removeModuleFromGroup(groupId: string, moduleId: string) {
+    history.captureSnapshot("从换乘组移除成员");
+    setTransferGroups((prev) => prev.map((g) =>
+      g.id === groupId
+        ? { ...g, moduleIds: g.moduleIds.filter((mid) => mid !== moduleId) }
+        : g,
+    ));
+    setHasUnsavedChanges(true);
+    setStatus("已从换乘组移除成员");
+  }
+
+  /** 将选中模块加入选中的换乘组 */
+  function addSelectedModulesToGroup(groupId: string) {
+    const group = transferGroups.find((g) => g.id === groupId);
+    if (!group) return;
+    const modsToAdd = modules.filter((m) => selectedIds.includes(m.id) && !group.moduleIds.includes(m.id));
+    if (modsToAdd.length === 0) {
+      setStatus("选中的模块已在换乘组中");
+      return;
+    }
+    history.captureSnapshot("添加成员到换乘组");
+    setTransferGroups((prev) => prev.map((g) =>
+      g.id === groupId
+        ? {
+            ...g,
+            moduleIds: [...g.moduleIds, ...modsToAdd.map((m) => m.id)],
+            lineIds: [...new Set([...g.lineIds, ...modsToAdd.flatMap((m) => m.lineIds)])],
+          }
+        : g,
+    ));
+    setHasUnsavedChanges(true);
+    setStatus(`已添加 ${modsToAdd.length} 个模块到换乘组`);
+  }
+
+  /** 换乘组鼠标按下：选中 */
+  function handleTransferGroupMouseDown(e: React.MouseEvent, group: TransferGroup) {
+    e.stopPropagation();
+    if (activeTool === "pan") return;
+    if (activeTool === "connect") return;
+    if (!group.visible || group.locked || isLayerLocked(group.layerId)) return;
+    const memberModules = modules.filter((module) => group.moduleIds.includes(module.id));
+    if (memberModules.some((module) => module.locked || isLayerLocked(module.layerId))) {
+      setStatus(`换乘组「${group.name}」包含锁定模块，无法整体移动`);
+      return;
+    }
+    if (e.shiftKey || e.ctrlKey || e.metaKey) {
+      setSelectedIds((previous) => previous.includes(group.id)
+        ? previous.filter((id) => id !== group.id)
+        : [...previous, group.id]);
+      return;
+    }
+    const bounds = getTransferGroupBounds(group);
+    if (!bounds) return;
+    const wasSelected = selectedIds.includes(group.id);
+    if (!wasSelected) setSelectedIds([group.id]);
+    if (beginSelectionDrag(e, group.id)) return;
+    history.captureSnapshot("移动换乘组");
+    dragRef.current = {
+      type: "transferGroup",
+      transferGroupId: group.id,
+      wasSelected,
+      startSX: e.clientX,
+      startSY: e.clientY,
+      startMX: bounds.x,
+      startMY: bounds.y,
+      startPX: 0,
+      startPY: 0,
+      moved: false,
+    };
+    setStatus(`已选中换乘组「${group.name}」，可拖动整体移动`);
+  }
+
+  function handleTransferGroupDoubleClick(e: React.MouseEvent, group: TransferGroup) {
+    e.stopPropagation();
+    setSelectedIds(group.moduleIds);
+    setStatus(`正在编辑换乘组「${group.name}」的成员；点击空白处退出`);
+  }
+
+  /** 计算换乘组成员模块的包围盒 */
+  function getTransferGroupBounds(group: TransferGroup): { x: number; y: number; w: number; h: number } | null {
+    const memberMods = modules.filter((m) => group.moduleIds.includes(m.id));
+    if (memberMods.length === 0) return null;
+    const template = (mod: DiagramModule) => resolvedTemplateMap.get(mod.id) || templateMap.get(mod.templateId);
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const mod of memberMods) {
+      const tpl = template(mod);
+      const w = tpl?.width || 160;
+      const h = tpl?.height || 112;
+      minX = Math.min(minX, mod.x);
+      minY = Math.min(minY, mod.y);
+      maxX = Math.max(maxX, mod.x + w);
+      maxY = Math.max(maxY, mod.y + h);
+    }
+    const pad = 12;
+    return { x: minX - pad, y: minY - pad, w: maxX - minX + pad * 2, h: maxY - minY + pad * 2 };
+  }
+
+  /** 删除换乘组（仅移除组合关系，不删除成员模块） */
+  function deleteTransferGroup(id: string) {
+    history.captureSnapshot("删除换乘组");
+    setTransferGroups((prev) => prev.filter((g) => g.id !== id));
+    setSelectedIds([]);
+    setHasUnsavedChanges(true);
+    setStatus("已删除换乘组");
+  }
+
+  function toggleLayer(id: string) {
+    history.captureSnapshot("切换图层可见性");
+    setLayers((prev) => prev.map((l) => (l.id === id ? { ...l, visible: !l.visible } : l)));
+    setHasUnsavedChanges(true);
+  }
+  function toggleLayerLock(id: string) {
+    history.captureSnapshot("切换图层锁定");
+    setLayers((prev) => prev.map((l) => (l.id === id ? { ...l, locked: !l.locked } : l)));
+    setHasUnsavedChanges(true);
+  }
+  function setLayerOpacity(id: string, opacity: number) {
+    setLayers((prev) => prev.map((l) => (l.id === id ? { ...l, opacity } : l)));
+    setHasUnsavedChanges(true);
+  }
+  function toggleLayerExpanded(id: string) {
+    setLayers((prev) => prev.map((l) => (l.id === id ? { ...l, expanded: !l.expanded } : l)));
+  }
+  function renameLayer(id: string, name: string) {
+    history.captureSnapshot("重命名图层");
+    setLayers((prev) => prev.map((l) => (l.id === id ? { ...l, name } : l)));
+    setHasUnsavedChanges(true);
+  }
+  function createSubLayer(parentId: string | null) {
+    history.captureSnapshot("新建子图层");
+    const siblings = layers.filter((l) => l.parentId === parentId);
+    const newOrder = siblings.length;
+    const newLayer: LayerNode = {
+      id: genId("layer"),
+      name: "新图层",
+      visible: true,
+      locked: false,
+      opacity: 1,
+      expanded: true,
+      parentId,
+      order: newOrder,
+    };
+    setLayers((prev) => [...prev, newLayer]);
+    // 展开父节点
+    if (parentId) {
+      setLayers((prev) => prev.map((l) => (l.id === parentId ? { ...l, expanded: true } : l)));
+    }
+    setHasUnsavedChanges(true);
+    setStatus("已新建图层");
+  }
+  function deleteLayer(id: string) {
+    // 收集该图层及其所有后代
+    const toDelete = new Set<string>([id]);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const layer of layers) {
+        if (layer.parentId && toDelete.has(layer.parentId) && !toDelete.has(layer.id)) {
+          toDelete.add(layer.id);
+          changed = true;
+        }
+      }
+    }
+    const hasObjects = [
+      ...modules.map((item) => item.layerId), ...connections.map((item) => item.layerId),
+      ...backgroundImages.map((item) => item.layerId), ...labels.map((item) => item.layerId), ...transferGroups.map((item) => item.layerId),
+      ...platforms.map((item) => item.layerId), ...graphics.map((item) => item.layerId),
+    ].some((layerId) => toDelete.has(layerId));
+    if (hasObjects) {
+      setStatus("只能删除空图层；请先移动或删除其中的对象");
+      return;
+    }
+    history.captureSnapshot("删除图层");
+    setLayers((prev) => prev.filter((l) => !toDelete.has(l.id)));
+    setHasUnsavedChanges(true);
+    setStatus(`已删除图层（含 ${toDelete.size} 个子图层）`);
+  }
+  /** 拖动排序：将 draggedId 移动到 targetId 之前/之后（同层级内） */
+  function moveLayer(draggedId: string, targetId: string, position: "before" | "after" | "inside") {
+    const dragged = layers.find((l) => l.id === draggedId);
+    const target = layers.find((l) => l.id === targetId);
+    if (!dragged || !target) return;
+    // 不允许将父拖入自己的子（循环检测）
+    if (position === "inside") {
+      let parent: string | null = target.parentId;
+      while (parent) {
+        if (parent === draggedId) return;
+        parent = layers.find((l) => l.id === parent)?.parentId ?? null;
+      }
+    }
+    const newParentId = position === "inside" ? targetId : target.parentId;
+    // 不允许移动到不同层级（仅同父下重排或变为子）
+    if (position !== "inside" && dragged.parentId !== target.parentId) return;
+
+    history.captureSnapshot("拖动排序图层");
+    setLayers((prev) => {
+      let updated = prev.map((l) =>
+        l.id === draggedId ? { ...l, parentId: newParentId } : l,
+      );
+      // 重新计算同层级 order
+      const siblings = updated
+        .filter((l) => l.parentId === newParentId)
+        .sort((a, b) => a.order - b.order);
+      const draggedIdx = siblings.findIndex((s) => s.id === draggedId);
+      // 移除 dragged 后重新插入
+      const [moved] = siblings.splice(draggedIdx, 1);
+      if (position === "before") {
+        siblings.splice(siblings.findIndex((s) => s.id === targetId), 0, moved);
+      } else {
+        const insertAfter = siblings.findIndex((s) => s.id === targetId);
+        siblings.splice(insertAfter + 1, 0, moved);
+      }
+      // 重新分配 order
+      const orderMap = new Map<string, number>();
+      siblings.forEach((s, i) => orderMap.set(s.id, i));
+      updated = updated.map((l) =>
+        orderMap.has(l.id) ? { ...l, order: orderMap.get(l.id)! } : l,
+      );
+      return updated;
+    });
+    setHasUnsavedChanges(true);
+  }
+
+  function moveLayerBy(id: string, direction: "up" | "down" | "top" | "bottom") {
+    const layer = layers.find((item) => item.id === id);
+    if (!layer) return;
+    const siblings = layers.filter((item) => item.parentId === layer.parentId).sort((a, b) => a.order - b.order);
+    const index = siblings.findIndex((item) => item.id === id);
+    const targetIndex = direction === "up" ? index - 1 : direction === "down" ? index + 1 : direction === "top" ? 0 : siblings.length - 1;
+    if (targetIndex < 0 || targetIndex >= siblings.length || targetIndex === index) return;
+    moveLayer(id, siblings[targetIndex].id, targetIndex < index ? "before" : "after");
+  }
+
+  // ── 交互处理 ──
+
+  /** 画布鼠标按下 */
+  function handleSvgMouseDown(e: React.MouseEvent<SVGSVGElement>) {
+    if (e.button === 2 && (activeTool === "connect" || activeTool === "auto") && connectFrom) {
+      e.preventDefault();
+      setConnectFrom(null);
+      setStatus("已取消连接");
+      return;
+    }
+    if (e.button === 1 || e.button === 2 || activeTool === "pan") {
+      // 平移
+      dragRef.current = { type: "pan", startSX: e.clientX, startSY: e.clientY, startPX: viewport.panX, startPY: viewport.panY, startMX: 0, startMY: 0, moved: false };
+      e.preventDefault();
+      return;
+    }
+    if (activeTool === "place" && activeTemplateId) {
+      const w = toWorld(e.clientX, e.clientY);
+      placeModule(w.x, w.y);
+      return;
+    }
+    if (activeTool === "label") {
+      const w = toWorld(e.clientX, e.clientY);
+      placeLabel(w.x, w.y);
+      return;
+    }
+    if (activeTool === "shape" && pendingElement) {
+      const w = toWorld(e.clientX, e.clientY);
+      if (pendingElement.kind === "shape") placeShape(w.x, w.y);
+      else placeNumber(w.x, w.y);
+      return;
+    }
+    // 选择工具下在空白区域拖拽 → 框选
+    if ((activeTool === "select" || activeTool === "auto") && (e.target === e.currentTarget || (e.target as Element).classList.contains("canvas-bg") || (e.target as Element).classList.contains("canvas-paper"))) {
+      dragRef.current = { type: "selectionBox", startSX: e.clientX, startSY: e.clientY, startMX: 0, startMY: 0, startPX: 0, startPY: 0, moved: false };
+      e.preventDefault();
+      return;
+    }
+    // 点击空白处取消选择
+    if (e.target === e.currentTarget || (e.target as Element).classList.contains("canvas-bg") || (e.target as Element).classList.contains("canvas-paper")) {
+      setSelectedIds([]);
+      if ((activeTool === "connect" || activeTool === "auto") && connectFrom) {
+        setConnectFrom(null);
+        setStatus("已取消连接");
+      }
+    }
+  }
+
+  /** Starts one drag transaction for every object captured by the marquee. */
+  function beginSelectionDrag(e: React.MouseEvent, objectId: string): boolean {
+    if (!selectedIds.includes(objectId) || selectedIds.length < 2) return false;
+    history.captureSnapshot("移动框选内容");
+    dragRef.current = {
+      type: "selection",
+      selectionIds: [...selectedIds],
+      startSX: e.clientX,
+      startSY: e.clientY,
+      startMX: 0,
+      startMY: 0,
+      startPX: 0,
+      startPY: 0,
+      lastMX: 0,
+      lastMY: 0,
+      moved: false,
+    };
+    return true;
+  }
+
+  /** 模块鼠标按下 */
+  function handleModuleMouseDown(e: React.MouseEvent, mod: DiagramModule) {
+    e.stopPropagation();
+    if (mod.locked || isLayerLocked(mod.layerId)) return;
+    if (activeTool === "pan") return;
+    if (activeTool === "connect") return;
+    if (e.shiftKey || e.ctrlKey || e.metaKey) {
+      // Shift/Ctrl+click: 切换多选，不启动拖拽
+      setSelectedIds((prev) =>
+        prev.includes(mod.id)
+          ? prev.filter((id) => id !== mod.id)
+          : [...prev, mod.id],
+      );
+      return;
+    } else if (!selectedIds.includes(mod.id)) {
+      setSelectedIds([mod.id]);
+    }
+    // 已选中模块：不定向取消选中，若拖拽则保持选中并移动，若未拖拽则在 mouseup 时取消选中
+    // 捕获拖拽前快照（只在 mousedown 时保存，mouseup 时若未移动则丢弃）
+    // wasSelected 用 mousedown 时(未 setSelectedIds 前)的选择状态，避免 handleUp 闭包陈旧导致新点击立即取消选中
+    if (beginSelectionDrag(e, mod.id)) return;
+    history.captureSnapshot("移动模块");
+    dragRef.current = {
+      type: "module",
+      moduleId: mod.id,
+      wasSelected: selectedIds.includes(mod.id),
+      startSX: e.clientX,
+      startSY: e.clientY,
+      startMX: mod.x,
+      startMY: mod.y,
+      startPX: 0,
+      startPY: 0,
+      moved: false,
+    };
+  }
+
+  function handlePlatformMouseDown(e: React.MouseEvent, platform: PlatformObject) {
+    e.stopPropagation();
+    if (platform.locked || isLayerLocked(platform.layerId) || activeTool === "pan") return;
+    // 站台属于模块且不在编辑模式 → 当作点击模块整体
+    if (platform.moduleId && editingPlatformModuleId !== platform.moduleId) {
+      const owner = modules.find(m => m.id === platform.moduleId);
+      if (owner && !owner.locked && !isLayerLocked(owner.layerId)) {
+        handleModuleMouseDown(e, owner);
+        return;
+      }
+      return;
+    }
+    // 编辑模式或独立站台
+    if ((e.shiftKey || e.ctrlKey || e.metaKey) && platform.moduleId && modules.some((m) => m.id === platform.moduleId)) {
+      toggleOwnerModuleSelection(platform.moduleId);
+      return;
+    }
+    if (!selectedIds.includes(platform.id)) {
+      setSelectedIds([platform.id]);
+    }
+    if (beginSelectionDrag(e, platform.id)) return;
+    history.captureSnapshot("移动站台");
+    dragRef.current = { type: "platform", platformId: platform.id, wasSelected: selectedIds.includes(platform.id), startSX: e.clientX, startSY: e.clientY, startMX: platform.x, startMY: platform.y, startPX: 0, startPY: 0, moved: false };
+  }
+
+  function handleGraphicMouseDown(e: React.MouseEvent, graphic: AttachedGraphic) {
+    e.stopPropagation();
+    if (graphic.locked || isLayerLocked(graphic.layerId) || activeTool === "pan") return;
+    if ((e.shiftKey || e.ctrlKey || e.metaKey) && graphic.positionMode === "attached" && graphic.attachedToId && modules.some((m) => m.id === graphic.attachedToId)) {
+      toggleOwnerModuleSelection(graphic.attachedToId);
+      return;
+    }
+    if (!selectedIds.includes(graphic.id)) {
+      setSelectedIds([graphic.id]);
+    }
+    if (beginSelectionDrag(e, graphic.id)) return;
+    history.captureSnapshot("移动图标");
+    dragRef.current = { type: "graphic", graphicId: graphic.id, wasSelected: selectedIds.includes(graphic.id), startSX: e.clientX, startSY: e.clientY, startMX: graphic.x, startMY: graphic.y, startPX: 0, startPY: 0, moved: false };
+  }
+
+  function handlePlatformResizeMouseDown(e: React.MouseEvent, platform: PlatformObject) {
+    e.stopPropagation();
+    if (platform.locked || isLayerLocked(platform.layerId)) return;
+    setSelectedIds([platform.id]);
+    history.captureSnapshot("调整站台尺寸");
+    dragRef.current = { type: "platformResize", platformId: platform.id, startSX: e.clientX, startSY: e.clientY, startMX: platform.x, startMY: platform.y, startPX: 0, startPY: 0, startWidth: platform.width, startHeight: platform.height, moved: false };
+  }
+
+  function handleGraphicResizeMouseDown(e: React.MouseEvent, graphic: AttachedGraphic) {
+    e.stopPropagation();
+    if (graphic.locked || isLayerLocked(graphic.layerId)) return;
+    setSelectedIds([graphic.id]);
+    history.captureSnapshot("调整图标尺寸");
+    dragRef.current = { type: "graphicResize", graphicId: graphic.id, startSX: e.clientX, startSY: e.clientY, startMX: graphic.x, startMY: graphic.y, startPX: 0, startPY: 0, startWidth: graphic.width, startHeight: graphic.height, moved: false };
+  }
+
+  /** 全局鼠标移动 */
+  useEffect(() => {
+    let animationFrame = 0;
+    let latestMove: MouseEvent | null = null;
+    function processMove(e: MouseEvent) {
+      const drag = dragRef.current;
+      if (drag.type === "none") {
+        // 更新鼠标世界坐标
+        if (svgRef.current) {
+          const w = toWorld(e.clientX, e.clientY);
+          setMouseWorld({ x: Math.round(w.x), y: Math.round(w.y) });
+        }
+        return;
+      }
+      if (drag.type === "pan") {
+        const dx = e.clientX - drag.startSX;
+        const dy = e.clientY - drag.startSY;
+        if (Math.abs(dx) > 2 || Math.abs(dy) > 2) drag.moved = true;
+        setViewport((prev) => ({ ...prev, panX: drag.startPX + dx, panY: drag.startPY + dy }));
+        return;
+      }
+      if (drag.type === "selectionBox") {
+        const dx = e.clientX - drag.startSX;
+        const dy = e.clientY - drag.startSY;
+        if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+          drag.moved = true;
+          setSelectionBox({
+            x1: Math.min(drag.startSX, e.clientX),
+            y1: Math.min(drag.startSY, e.clientY),
+            x2: Math.max(drag.startSX, e.clientX),
+            y2: Math.max(drag.startSY, e.clientY),
+          });
+        }
+        return;
+      }
+      if (drag.type === "selection" && drag.selectionIds) {
+        const world = toWorld(e.clientX, e.clientY);
+        const startWorld = toWorld(drag.startSX, drag.startSY);
+        let totalDx = world.x - startWorld.x;
+        let totalDy = world.y - startWorld.y;
+        if (snapEnabled) {
+          totalDx = snapToGrid(totalDx, pageGridSize);
+          totalDy = snapToGrid(totalDy, pageGridSize);
+        }
+        const lastDx = drag.lastMX ?? 0;
+        const lastDy = drag.lastMY ?? 0;
+        const frameDx = totalDx - lastDx;
+        const frameDy = totalDy - lastDy;
+        if (!frameDx && !frameDy) return;
+        drag.moved = true;
+        drag.lastMX = totalDx;
+        drag.lastMY = totalDy;
+        const translated = translateCanvasSelection({
+          modules: modulesRef.current,
+          connections: connectionsRef.current,
+          platforms: platformsRef.current,
+          labels: labelsRef.current,
+          graphics: graphicsRef.current,
+          backgroundImages: backgroundImagesRef.current,
+          transferGroups: transferGroupsRef.current,
+        }, drag.selectionIds, frameDx, frameDy);
+        modulesRef.current = translated.modules;
+        connectionsRef.current = translated.connections;
+        platformsRef.current = translated.platforms;
+        labelsRef.current = translated.labels;
+        graphicsRef.current = translated.graphics;
+        backgroundImagesRef.current = translated.backgroundImages;
+        setModules(translated.modules);
+        setConnections(translated.connections);
+        setPlatforms(translated.platforms);
+        setLabels(translated.labels);
+        setGraphics(translated.graphics);
+        setBackgroundImages(translated.backgroundImages);
+        return;
+      }
+      if (drag.type === "module" && drag.moduleId) {
+        const w = toWorld(e.clientX, e.clientY);
+        const startW = toWorld(drag.startSX, drag.startSY);
+        const dx = w.x - startW.x;
+        const dy = w.y - startW.y;
+        if (Math.abs(dx) > 1 || Math.abs(dy) > 1) drag.moved = true;
+        if (!drag.moved) return;
+        setManualCurveEditingId(drag.connId ?? null);
+        let newX = drag.startMX + dx;
+        let newY = drag.startMY + dy;
+        if (snapEnabled) {
+          newX = snapToGrid(newX, pageGridSize);
+          newY = snapToGrid(newY, pageGridSize);
+          const current = modulesRef.current.find((module) => module.id === drag.moduleId);
+          if (current) {
+            const aligned = alignModuleToExistingTracks({ ...current, x: newX, y: newY });
+            newX = aligned.x;
+            newY = aligned.y;
+          }
+        }
+        // 使用 dragRef 记录的上一帧位置计算增量，避免 modulesRef 异步延迟导致平台漂移
+        const lastMX = drag.lastMX ?? drag.startMX;
+        const lastMY = drag.lastMY ?? drag.startMY;
+        const frameDx = newX - lastMX;
+        const frameDy = newY - lastMY;
+        drag.lastMX = newX;
+        drag.lastMY = newY;
+        setModules((prev) => {
+          const next = prev.map((m) => (m.id === drag.moduleId ? { ...m, x: newX, y: newY } : m));
+          modulesRef.current = next;
+          return next;
+        });
+        if (frameDx || frameDy) {
+          setLabels((prev) => prev.map((label) => label.positionMode === "attached" && label.attachedToId === drag.moduleId ? { ...label, x: label.x + frameDx, y: label.y + frameDy } : label));
+          setGraphics((prev) => prev.map((graphic) => graphic.positionMode === "attached" && graphic.attachedToId === drag.moduleId ? { ...graphic, x: graphic.x + frameDx, y: graphic.y + frameDy } : graphic));
+          setPlatforms((prev) => prev.map((platform) => platform.moduleId === drag.moduleId ? { ...platform, x: platform.x + frameDx, y: platform.y + frameDy } : platform));
+        }
+      }
+      if (drag.type === "transferGroup" && drag.transferGroupId) {
+        const group = transferGroupsRef.current.find((candidate) => candidate.id === drag.transferGroupId);
+        if (!group) return;
+        const world = toWorld(e.clientX, e.clientY);
+        const startWorld = toWorld(drag.startSX, drag.startSY);
+        const dx = world.x - startWorld.x;
+        const dy = world.y - startWorld.y;
+        if (Math.abs(dx) > 1 || Math.abs(dy) > 1) drag.moved = true;
+        if (!drag.moved) return;
+        let nextX = drag.startMX + dx;
+        let nextY = drag.startMY + dy;
+        if (snapEnabled) {
+          nextX = snapToGrid(nextX, pageGridSize);
+          nextY = snapToGrid(nextY, pageGridSize);
+        }
+        const lastX = drag.lastMX ?? drag.startMX;
+        const lastY = drag.lastMY ?? drag.startMY;
+        const frameDx = nextX - lastX;
+        const frameDy = nextY - lastY;
+        drag.lastMX = nextX;
+        drag.lastMY = nextY;
+        if (!frameDx && !frameDy) return;
+        const translated = translateModuleGroup({
+          modules: modulesRef.current,
+          connections: connectionsRef.current,
+          platforms: platformsRef.current,
+          labels: labelsRef.current,
+          graphics: graphicsRef.current,
+        }, group.moduleIds, frameDx, frameDy);
+        modulesRef.current = translated.modules;
+        connectionsRef.current = translated.connections;
+        platformsRef.current = translated.platforms;
+        labelsRef.current = translated.labels;
+        graphicsRef.current = translated.graphics;
+        setModules(translated.modules);
+        setConnections(translated.connections);
+        setPlatforms(translated.platforms);
+        setLabels(translated.labels);
+        setGraphics(translated.graphics);
+      }
+      if (drag.type === "bgImage" && drag.bgImageId) {
+        const w = toWorld(e.clientX, e.clientY);
+        const startW = toWorld(drag.startSX, drag.startSY);
+        const dx = w.x - startW.x;
+        const dy = w.y - startW.y;
+        if (Math.abs(dx) > 1 || Math.abs(dy) > 1) drag.moved = true;
+        let newX = drag.startMX + dx;
+        let newY = drag.startMY + dy;
+        if (snapEnabled) {
+          newX = snapToGrid(newX, pageGridSize);
+          newY = snapToGrid(newY, pageGridSize);
+        }
+        setBackgroundImages((prev) => prev.map((b) => (b.id === drag.bgImageId ? { ...b, x: newX, y: newY } : b)));
+      }
+      if (drag.type === "label" && drag.labelId) {
+        const w = toWorld(e.clientX, e.clientY);
+        const startW = toWorld(drag.startSX, drag.startSY);
+        const dx = w.x - startW.x;
+        const dy = w.y - startW.y;
+        if (Math.abs(dx) > 1 || Math.abs(dy) > 1) drag.moved = true;
+        let newX = drag.startMX + dx;
+        let newY = drag.startMY + dy;
+        if (snapEnabled) {
+          newX = snapToGrid(newX, pageGridSize);
+          newY = snapToGrid(newY, pageGridSize);
+        }
+        setLabels((prev) => prev.map((label) => {
+          if (label.id !== drag.labelId) return label;
+          const owner = label.positionMode === "attached" ? modulesRef.current.find((module) => module.id === label.attachedToId) : undefined;
+          return { ...label, x: newX, y: newY, offsetX: owner ? newX - owner.x : label.offsetX, offsetY: owner ? newY - owner.y : label.offsetY };
+        }));
+      }
+      if (drag.type === "platform" && drag.platformId) {
+        const w = toWorld(e.clientX, e.clientY);
+        const startW = toWorld(drag.startSX, drag.startSY);
+        let newX = drag.startMX + w.x - startW.x;
+        let newY = drag.startMY + w.y - startW.y;
+        if (Math.abs(newX - drag.startMX) > 1 || Math.abs(newY - drag.startMY) > 1) drag.moved = true;
+        if (snapEnabled) { newX = snapToGrid(newX, pageGridSize); newY = snapToGrid(newY, pageGridSize); }
+        setPlatforms((prev) => prev.map((platform) => platform.id === drag.platformId ? { ...platform, x: newX, y: newY } : platform));
+      }
+      if (drag.type === "graphic" && drag.graphicId) {
+        const w = toWorld(e.clientX, e.clientY);
+        const startW = toWorld(drag.startSX, drag.startSY);
+        let newX = drag.startMX + w.x - startW.x;
+        let newY = drag.startMY + w.y - startW.y;
+        if (Math.abs(newX - drag.startMX) > 1 || Math.abs(newY - drag.startMY) > 1) drag.moved = true;
+        if (snapEnabled) { newX = snapToGrid(newX, pageGridSize); newY = snapToGrid(newY, pageGridSize); }
+        setGraphics((prev) => prev.map((graphic) => {
+          if (graphic.id !== drag.graphicId) return graphic;
+          const owner = graphic.positionMode === "attached" ? modulesRef.current.find((module) => module.id === graphic.attachedToId) : undefined;
+          return { ...graphic, x: newX, y: newY, offsetX: owner ? newX - owner.x : graphic.offsetX, offsetY: owner ? newY - owner.y : graphic.offsetY };
+        }));
+      }
+      if (drag.type === "platformResize" && drag.platformId) {
+        const w = toWorld(e.clientX, e.clientY);
+        const startW = toWorld(drag.startSX, drag.startSY);
+        const width = Math.max(10, (drag.startWidth || 10) + w.x - startW.x);
+        const height = Math.max(4, (drag.startHeight || 4) + w.y - startW.y);
+        if (width !== drag.startWidth || height !== drag.startHeight) drag.moved = true;
+        setPlatforms((prev) => prev.map((platform) => platform.id === drag.platformId ? { ...platform, width, height } : platform));
+      }
+      if (drag.type === "graphicResize" && drag.graphicId) {
+        const w = toWorld(e.clientX, e.clientY);
+        const startW = toWorld(drag.startSX, drag.startSY);
+        const startWidth = drag.startWidth || 4;
+        const startHeight = drag.startHeight || 4;
+        const width = Math.max(4, startWidth + w.x - startW.x);
+        const height = Math.max(4, width * (startHeight / startWidth));
+        if (width !== startWidth || height !== startHeight) drag.moved = true;
+        setGraphics((prev) => prev.map((graphic) => graphic.id === drag.graphicId ? { ...graphic, width, height } : graphic));
+      }
+      // 控制点只保存中间位置与切线。端点和端点锚点每次都从模块端口派生。
+      if (drag.type === "controlPoint" && drag.connId && drag.cpId) {
+        const w = toWorld(e.clientX, e.clientY);
+        const startW = toWorld(drag.startSX, drag.startSY);
+        const dx = w.x - startW.x;
+        const dy = w.y - startW.y;
+        if (Math.abs(dx) > 1 || Math.abs(dy) > 1) drag.moved = true;
+        if (!drag.moved) return;
+        setManualCurveEditingId(drag.connId ?? null);
+        let newX = drag.startMX + dx;
+        let newY = drag.startMY + dy;
+        if (snapEnabled) { newX = snapToGrid(newX, pageGridSize); newY = snapToGrid(newY, pageGridSize); }
+        setConnections((prev) => updateConnectionAndPairedRail(prev, drag.connId!, (c) => {
+          const geometry = geometryForConnection(c, prev, modulesRef.current, resolveTemplatesFor(modulesRef.current));
+          if (!geometry) return c;
+          const cps = geometry.controlPoints.map((p) => (p.id === drag.cpId
+            ? { ...p, x: newX, y: newY, curveKind: undefined }
+            : p));
+          return { ...c, autoCurve: false, controlPoints: cps };
+        }));
+      }
+      // 曲率手柄拖拽：调整 handleX/handleY 偏移
+      if (drag.type === "controlPointHandle" && drag.connId && drag.cpId) {
+        const w = toWorld(e.clientX, e.clientY);
+        const startW = toWorld(drag.startSX, drag.startSY);
+        const dx = w.x - startW.x;
+        const dy = w.y - startW.y;
+        if (Math.abs(dx) > 1 || Math.abs(dy) > 1) drag.moved = true;
+        if (!drag.moved) return;
+        setManualCurveEditingId(drag.connId);
+        const newHX = (drag.startHX || 0) + dx;
+        const newHY = (drag.startHY || 0) + dy;
+        setConnections((prev) => updateConnectionAndPairedRail(prev, drag.connId!, (c) => {
+          const geometry = geometryForConnection(c, prev, modulesRef.current, resolveTemplatesFor(modulesRef.current));
+          if (!geometry) return c;
+          const cps = geometry.controlPoints.map((p) => (p.id === drag.cpId
+            ? { ...p, curved: true, handleX: newHX, handleY: newHY, directionOnly: true, tangentDirection: Math.atan2(newHY, newHX) * 180 / Math.PI, curveKind: undefined }
+            : p));
+          return { ...c, autoCurve: false, controlPoints: cps };
+        }));
+      }
+    }
+    function handleMove(e: MouseEvent) {
+      latestMove = e;
+      if (animationFrame) return;
+      animationFrame = window.requestAnimationFrame(() => {
+        animationFrame = 0;
+        const event = latestMove;
+        latestMove = null;
+        if (event) processMove(event);
+      });
+    }
+    function handleUp() {
+      if (animationFrame) {
+        window.cancelAnimationFrame(animationFrame);
+        animationFrame = 0;
+        const event = latestMove;
+        latestMove = null;
+        if (event) processMove(event);
+      }
+      const drag = dragRef.current;
+      // 框选结束：计算选中对象（使用 ref 读取最新数据，避免闭包陈旧导致无法选中）
+      if (drag.type === "selectionBox") {
+        const box = selectionBoxRef.current;
+        if (drag.moved && box) {
+          const w1 = toWorld(box.x1, box.y1);
+          const w2 = toWorld(box.x2, box.y2);
+          const selRect = { x: Math.min(w1.x, w2.x), y: Math.min(w1.y, w2.y), w: Math.abs(w2.x - w1.x), h: Math.abs(w2.y - w1.y) };
+          const ids: string[] = [];
+          // 模块
+          for (const m of modulesRef.current) {
+            if (!isOnActivePage(m.pageId)) continue;
+            if (m.locked || isLayerLocked(m.layerId)) continue;
+            const t = resolveTemplatesFor(modulesRef.current).get(m.id) || templateMap.get(m.templateId);
+            if (!t) continue;
+            if (rectsIntersect(selRect, { x: m.x, y: m.y, w: t.width, h: t.height })) ids.push(m.id);
+          }
+          // 标签
+          for (const l of labelsRef.current) {
+            if (!isOnActivePage(l.pageId)) continue;
+            if (l.locked || isLayerLocked(l.layerId)) continue;
+            const lw = Math.max(20, l.text.length * l.fontSize * 0.6);
+            const lh = l.fontSize * 1.4;
+            if (rectsIntersect(selRect, { x: l.x, y: l.y, w: lw, h: lh })) ids.push(l.id);
+          }
+          // 独立站台
+          for (const p of platformsRef.current) {
+            if (!isOnActivePage(p.pageId)) continue;
+            if (p.locked || isLayerLocked(p.layerId)) continue;
+            if (rectsIntersect(selRect, { x: p.x, y: p.y, w: p.width, h: p.height })) ids.push(p.id);
+          }
+          // 图标
+          for (const g of graphicsRef.current) {
+            if (!isOnActivePage(g.pageId)) continue;
+            if (g.locked || isLayerLocked(g.layerId)) continue;
+            if (rectsIntersect(selRect, { x: g.x, y: g.y, w: g.width, h: g.height })) ids.push(g.id);
+          }
+          // 背景图
+          for (const b of backgroundImagesRef.current) {
+            if (!isOnActivePage(b.pageId)) continue;
+            if (b.locked || isLayerLocked(b.layerId)) continue;
+            const bw = b.naturalWidth * b.scale;
+            const bh = b.naturalHeight * b.scale;
+            if (rectsIntersect(selRect, { x: b.x, y: b.y, w: bw, h: bh })) ids.push(b.id);
+          }
+          // 连接
+          for (const conn of connectionsRef.current) {
+            if (!isOnActivePage(conn.pageId)) continue;
+            if (isLayerLocked(conn.layerId)) continue;
+            const tracks = conn.tracks;
+            if (!tracks.length) continue;
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+            for (const t of tracks) {
+              minX = Math.min(minX, t.x1, t.x2);
+              minY = Math.min(minY, t.y1, t.y2);
+              maxX = Math.max(maxX, t.x1, t.x2);
+              maxY = Math.max(maxY, t.y1, t.y2);
+            }
+            if (maxX >= minX && rectsIntersect(selRect, { x: minX, y: minY, w: maxX - minX, h: maxY - minY })) ids.push(conn.id);
+          }
+          // 换乘组
+          for (const tg of transferGroupsRef.current) {
+            if (!isOnActivePage(tg.pageId)) continue;
+            if (!tg.visible || tg.locked || isLayerLocked(tg.layerId)) continue;
+            const bounds = getTransferGroupBounds(tg);
+            if (bounds && rectsIntersect(selRect, { x: bounds.x, y: bounds.y, w: bounds.w, h: bounds.h })) ids.push(tg.id);
+          }
+          setSelectedIds(ids);
+          if (ids.length > 0) setStatus(`已选中 ${ids.length} 个对象`);
+        } else if (!drag.moved) {
+          // 轻点空白（未移动）→ 取消选中
+          setSelectedIds([]);
+        }
+        setSelectionBox(null);
+        dragRef.current = { ...drag, type: "none", moved: false };
+        return;
+      }
+      if (drag.type === "selection") {
+        if (!drag.moved) {
+          history.discardSnapshot();
+        } else {
+          setConnections((previous) => {
+            const synchronized = synchronizeConnectionTracks(previous, modulesRef.current, resolveTemplatesFor(modulesRef.current));
+            connectionsRef.current = synchronized;
+            return synchronized;
+          });
+          setHasUnsavedChanges(true);
+          setStatus(`已移动 ${drag.selectionIds?.length ?? 0} 个框选对象`);
+          setTimeout(() => applyLabelAvoidance(false), 0);
+        }
+        dragRef.current = { ...drag, type: "none", moved: false };
+        return;
+      }
+      if (drag.type === "module" && !drag.moved && drag.moduleId) {
+        // 点击未移动 → 若 mousedown 前已选中则取消选中，否则选中
+        history.discardSnapshot();
+        if (drag.wasSelected) {
+          setSelectedIds((prev) => prev.filter((id) => id !== drag.moduleId));
+        } else {
+          setSelectedIds([drag.moduleId]);
+        }
+      }
+      if (drag.type === "module" && drag.moved) {
+        // Connection endpoints derive from ports while rendering. Refresh the
+        // stored cache once the drag finishes so saved projects stay portable.
+        setConnections((prev) => synchronizeConnectionTracks(prev, modulesRef.current, resolveTemplatesFor(modulesRef.current)));
+        setHasUnsavedChanges(true);
+        // 模块停稳后重新求解站名/图标避让；延迟一帧等 refs 刷新，且不单独落历史快照（并入本次拖动事务）。
+        setTimeout(() => applyLabelAvoidance(false), 0);
+      }
+      if (drag.type === "transferGroup" && !drag.moved && drag.transferGroupId) {
+        history.discardSnapshot();
+        if (drag.wasSelected) {
+          setSelectedIds((previous) => previous.filter((id) => id !== drag.transferGroupId));
+        } else {
+          setSelectedIds([drag.transferGroupId]);
+        }
+      }
+      if (drag.type === "transferGroup" && drag.moved && drag.transferGroupId) {
+        setConnections((previous) => {
+          const synchronized = synchronizeConnectionTracks(previous, modulesRef.current, resolveTemplatesFor(modulesRef.current));
+          connectionsRef.current = synchronized;
+          return synchronized;
+        });
+        setHasUnsavedChanges(true);
+        const group = transferGroupsRef.current.find((candidate) => candidate.id === drag.transferGroupId);
+        setStatus(group ? `已整体移动换乘组「${group.name}」` : "已整体移动换乘组");
+        setTimeout(() => applyLabelAvoidance(false), 0);
+      }
+      if (drag.type === "bgImage" && !drag.moved && drag.bgImageId) {
+        history.discardSnapshot();
+        if (drag.wasSelected) {
+          setSelectedIds((prev) => prev.filter((id) => id !== drag.bgImageId));
+        } else {
+          setSelectedIds([drag.bgImageId]);
+        }
+      }
+      if (drag.type === "bgImage" && drag.moved) {
+        setHasUnsavedChanges(true);
+      }
+      if (drag.type === "label" && !drag.moved && drag.labelId) {
+        history.discardSnapshot();
+        if (drag.wasSelected) {
+          setSelectedIds((prev) => prev.filter((id) => id !== drag.labelId));
+        } else {
+          setSelectedIds([drag.labelId]);
+        }
+      }
+
+      if (drag.type === "platform" && !drag.moved && drag.platformId) {
+        history.discardSnapshot();
+        if (drag.wasSelected) {
+          setSelectedIds((prev) => prev.filter((id) => id !== drag.platformId));
+        } else {
+          setSelectedIds([drag.platformId]);
+        }
+      }
+      if (drag.type === "platform" && drag.moved) {
+        setHasUnsavedChanges(true);
+        // 拖拽完成后才剥离 moduleId，使站台独立于原模块
+        setPlatforms((prev) => prev.map((p) => p.id === drag.platformId ? { ...p, moduleId: undefined } : p));
+      }
+      if (drag.type === "graphic" && !drag.moved && drag.graphicId) {
+        history.discardSnapshot();
+        if (drag.wasSelected) {
+          setSelectedIds((prev) => prev.filter((id) => id !== drag.graphicId));
+        } else {
+          setSelectedIds([drag.graphicId]);
+        }
+      }
+      if (drag.type === "graphic" && drag.moved) setHasUnsavedChanges(true);
+      if ((drag.type === "platformResize" || drag.type === "graphicResize") && !drag.moved) {
+        history.discardSnapshot();
+      }
+      if ((drag.type === "platformResize" || drag.type === "graphicResize") && drag.moved) setHasUnsavedChanges(true);
+      if ((drag.type === "controlPoint" || drag.type === "controlPointHandle") && !drag.moved) {
+        history.discardSnapshot();
+      }
+      if ((drag.type === "controlPoint" || drag.type === "controlPointHandle") && drag.moved) {
+        setHasUnsavedChanges(true);
+        if (drag.connId) {
+          const conn = connections.find((c) => c.id === drag.connId);
+          if (conn?.autoCurve !== false) {
+            setConnections((prev) => updateConnectionAndPairedRail(prev, drag.connId!, (c) => ({ ...c, autoCurve: false })));
+            setStatus("控制点已手动调整，已切换为手动模式");
+          }
+        }
+      }
+      dragRef.current = { ...drag, type: "none", moved: false };
+    }
+    window.addEventListener("mousemove", handleMove);
+    window.addEventListener("mouseup", handleUp);
+    return () => {
+      if (animationFrame) window.cancelAnimationFrame(animationFrame);
+      window.removeEventListener("mousemove", handleMove);
+      window.removeEventListener("mouseup", handleUp);
+    };
+  }, [toWorld, snapEnabled, templateMap, pageGridSize]);
+
+  /** 滚轮缩放 */
+  function handleWheel(e: React.WheelEvent<SVGSVGElement>) {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? 0.9 : 1.1;
+    const newScale = Math.max(0.15, Math.min(4, viewport.scale * delta));
+    // 以鼠标为中心缩放
+    const svg = svgRef.current;
+    if (!svg) return;
+    const rect = svg.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    const worldX = (mx - viewport.panX) / viewport.scale;
+    const worldY = (my - viewport.panY) / viewport.scale;
+    setViewport({
+      panX: mx - worldX * newScale,
+      panY: my - worldY * newScale,
+      scale: newScale,
+    });
+  }
+
+  useEffect(() => {
+    saveProjectActionRef.current = handleSaveProject;
+    deleteSelectedActionRef.current = deleteSelected;
+  });
+
+  /** 键盘快捷键 */
+  useEffect(() => {
+    function handleKey(e: KeyboardEvent) {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || e.target instanceof HTMLTextAreaElement) return;
+      // Ctrl+Z 撤销 / Ctrl+Shift+Z 或 Ctrl+Y 重做
+      if ((e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z")) {
+        e.preventDefault();
+        if (e.shiftKey) {
+          handleRedo();
+        } else {
+          handleUndo();
+        }
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && (e.key === "y" || e.key === "Y")) {
+        e.preventDefault();
+        handleRedo();
+        return;
+      }
+      // Ctrl+S 保存工程
+      if ((e.ctrlKey || e.metaKey) && (e.key === "s" || e.key === "S")) {
+        e.preventDefault();
+        saveProjectActionRef.current();
+        return;
+      }
+      if (e.key === "Delete" || e.key === "Backspace") {
+        if (selectedIds.length) {
+          e.preventDefault();
+          deleteSelectedActionRef.current();
+        }
+      } else if (e.key === "Escape") {
+        const wasConnecting = activeTool === "connect" || activeTool === "auto" || connectFrom;
+        const wasPlacing = activeTool === "shape" && pendingElement !== null;
+        setActiveTool("auto");
+        setActiveTemplateId(null);
+        setPendingElement(null);
+        setConnectFrom(null);
+        setSelectedIds([]);
+        if (wasConnecting) setStatus("已取消连接");
+        else if (wasPlacing) setStatus("已取消放置");
+      } else if (e.key === "v" || e.key === "V") {
+        setActiveTool("select");
+      } else if (e.key === "h" || e.key === "H") {
+        setActiveTool("pan");
+      } else if (e.key === "c" || e.key === "C") {
+        setActiveTool("connect");
+        setConnectFrom(null);
+        setStatus("连接工具：请选择起点端口");
+      }
+    }
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [selectedIds, handleUndo, handleRedo, backgroundImages, modules, labels, activeTool, connectFrom, pendingElement]);
+
+  /** 右键菜单 */
+  function handleContextMenu(e: React.MouseEvent) {
+    e.preventDefault();
+    const selModCount = modules.filter((m) => selectedIds.includes(m.id)).length;
+    if (selModCount >= 2) {
+      setContextMenu({ x: e.clientX, y: e.clientY });
+    }
+  }
+
+  // 关闭右键菜单（Esc 或点击外部）
+  useEffect(() => {
+    if (!contextMenu) return;
+    const close = () => setContextMenu(null);
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") close(); };
+    const onClick = (e: MouseEvent) => {
+      if (contextMenu) close();
+    };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("mousedown", onClick);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("mousedown", onClick);
+    };
+  }, [contextMenu]);
+
+  // ── 导出 ──
+
+  function getExportBounds(): ExportBounds {
+    if (exportScope !== "selection") return { x: 0, y: 0, width: pageWidth, height: pageHeight };
+    const bounds: Array<{ x: number; y: number; width: number; height: number }> = [];
+    modules.filter((item) => isOnActivePage(item.pageId) && selectedIds.includes(item.id)).forEach((item) => {
+      const template = resolvedTemplateMap.get(item.id) || templateMap.get(item.templateId);
+      if (template) bounds.push({ x: item.x, y: item.y, width: template.width, height: template.height });
+    });
+    backgroundImages.filter((item) => isOnActivePage(item.pageId) && selectedIds.includes(item.id)).forEach((item) => {
+      bounds.push({ x: item.x, y: item.y, width: item.naturalWidth * item.scale, height: item.naturalHeight * item.scale });
+    });
+    labels.filter((item) => isOnActivePage(item.pageId) && selectedIds.includes(item.id)).forEach((item) => {
+      bounds.push({ x: item.x - item.text.length * item.fontSize * 0.35, y: item.y - item.fontSize, width: Math.max(item.fontSize, item.text.length * item.fontSize * 0.7), height: item.fontSize * 1.5 });
+    });
+    connections.filter((item) => isOnActivePage(item.pageId) && selectedIds.includes(item.id)).forEach((item) => {
+      const tracks = rebuildConnectionTrackCache(item);
+      if (!tracks.length) return;
+      const xs = tracks.flatMap((track) => [track.x1, track.x2]);
+      const ys = tracks.flatMap((track) => [track.y1, track.y2]);
+      bounds.push({ x: Math.min(...xs), y: Math.min(...ys), width: Math.max(...xs) - Math.min(...xs), height: Math.max(...ys) - Math.min(...ys) });
+    });
+    transferGroups.filter((item) => isOnActivePage(item.pageId) && selectedIds.includes(item.id)).forEach((item) => {
+      const groupBounds = getTransferGroupBounds(item);
+      if (groupBounds) bounds.push({ x: groupBounds.x, y: groupBounds.y, width: groupBounds.w, height: groupBounds.h });
+    });
+    if (!bounds.length) return { x: 0, y: 0, width: pageWidth, height: pageHeight };
+    const padding = 24;
+    const left = Math.max(0, Math.min(...bounds.map((item) => item.x)) - padding);
+    const top = Math.max(0, Math.min(...bounds.map((item) => item.y)) - padding);
+    const right = Math.min(pageWidth, Math.max(...bounds.map((item) => item.x + item.width)) + padding);
+    const bottom = Math.min(pageHeight, Math.max(...bounds.map((item) => item.y + item.height)) + padding);
+    return { x: left, y: top, width: Math.max(1, right - left), height: Math.max(1, bottom - top) };
+  }
+
+  function exportSvg() {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const bounds = getExportBounds();
+    const str = svgToString(svg, bounds, exportIncludeBackground, exportTransparent);
+    downloadBlob(new Blob([str], { type: "image/svg+xml;charset=utf-8" }), `${activePage?.name || "配线图"}.svg`);
+    setStatus(`已导出「${activePage?.name || "配线图"}」SVG`);
+  }
+
+  function exportPng(scale: number) {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const bounds = getExportBounds();
+    const str = svgToString(svg, bounds, exportIncludeBackground, exportTransparent);
+    const w = Math.round(bounds.width * scale);
+    const h = Math.round(bounds.height * scale);
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      if (!exportTransparent) {
+        ctx.fillStyle = activePage?.backgroundColor || "white";
+        ctx.fillRect(0, 0, w, h);
+      }
+      ctx.drawImage(img, 0, 0, w, h);
+      canvas.toBlob((blob) => {
+        if (blob) downloadBlob(blob, `${activePage?.name || "配线图"}_${scale}x.png`);
+        setStatus(`已导出「${activePage?.name || "配线图"}」${scale}× PNG`);
+      });
+    };
+    img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(str);
+  }
+
+  function createNewCanvas() {
+    const page = createCanvasPage({
+      id: genId("page"), name: newCanvasDraft.name, width: newCanvasDraft.width, height: newCanvasDraft.height,
+      backgroundColor: newCanvasDraft.backgroundColor, gridSize: newCanvasDraft.gridSize, showGrid: newCanvasDraft.showGrid,
+      orientation: newCanvasDraft.orientation, layerRootIds: layers.filter((layer) => layer.parentId === null).map((layer) => layer.id),
+    });
+    setPages((prev) => [...prev, page]);
+    setActivePageId(page.id);
+    setViewport(page.viewport);
+    setShowGrid(page.showGrid);
+    setSelectedIds([]);
+    setNewCanvasOpen(false);
+    setHasUnsavedChanges(true);
+    setStatus(`已新建画布「${page.name}」`);
+  }
+
+  function switchCanvasPage(pageId: string) {
+    const nextPage = pages.find((page) => page.id === pageId);
+    if (!nextPage || pageId === activePageId) return;
+    setPages((prev) => prev.map((page) => page.id === activePageId ? { ...page, viewport, showGrid } : page));
+    setActivePageId(pageId);
+    setViewport(nextPage.viewport);
+    setShowGrid(nextPage.showGrid);
+    setSelectedIds([]);
+    setStatus(`已切换至画布「${nextPage.name}」`);
+  }
+
+  function renameActivePage() {
+    const name = window.prompt("画布名称", activePage?.name || "");
+    if (!name?.trim() || !activePage) return;
+    history.captureSnapshot("重命名画布"); setPages((prev) => prev.map((page) => page.id === activePage.id ? { ...page, name: name.trim() } : page)); setHasUnsavedChanges(true);
+  }
+  function deleteActivePage() {
+    if (!activePage || pages.length < 2) return;
+    history.captureSnapshot("删除画布"); const next = pages.filter((page) => page.id !== activePage.id); setPages(next); setActivePageId(next[0].id); setViewport(next[0].viewport); setHasUnsavedChanges(true);
+  }
+  function fitCanvas() { const svg = svgRef.current; if (!svg) return; const scale = Math.min(svg.clientWidth / pageWidth, svg.clientHeight / pageHeight) * 0.9; setViewport({ scale, panX: (svg.clientWidth - pageWidth * scale) / 2, panY: (svg.clientHeight - pageHeight * scale) / 2 }); }
+  function centerCanvas() { const svg = svgRef.current; if (!svg) return; setViewport((prev) => ({ ...prev, panX: (svg.clientWidth - pageWidth * prev.scale) / 2, panY: (svg.clientHeight - pageHeight * prev.scale) / 2 })); }
+
+  function applyCanvasPreset(presetId: string) {
+    const preset = CANVAS_PRESETS.find((item) => item.id === presetId);
+    if (preset) {
+      setNewCanvasDraft((prev) => ({
+        ...prev,
+        width: preset.width,
+        height: preset.height,
+        orientation: preset.width >= preset.height ? "landscape" : "portrait",
+      }));
+    }
+  }
+
+  // ── 工程保存/加载 ──
+
+  function editorDocumentFor(project: ProjectFile): JsonEditorDocument {
+    return JSON.parse(projectToJson(project)) as JsonEditorDocument;
+  }
+
+  async function persistWiringProject(project: ProjectFile) {
+    await Promise.all([
+      saveToIndexedDB(project, autosaveKey),
+      documentStore.save(projectId, "wiring", editorDocumentFor(project)),
+    ]);
+  }
+
+  /** 立即保存到当前城市项目；公共工程文件统一从项目首页导入、导出。 */
+  async function handleSaveProject() {
+    const project = serializeProject({
+      projectName,
+      modules,
+      connections,
+      layers,
+      viewport,
+      backgroundImages,
+      labels,
+      transferGroups,
+      platforms, graphics, assets, sourceLines, sourceStationsOnLine, physicalStations, sourceMappings, filters: filterState, unresolvedChanges, pendingPlacement,
+      servicePatterns,
+      sourceDataSnapshot: data || undefined,
+      pages: pages.map((page) => page.id === activePageId ? { ...page, viewport, showGrid } : page),
+    });
+    setSaveStatus("saving");
+    try {
+      await persistWiringProject(project);
+      setSaveStatus("saved");
+      setHasUnsavedChanges(false);
+      setStatus("已保存到当前城市项目");
+    } catch (err) {
+      setSaveStatus("error");
+      setStatus(`保存失败：${err instanceof Error ? err.message : "未知错误"}`);
+    }
+  }
+
+  // ── 自动保存到 IndexedDB（防抖） ──
+  useEffect(() => {
+    if (!hasUnsavedChanges) return;
+    const timer = window.setTimeout(async () => {
+      setSaveStatus("saving");
+      try {
+        const project = serializeProject({
+          projectName,
+          modules,
+          connections,
+          layers,
+          viewport,
+          backgroundImages,
+          labels,
+          transferGroups,
+          platforms, graphics, assets, sourceLines, sourceStationsOnLine, physicalStations, sourceMappings, filters: filterState, unresolvedChanges, pendingPlacement,
+          servicePatterns,
+          sourceDataSnapshot: data || undefined,
+          pages: pages.map((page) => page.id === activePageId ? { ...page, viewport, showGrid } : page),
+        });
+        await persistWiringProject(project);
+        setSaveStatus("saved");
+      } catch {
+        setSaveStatus("error");
+      }
+    }, 2000);
+    return () => window.clearTimeout(timer);
+  }, [modules, connections, layers, viewport, projectName, hasUnsavedChanges, backgroundImages, labels, transferGroups, servicePatterns, pages, activePageId, showGrid, data, platforms, graphics, assets, sourceLines, sourceStationsOnLine, physicalStations, sourceMappings, filterState, unresolvedChanges, pendingPlacement, autosaveKey, documentStore, projectId]);
+
+  // ── 启动时按顺序加载当前 CSV，再恢复画布工程 ──
+  useEffect(() => {
+    let cancelled = false;
+    setStatus("正在读取项目 CSV 与配线图…");
+    (async () => {
+      const normalized = normalizeTransitData(await projectRepository.loadTransitData(projectId));
+      const [storedDocument, compatibleProject] = await Promise.all([
+        documentStore.load<Record<string, unknown>>(projectId, "wiring").catch(() => null),
+        loadFromIndexedDB(autosaveKey).catch(() => null),
+      ]);
+      let project = newestWiringProject(
+        storedDocument ? migrateProjectSchema(storedDocument as unknown as ProjectFile) : null,
+        compatibleProject,
+      );
+      if (!project && projectId === DEFAULT_PROJECT_ID) {
+        const legacy = await loadFromIndexedDB("autosave");
+        if (legacy) {
+          await persistWiringProject(legacy);
+          project = legacy;
+        }
+      }
+      if (cancelled) return;
+      if (project) {
+          const synchronized = synchronizeWiringProjectSource(project, normalized);
+          project = synchronized;
+          setProjectName(project.projectInfo?.name || "未命名配线图");
+          setModules(project.modules);
+          setConnections(project.connections || []);
+          if (project.layers?.length) setLayers(project.layers);
+          if (project.backgroundImages?.length) setBackgroundImages(project.backgroundImages);
+          if (project.labels?.length) setLabels(project.labels);
+          if (project.transferGroups?.length) setTransferGroups(project.transferGroups);
+          setPlatforms(project.platforms || []); setGraphics(project.graphics || []); setAssets(project.assets || []); setSourceLines(project.sourceLines || []); setSourceStationsOnLine(project.sourceStationsOnLine || []); setPhysicalStations(project.physicalStations || []); setSourceMappings(project.sourceMappings || []); setFilterState(project.filters || { lineIds: [] }); setUnresolvedChanges(project.unresolvedChanges || []); setPendingPlacement(project.pendingPlacement || null);
+          if (project.servicePatterns?.length) setServicePatterns(project.servicePatterns);
+          setData(normalized);
+          const restoredPages = project.pages?.length ? project.pages : [createCanvasPage({ id: "page-1", name: "主画布" })];
+          setPages(restoredPages);
+          setActivePageId(restoredPages[0].id);
+          setShowGrid(restoredPages[0].showGrid);
+          setViewport(restoredPages[0].viewport);
+          setStatus(project.unresolvedChanges.length
+            ? `已恢复配线图，并同步当前 CSV（检测到 ${project.unresolvedChanges.length} 项变化）`
+            : "已恢复配线图，站点数据已与当前 CSV 同步");
+      } else {
+        const identity = buildSourceIdentityRecords(normalized);
+        setData(normalized);
+        setSourceLines(identity.sourceLines);
+        setSourceStationsOnLine(identity.sourceStationsOnLine);
+        setStatus("数据已载入");
+      }
+    })().catch((reason) => {
+      if (cancelled) return;
+      setError(reason instanceof Error ? reason.message : "读取失败");
+      setData(normalizeTransitData({ schemaVersion: 1, lines: [], stations: [], transfers: [], layout: DEFAULT_LAYOUT, activeStyleTemplate: "classic", layoutTemplates: { classic: DEFAULT_LAYOUT, loop: DEFAULT_LOOP_LAYOUT, scenic: DEFAULT_SCENIC_LAYOUT, pulse: DEFAULT_PULSE_LAYOUT } }));
+      setStatus("项目数据读取失败");
+    });
+    return () => { cancelled = true; };
+  }, [autosaveKey, projectId, projectRepository, documentStore]);
+
+  // ── 工具栏操作 ──
+
+  function selectTemplate(templateId: string) {
+    setSelectedIds([]);
+    setActiveTemplateId(templateId);
+    setPendingElement(null);
+    setActiveTool("place");
+    setStatus(`已选择模板，点击画布放置`);
+  }
+
+  function connectionFailureMessage(reason: string): string {
+    const messages: Record<string, string> = {
+      "same-port": "请选择另一个端口",
+      "same-module": "不能连接同一模块内的端口",
+      "missing-port": "端口不存在，无法建立连接",
+      role: "端口角色不匹配：上、下行及侧线必须分别对应",
+      duplicate: "该连接已存在",
+      occupied: "端口已被占用，请先删除原有连接",
+    };
+    return messages[reason] || "无法建立连接";
+  }
+
+  function makeConnection(
+    from: NonNullable<ReturnType<typeof getConnectionEndpoint>>,
+    to: NonNullable<ReturnType<typeof getConnectionEndpoint>>,
+    connectionModules: DiagramModule[] = modules,
+    pairedEndpoints?: PairedCurveEndpoints,
+  ): ModuleConnection {
+    const endpoints = curveEndpointsFor(from, to);
+    const ids = {
+      from: `${from.moduleId}:${from.portId}:endpoint-from`,
+      middle: `${from.moduleId}:${from.portId}:${to.moduleId}:${to.portId}:middle`,
+      to: `${to.moduleId}:${to.portId}:endpoint-to`,
+    };
+    const autoControlPoints = pairedEndpoints
+      ? createPairedAutoControlPoints(endpoints, pairedEndpoints, ids)
+      : createAutoControlPoints(endpoints.from, endpoints.to, endpoints.fromDir, endpoints.toDir, ids);
+
+    const connection: ModuleConnection = {
+      id: genId("conn"),
+      fromModuleId: from.moduleId,
+      fromPortId: from.portId,
+      toModuleId: to.moduleId,
+      toPortId: to.portId,
+      tracks: [],
+      crossingType: "plain",
+      lineStyle: "solid",
+      crossingPoints: [],
+      controlPoints: autoControlPoints,
+      autoCurve: true,
+      layerId: defaultConnectionLayerId(
+        connectionModules.find((module) => module.id === from.moduleId),
+        connectionModules.find((module) => module.id === to.moduleId),
+        sourceLines,
+      ),
+      zIndexMode: "auto",
+      zIndex: connections.length,
+      pageId: activePageId,
+      createdOrder: Date.now(),
+    };
+    return { ...connection, tracks: getConnectionTracks(connection, connectionModules, resolveTemplatesFor(connectionModules)) };
+  }
+
+  /** Finds the closest destination that would be accepted by the connection click handler. */
+  function previewDestinationFor(source: NonNullable<ReturnType<typeof getConnectionEndpoint>>) {
+    let closest: { endpoint: NonNullable<ReturnType<typeof getConnectionEndpoint>>; distance: number } | null = null;
+    for (const module of modules) {
+      if (!isOnActivePage(module.pageId) || !isModuleVisible(module)) continue;
+      const template = resolvedTemplateMap.get(module.id) || templateMap.get(module.templateId);
+      if (!template) continue;
+      for (const port of template.ports) {
+        const destination = getConnectionEndpoint(module.id, port.id, modules, resolvedTemplateMap);
+        if (!destination || !validateConnection(source, destination, connections).valid) continue;
+        const position = worldPortPosition(module, template, port.id);
+        const distance = Math.hypot(mouseWorld.x - position.x, mouseWorld.y - position.y);
+        if (distance <= PORT_SNAP_RADIUS && (!closest || distance < closest.distance)) {
+          closest = { endpoint: destination, distance };
+        }
+      }
+    }
+    return closest?.endpoint || null;
+  }
+
+  /** Uses the same endpoint and automatic-curve rules as a saved connection. */
+  function connectionPreviewPaths(source: NonNullable<ReturnType<typeof getConnectionEndpoint>>, destination: NonNullable<ReturnType<typeof getConnectionEndpoint>>) {
+    const primaryEndpoints = curveEndpointsFor(source, destination);
+    const ids = { from: "preview:endpoint-from", middle: "preview:middle", to: "preview:endpoint-to" };
+    let pairedEndpoints: PairedCurveEndpoints | undefined;
+    let pairedPath: string | undefined;
+
+    if (doubleTrackConnect) {
+      const sourcePartner = findDoubleTrackPartner(source.template, source.port);
+      const destinationPartner = findDoubleTrackPartner(destination.template, destination.port);
+      if (sourcePartner && destinationPartner) {
+        const pairedSource = getConnectionEndpoint(source.moduleId, sourcePartner.id, modules, resolvedTemplateMap);
+        const pairedDestination = getConnectionEndpoint(destination.moduleId, destinationPartner.id, modules, resolvedTemplateMap);
+        if (validateConnection(pairedSource, pairedDestination, connections).valid) {
+          pairedEndpoints = curveEndpointsFor(pairedSource!, pairedDestination!);
+          pairedPath = buildPairedOffsetPathD(pairedEndpoints, primaryEndpoints) || undefined;
+        }
+      }
+    }
+
+    const primaryControlPoints = pairedEndpoints
+      ? createPairedAutoControlPoints(primaryEndpoints, pairedEndpoints, ids)
+      : createAutoControlPoints(primaryEndpoints.from, primaryEndpoints.to, primaryEndpoints.fromDir, primaryEndpoints.toDir, ids);
+    const primaryPath = pairedEndpoints
+      ? buildPairedOffsetPathD(primaryEndpoints, pairedEndpoints) || buildControlPointPathD(primaryEndpoints.from, primaryEndpoints.to, primaryControlPoints, primaryEndpoints.fromDir, primaryEndpoints.toDir)
+      : buildControlPointPathD(primaryEndpoints.from, primaryEndpoints.to, primaryControlPoints, primaryEndpoints.fromDir, primaryEndpoints.toDir);
+    return pairedPath ? [primaryPath, pairedPath] : [primaryPath];
+  }
+
+  /** Connection tool: choose two compatible ports. Standard main pairs can be created together. */
+  function handlePortClick(e: React.MouseEvent, mod: DiagramModule, portId: string) {
+    e.stopPropagation();
+    if (activeTool !== "connect" && activeTool !== "auto") return;
+    const destination = getConnectionEndpoint(mod.id, portId, modules, resolvedTemplateMap);
+    if (!destination) return;
+
+    if (!connectFrom) {
+      if (portIsOccupied(connections, mod.id, portId)) {
+        setStatus("端口已被占用，请先删除原有连接");
+        return;
+      }
+      setConnectFrom({ moduleId: mod.id, portId });
+      setStatus("已选择起点端口，点击兼容端口完成连接 · Esc 或右键取消");
+      return;
+    }
+
+    if (connectFrom.moduleId === mod.id && connectFrom.portId === portId) {
+      setConnectFrom(null);
+      setStatus("已取消连接");
+      return;
+    }
+
+    const source = getConnectionEndpoint(connectFrom.moduleId, connectFrom.portId, modules, resolvedTemplateMap);
+    const validation = validateConnection(source, destination, connections);
+    if (!validation.valid) {
+      setStatus(connectionFailureMessage(validation.reason));
+      return;
+    }
+
+    const created = [makeConnection(source!, destination)];
+    if (doubleTrackConnect) {
+      const sourcePartner = findDoubleTrackPartner(source!.template, source!.port);
+      const destinationPartner = findDoubleTrackPartner(destination.template, destination.port);
+      if (sourcePartner && destinationPartner) {
+        const pairedSource = getConnectionEndpoint(source!.moduleId, sourcePartner.id, modules, resolvedTemplateMap);
+        const pairedDestination = getConnectionEndpoint(destination.moduleId, destinationPartner.id, modules, resolvedTemplateMap);
+        const pairedValidation = validateConnection(pairedSource, pairedDestination, connections);
+        if (pairedValidation.valid) {
+          const primaryEndpoints = curveEndpointsFor(source!, destination);
+          const secondaryEndpoints = curveEndpointsFor(pairedSource!, pairedDestination!);
+          const primary = makeConnection(source!, destination, modules, secondaryEndpoints);
+          const pairedConnection = makeConnection(pairedSource!, pairedDestination!, modules, primaryEndpoints);
+          created[0] = { ...primary, pairedConnectionId: pairedConnection.id };
+          created.push({ ...pairedConnection, pairedConnectionId: primary.id });
+        }
+      }
+    }
+    history.captureSnapshot("手动连接");
+    setConnections((prev) => [...prev, ...created]);
+    setConnectFrom(null);
+    setStatus(created.length === 2 ? "已创建双线区间连接" : "已创建单线连接");
+    setHasUnsavedChanges(true);
+  }
+
+  function zoomBy(factor: number) {
+    const newScale = Math.max(0.15, Math.min(4, viewport.scale * factor));
+    const svg = svgRef.current;
+    if (!svg) return;
+    const rect = svg.getBoundingClientRect();
+    const cx = rect.width / 2;
+    const cy = rect.height / 2;
+    const worldX = (cx - viewport.panX) / viewport.scale;
+    const worldY = (cy - viewport.panY) / viewport.scale;
+    setViewport({ panX: cx - worldX * newScale, panY: cy - worldY * newScale, scale: newScale });
+  }
+
+  function resetViewport() {
+    setViewport({ panX: 100, panY: 60, scale: 0.75 });
+  }
+
+  // ── 数据面板辅助 ──
+
+  const filteredStations = useMemo(() => {
+    const byLine = new Map<string, Station[]>();
+    if (!data) return byLine;
+    const all = data.stations.filter((s) => {
+      if (showPlacedOnly && !placedStationIds.has(s.id)) return false;
+      if (filterState.placement === "unplaced" && placedStationIds.has(s.id)) return false;
+      if (activeFilterLineIds.length && !activeFilterLineIds.includes(s.lineId)) return false;
+      const stationStatus = !s.isOpen ? "closed" : s.terminalType === "normal" ? "open" : "terminal";
+      if (filterState.stationStatuses?.length && !filterState.stationStatuses.includes(stationStatus)) return false;
+      if (searchQuery) {
+        const q = searchQuery.toLowerCase();
+        return s.nameZh.includes(searchQuery) || s.nameEn.toLowerCase().includes(q) || s.id.toLowerCase().includes(q);
+      }
+      return true;
+    });
+    all.forEach((s) => {
+      if (!byLine.has(s.lineId)) byLine.set(s.lineId, []);
+      byLine.get(s.lineId)!.push(s);
+    });
+    byLine.forEach((list) => list.sort((a, b) => a.sequence - b.sequence));
+    return byLine;
+  }, [data, searchQuery, showPlacedOnly, placedStationIds, filterState.placement, filterState.stationStatuses, activeFilterLineIds]);
+  const physicalStationSuggestions = useMemo(() => data ? suggestPhysicalStations(data, sourceMappings) : [], [data, sourceMappings]);
+  const pendingSourcePlacements = useMemo(() => pendingPlacementChanges(unresolvedChanges), [unresolvedChanges]);
+
+  // ── 模板分组 ──
+
+  const templateGroups = useMemo(() => templatesByCategory(), []);
+
+  // ── 下拉菜单项（useMemo 避免每次渲染重建；必须在所有早返回之前）──
+
+  const importMenuItems: PopoverMenuItem[] = [
+    { kind: "action", id: "reload-project-csv", label: "重新读取项目 CSV", icon: "↻", onClick: () => void reloadProjectCsv() },
+    { kind: "action", id: "csv", label: "导入 CSV", icon: "📄", onClick: () => csvImportRef.current?.click() },
+    { kind: "action", id: "bg", label: "导入背景图", icon: "🖼", onClick: () => bgImageInputRef.current?.click() },
+    { kind: "separator", id: "sep1" },
+    { kind: "action", id: "icon-zip", label: "图标 ZIP", icon: "📦", onClick: () => iconArchiveInputRef.current?.click() },
+    { kind: "action", id: "icon-dir", label: "图标目录", icon: "📁", onClick: () => iconDirectoryInputRef.current?.click() },
+    { kind: "separator", id: "sep2" },
+    { kind: "checkbox", id: "tracing", label: "描图模式", checked: tracingMode, onChange: toggleTracingMode, title: "降低背景图不透明度，便于对照绘制" },
+  ];
+
+  const exportMenuItems: PopoverMenuItem[] = useMemo(() => [
+    { kind: "action", id: "svg", label: "导出 SVG", onClick: exportSvg },
+    { kind: "action", id: "png", label: "导出 PNG", onClick: () => exportPng(pngScale) },
+    { kind: "select", id: "png-scale", label: "PNG 倍率", value: pngScale, options: [{ value: 1, label: "1× (低清)" }, { value: 2, label: "2× (高清)" }, { value: 4, label: "4× (超清)" }], onChange: (v) => setPngScale(Number(v) as 1 | 2 | 4) },
+    { kind: "select", id: "scope", label: "导出范围", value: exportScope, options: [{ value: "canvas", label: "整个画布" }, { value: "selection", label: "选中区域" }], onChange: (v) => setExportScope(v as "canvas" | "selection") },
+    { kind: "separator", id: "sep1" },
+    { kind: "checkbox", id: "include-bg", label: "包含背景图", checked: exportIncludeBackground, onChange: setExportIncludeBackground },
+    { kind: "checkbox", id: "transparent", label: "透明背景", checked: exportTransparent, onChange: setExportTransparent },
+  ], [pngScale, exportScope, exportIncludeBackground, exportTransparent, exportSvg, exportPng]);
+
+  const activeFilterCount = useMemo(() => {
+    let count = 0;
+    if (filterState.stationStatuses?.length) count++;
+    if (filterState.objectTypes?.length) count++;
+    if (filterState.changeStatuses?.length) count++;
+    if (filterState.layerIds?.length) count++;
+    if (filterState.labelLanguageMode && filterState.labelLanguageMode !== "zh") count++;
+    return count;
+  }, [filterState]);
+
+  const filterMenuItems: PopoverMenuItem[] = useMemo(() => [
+    { kind: "select", id: "service", label: "交路", value: activeServicePatternId, options: [{ value: "", label: "全部交路" }, ...servicePatterns.filter((p) => p.visible).map((p) => ({ value: p.id, label: `${p.id} · ${p.name}` }))], onChange: (v) => { setActiveServicePatternId(v); setFilterLineIds([]); updateFilters({ lineIds: [], servicePatternIds: v ? [v] : [] }); } },
+    { kind: "select", id: "line", label: "线路", value: filterLineIds[0] || "", options: [{ value: "", label: "全部线路" }, ...(data?.lines || []).map((l) => ({ value: l.id, label: `${l.id} · ${l.nameZh}` }))], onChange: (v) => { const ids = v ? [v] : []; setFilterLineIds(ids); setActiveServicePatternId(""); updateFilters({ lineIds: ids, servicePatternIds: [] }); } },
+    { kind: "select", id: "mode", label: "显示模式", value: filterState.mode || "target_only", options: [{ value: "target_only", label: "仅目标" }, { value: "retain_transfers", label: "保留换乘" }, { value: "dim_others", label: "弱化其它" }], onChange: (v) => updateFilters({ mode: v as FilterState["mode"] }) },
+    { kind: "section", id: "advanced-filters", label: "高级筛选", defaultExpanded: false, items: [
+      { kind: "select", id: "station-status", label: "站点状态", value: filterState.stationStatuses?.[0] || "", options: [{ value: "", label: "全部状态" }, { value: "open", label: "已开通" }, { value: "closed", label: "未开通" }, { value: "terminal", label: "终点" }], onChange: (v) => updateFilters({ stationStatuses: v ? [v as "open" | "closed" | "terminal"] : [] }) },
+      { kind: "select", id: "object-type", label: "对象类型", value: filterState.objectTypes?.[0] || "", options: [{ value: "", label: "全部对象" }, { value: "module", label: "模块" }, { value: "connection", label: "轨道" }, { value: "platform", label: "站台" }, { value: "label", label: "文字" }, { value: "graphic", label: "图标" }, { value: "transfer", label: "换乘" }, { value: "background", label: "背景" }], onChange: (v) => updateFilters({ objectTypes: v ? [v as "module" | "connection" | "platform" | "label" | "graphic" | "transfer" | "background"] : [] }) },
+      { kind: "select", id: "change-status", label: "数据变更", value: filterState.changeStatuses?.[0] || "", options: [{ value: "", label: "全部变更" }, { value: "unresolved", label: "未处理" }, { value: "accepted", label: "已接受" }, { value: "ignored", label: "已忽略" }], onChange: (v) => updateFilters({ changeStatuses: v ? [v as SourceChange["status"]] : [] }) },
+      { kind: "select", id: "layer", label: "图层", value: filterState.layerIds?.[0] || "", options: [{ value: "", label: "全部图层" }, ...layers.map((l) => ({ value: l.id, label: l.name }))], onChange: (v) => updateFilters({ layerIds: v ? [v] : [] }) },
+      { kind: "select", id: "lang", label: "站名语言", value: filterState.labelLanguageMode || "zh", options: [{ value: "zh", label: "仅中文站名" }, { value: "en", label: "仅英文站名" }, { value: "bilingual", label: "中英双语" }], onChange: (v) => updateFilters({ labelLanguageMode: v as FilterState["labelLanguageMode"] }) },
+    ] },
+  ], [activeServicePatternId, filterLineIds, filterState, servicePatterns, data, layers, updateFilters, setActiveServicePatternId, setFilterLineIds]);
+
+  // ── 渲染 ──
+
+  if (!data) {
+    return (
+      <main className="loading-shell">
+        <div className="loading-card">
+          <span className="brand-mark"><img src="/assets/rail-transit-icon.png" alt="" /></span>
+          <h1>配线图编辑器</h1>
+          <p>{error || status}</p>
+          {error && <button onClick={() => window.location.reload()}>重新连接</button>}
+        </div>
+      </main>
+    );
+  }
+  const currentData = data;
+
+  /** 递归渲染图层树节点 */
+  function renderLayerNode(layer: LayerNode, depth: number): React.ReactNode {
+    const children = getChildLayers(layers, layer.id);
+    const hasChild = children.length > 0;
+    const treeVisible = isLayerTreeVisible(layers, layer.id);
+    const treeLocked = isLayerTreeLocked(layers, layer.id);
+    const isRenaming = renamingLayerId === layer.id;
+    const isDragging = layerDragState.draggedId === layer.id;
+    const isDropTarget = layerDragState.dropTargetId === layer.id;
+    const dropPos = layerDragState.dropPosition;
+
+    return (
+      <React.Fragment key={layer.id}>
+        <div
+          className={`wiring-layer-row ${isDragging ? "dragging" : ""} ${isDropTarget && dropPos === "before" ? "drop-before" : ""} ${isDropTarget && dropPos === "after" ? "drop-after" : ""} ${isDropTarget && dropPos === "inside" ? "drop-inside" : ""}`}
+          style={{ paddingLeft: depth * 16 + 4 }}
+          draggable
+          onDragStart={(e) => {
+            layerDragRef.current = { draggedId: layer.id, dropTargetId: null, dropPosition: null };
+            e.dataTransfer.effectAllowed = "move";
+          }}
+          onDragEnd={() => {
+            if (layerDragRef.current.draggedId && layerDragRef.current.dropTargetId && layerDragRef.current.dropPosition) {
+              moveLayer(layerDragRef.current.draggedId, layerDragRef.current.dropTargetId, layerDragRef.current.dropPosition);
+            }
+            layerDragRef.current = { draggedId: null, dropTargetId: null, dropPosition: null };
+            setLayerDragState({ draggedId: null, dropTargetId: null, dropPosition: null });
+          }}
+          onDragOver={(e) => {
+            if (!layerDragRef.current.draggedId || layerDragRef.current.draggedId === layer.id) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "move";
+            const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+            const y = e.clientY - rect.top;
+            const h = rect.height;
+            let pos: "before" | "after" | "inside";
+            if (y < h * 0.25) pos = "before";
+            else if (y > h * 0.75) pos = "after";
+            else pos = "inside";
+            if (layerDragRef.current.dropTargetId !== layer.id || layerDragRef.current.dropPosition !== pos) {
+              layerDragRef.current.dropTargetId = layer.id;
+              layerDragRef.current.dropPosition = pos;
+              setLayerDragState({ draggedId: layerDragRef.current.draggedId, dropTargetId: layer.id, dropPosition: pos });
+            }
+          }}
+          onDragLeave={() => {
+            if (layerDragRef.current.dropTargetId === layer.id) {
+              layerDragRef.current.dropTargetId = null;
+              layerDragRef.current.dropPosition = null;
+              setLayerDragState({ ...layerDragRef.current });
+            }
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            // drop 在 moveLayer 中由 onDragEnd 触发
+          }}
+        >
+          {/* 展开/折叠按钮 */}
+          {hasChild ? (
+            <button className="layer-toggle layer-expand" onClick={() => toggleLayerExpanded(layer.id)} title={layer.expanded ? "折叠" : "展开"}>
+              {layer.expanded ? "▾" : "▸"}
+            </button>
+          ) : (
+            <span className="layer-toggle-spacer" />
+          )}
+          {/* 可见性 */}
+          <button className={`layer-toggle ${!treeVisible ? "muted" : ""}`} onClick={() => toggleLayer(layer.id)} title={layer.visible ? "隐藏" : "显示"}>
+            {layer.visible ? "👁" : "🚫"}
+          </button>
+          {/* 锁定 */}
+          <button className={`layer-toggle ${treeLocked ? "muted" : ""}`} onClick={() => toggleLayerLock(layer.id)} title={layer.locked ? "解锁" : "锁定"}>
+            {layer.locked ? "🔒" : "🔓"}
+          </button>
+          {/* 名称（双击重命名） */}
+          {isRenaming ? (
+            <input
+              className="layer-name-input"
+              type="text"
+              value={layer.name}
+              autoFocus
+              onChange={(e) => renameLayer(layer.id, e.target.value)}
+              onBlur={() => setRenamingLayerId(null)}
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === "Escape") setRenamingLayerId(null); }}
+              onClick={(e) => e.stopPropagation()}
+            />
+          ) : (
+            <span className="layer-name" onDoubleClick={() => setRenamingLayerId(layer.id)} title="双击重命名">{layer.name}</span>
+          )}
+          {/* 透明度 */}
+          <input type="range" min={0} max={1} step={0.1} value={layer.opacity} onChange={(e) => setLayerOpacity(layer.id, parseFloat(e.target.value))} style={{ width: 36 }} title={`不透明度 ${Math.round(layer.opacity * 100)}%`} />
+          <button className="layer-toggle layer-menu" onClick={() => moveLayerBy(layer.id, "top")} title="置顶">⇈</button>
+          <button className="layer-toggle layer-menu" onClick={() => moveLayerBy(layer.id, "up")} title="上移">↑</button>
+          <button className="layer-toggle layer-menu" onClick={() => moveLayerBy(layer.id, "down")} title="下移">↓</button>
+          <button className="layer-toggle layer-menu" onClick={() => moveLayerBy(layer.id, "bottom")} title="置底">⇊</button>
+          {/* 操作菜单 */}
+          <button className="layer-toggle layer-menu" onClick={() => createSubLayer(layer.id)} title="新建子图层">＋</button>
+          <button className="layer-toggle layer-menu danger" onClick={() => deleteLayer(layer.id)} title="删除图层">✕</button>
+        </div>
+        {/* 递归渲染子图层 */}
+        {hasChild && layer.expanded && children.map((child) => renderLayerNode(child, depth + 1))}
+      </React.Fragment>
+    );
+  }
+
+  const transform = `translate(${viewport.panX},${viewport.panY}) scale(${viewport.scale})`;
+  const selectedMod = selectedModules[0] || null;
+  const selectedTemplate = selectedMod ? templateMap.get(selectedMod.templateId) : null;
+
+  const selectedBgImage = backgroundImages.find((b) => selectedIds.includes(b.id)) || null;
+  const bgLocked = selectedBgImage ? selectedBgImage.locked || isLayerLocked(selectedBgImage.layerId) : false;
+  const selectedLabel = labels.find((l) => selectedIds.includes(l.id)) || null;
+  const selectedPlatform = platforms.find((platform) => selectedIds.includes(platform.id)) || null;
+  const selectedGraphic = graphics.find((graphic) => selectedIds.includes(graphic.id)) || null;
+  const selectedConnection = connections.find((c) => selectedIds.includes(c.id)) || null;
+  const selectedTransferGroup = transferGroups.find((g) => selectedIds.includes(g.id)) || null;
+  const placementTemplate = activeTemplateId ? templateMap.get(activeTemplateId) : undefined;
+  const placementStation = pendingStationId ? data?.stations.find((station) => station.id === pendingStationId) : undefined;
+  const placementTargetName = activeTool === "place" && placementTemplate
+    ? placementTemplate.name
+    : activeTool === "label"
+      ? "文字工具"
+      : activeTool === "shape" && pendingElement?.kind === "shape"
+        ? SHAPE_META[pendingElement.shapeType].label
+        : activeTool === "shape" && pendingElement?.kind === "number"
+          ? (pendingElement.numeralType === "track" ? "股道编号" : "道岔编号")
+          : "";
+  const automaticPlacementLayerId = placementTemplate
+    ? defaultModuleLayerId(placementTemplate, { lineIds: placementStation ? [placementStation.lineId] : [] }, data?.lines || sourceLines)
+    : activeTool === "label"
+      ? defaultLabelLayerId({})
+      : pendingElement?.kind === "shape"
+        ? defaultGraphicLayerId({ shapeType: pendingElement.shapeType })
+        : pendingElement?.kind === "number"
+          ? defaultLabelLayerId({ numeralType: pendingElement.numeralType })
+          : "";
+  const automaticPlacementLayerName = layers.find((layer) => layer.id === automaticPlacementLayerId)?.name;
+
+  function renderItemBounds(entry: CanvasRenderItem): { x: number; y: number; w: number; h: number } | null {
+    if (entry.kind === "label") return computeLabelBbox(entry.item as LabelObject);
+    if (entry.kind === "platform") return computePlatformBbox(entry.item as PlatformObject);
+    if (entry.kind === "graphic") return computeGraphicBbox(entry.item as AttachedGraphic);
+    if (entry.kind === "background") {
+      const item = entry.item as BackgroundImageObject;
+      return rotatedRectBounds(item.x, item.y, item.naturalWidth * item.scale, item.naturalHeight * item.scale, item.rotation || 0);
+    }
+    if (entry.kind === "module") {
+      const item = entry.item as DiagramModule;
+      const template = resolvedTemplateMap.get(item.id) || templateMap.get(item.templateId);
+      return rotatedRectBounds(item.x, item.y, template?.width || 160, template?.height || 112, item.rotation);
+    }
+    if (entry.kind === "transfer") return getTransferGroupBounds(entry.item as TransferGroup);
+    const connection = entry.item as ModuleConnection;
+    const points = connection.tracks.flatMap((track) => [
+      { x: track.x1, y: track.y1 }, { x: track.x2, y: track.y2 },
+      ...(typeof track.cx === "number" && typeof track.cy === "number" ? [{ x: track.cx, y: track.cy }] : []),
+      ...(typeof track.cx2 === "number" && typeof track.cy2 === "number" ? [{ x: track.cx2, y: track.cy2 }] : []),
+    ]);
+    if (!points.length) return null;
+    const xs = points.map((point) => point.x);
+    const ys = points.map((point) => point.y);
+    const pad = 4;
+    return { x: Math.min(...xs) - pad, y: Math.min(...ys) - pad, w: Math.max(...xs) - Math.min(...xs) + pad * 2, h: Math.max(...ys) - Math.min(...ys) + pad * 2 };
+  }
+
+  function renderItemName(entry: CanvasRenderItem): string {
+    if (entry.kind === "module") return (entry.item as DiagramModule).name;
+    if (entry.kind === "label") {
+      const label = entry.item as LabelObject;
+      return label.numeralType === "track" ? `股道编号 ${label.text}` : label.numeralType === "switch" ? `道岔编号 ${label.text}` : `文字：${label.text}`;
+    }
+    if (entry.kind === "background") return `背景：${(entry.item as BackgroundImageObject).name}`;
+    if (entry.kind === "platform") return "站台";
+    if (entry.kind === "connection") return "轨道连接";
+    if (entry.kind === "transfer") return `换乘组：${(entry.item as TransferGroup).name}`;
+    const graphic = entry.item as AttachedGraphic;
+    if (graphic.shapeType) return SHAPE_META[graphic.shapeType]?.label || "图形";
+    return `图标：${assets.find((asset) => asset.id === graphic.assetId)?.name || graphic.id}`;
+  }
+
+  const overlappingLabelItems = selectedLabel
+    ? orderedRenderItems.filter((entry) => {
+        if (entry.item.id === selectedLabel.id || !isLayerVisible(entry.item.layerId) || (entry.item as { visible?: boolean }).visible === false) return false;
+        const bounds = renderItemBounds(entry);
+        return !!bounds && rectsIntersect(computeLabelBbox(selectedLabel), bounds);
+      }).slice().reverse()
+    : [];
+
+  function moveLabelRelative(label: LabelObject, entry: CanvasRenderItem, above: boolean) {
+    if (isLayerLocked(entry.item.layerId)) {
+      setStatus(`「${renderItemName(entry)}」所在图层已锁定，无法移动文字到该层级`);
+      return;
+    }
+    updateLabel(label.id, {
+      layerId: entry.item.layerId,
+      zIndex: entry.item.zIndex + (above ? 0.5 : -0.5),
+    }, above ? `将文字置于${renderItemName(entry)}上方` : `将文字置于${renderItemName(entry)}下方`);
+  }
+
+  function moveLabelToEdge(label: LabelObject, top: boolean) {
+    const candidates = orderedRenderItems.filter((entry) => entry.item.id !== label.id && isLayerVisible(entry.item.layerId) && !isLayerLocked(entry.item.layerId));
+    const target = top ? candidates[candidates.length - 1] : candidates[0];
+    if (!target) return;
+    moveLabelRelative(label, target, top);
+  }
+
+  function renderCanvasItem(entry: CanvasRenderItem): React.ReactNode {
+    const { item } = entry;
+    if (!isLayerVisible(item.layerId)) return null;
+    const layerOpacity = effectiveLayerOpacity(layers, item.layerId);
+    const linkedModule = entry.kind === "module" ? entry.item as DiagramModule
+      : entry.kind === "connection" ? modules.find((module) => module.id === (entry.item as ModuleConnection).fromModuleId)
+      : entry.kind === "platform" ? modules.find((module) => module.id === (entry.item as PlatformObject).moduleId)
+      : entry.kind === "graphic" ? modules.find((module) => module.id === (entry.item as AttachedGraphic).attachedToId)
+      : entry.kind === "label" ? modules.find((module) => module.id === (entry.item as LabelObject).attachedToId)
+      : undefined;
+    const transfer = entry.kind === "transfer" ? entry.item as TransferGroup : undefined;
+    const station = linkedModule?.sourceStationIds.length ? currentData.stations.find((candidate) => candidate.id === linkedModule.sourceStationIds[0]) : undefined;
+    const connectionLineIds = entry.kind === "connection"
+      ? Array.from(new Set([
+        ...(modules.find((module) => module.id === (entry.item as ModuleConnection).fromModuleId)?.lineIds || []),
+        ...(modules.find((module) => module.id === (entry.item as ModuleConnection).toModuleId)?.lineIds || []),
+      ]))
+      : [];
+    const entryLineIds = transfer?.lineIds
+      || (entry.kind === "connection" ? connectionLineIds : undefined)
+      || linkedModule?.lineIds
+      || (entry.kind === "platform" && (entry.item as PlatformObject).sourceLineId ? [(entry.item as PlatformObject).sourceLineId!] : []);
+    const changeStatus = unresolvedChanges.find((change) => change.affectedObjectIds.includes(item.id))?.status;
+    const filterResult = evaluateFilter({
+      objectType: entry.kind,
+      lineIds: entryLineIds,
+      stationStatus: station ? (!station.isOpen ? "closed" : station.terminalType === "normal" ? "open" : "terminal") : undefined,
+      placed: true,
+      changeStatus,
+      hasDataChanges: Boolean(changeStatus),
+      layerId: item.layerId,
+      isTransferHint: Boolean(transfer),
+      transferLineIds: transfer?.lineIds,
+    }, { ...filterState, lineIds: activeFilterLineIds });
+    if (filterResult === "hide") return null;
+    const filterOpacity = filterResult === "dim" ? 0.25 : 1;
+
+    if (entry.kind === "connection") {
+      const conn = entry.item as ModuleConnection;
+      const fromModule = modules.find((module) => module.id === conn.fromModuleId);
+      if (!fromModule || !isModuleVisible(fromModule)) return null;
+      const isSelected = selectedIds.includes(conn.id);
+      const geometry = geometryForConnection(conn, connections, modules, resolvedTemplateMap);
+      const endpoints = geometry || getConnectionEndpoints(conn);
+      const controlPoints = geometry?.controlPoints || conn.controlPoints;
+      const hasControls = controlPoints.length > 0 && endpoints !== null;
+      const tracks = geometry?.tracks || rebuildConnectionTrackCache(conn);
+      const pairedConnection = findPairedConnection(conn, connections, modules, resolvedTemplateMap);
+      const pairedEndpoints = pairedConnection ? endpointsForConnection(pairedConnection, modules, resolvedTemplateMap) : undefined;
+      const pairedOffsetPath = endpoints && conn.autoCurve !== false && pairedConnection?.autoCurve !== false && pairedEndpoints
+        ? buildPairedOffsetPathD(endpoints, pairedEndpoints)
+        : null;
+      const className = `connection-track ${conn.crossingType === "gap" ? "crossing-gap" : conn.crossingType === "bridge" ? "crossing-bridge" : ""} ${conn.lineStyle === "dashed" ? "line-dashed" : ""} ${isSelected ? "selected" : ""}`;
+      const connColorSpec = colorSpecs.connectionSpecs.get(conn.id);
+      const connTrackStyle = connColorSpec ? { "--track-stroke": connColorSpec.css } as React.CSSProperties : undefined;
+      return (
+        <g
+          key={`connection-${conn.id}`}
+          className={`connection-group ${isSelected ? "selected" : ""}`}
+          opacity={layerOpacity * filterOpacity}
+          onMouseDown={(event) => handleConnectionMouseDown(event, conn)}
+          onDoubleClick={(event) => handleConnectionDoubleClick(event, conn)}
+          style={{ cursor: isLayerLocked(conn.layerId) ? "default" : "pointer" }}
+        >
+          {hasControls ? (() => {
+            const path = pairedOffsetPath || buildControlPointPathD(endpoints!.from, endpoints!.to, controlPoints, endpoints!.fromDir, endpoints!.toDir);
+            return (
+              <>
+                <path d={path} className={className} fill="none" style={connTrackStyle} onClick={(event) => handleTrackClick(event, conn)} />
+                <path d={path} stroke="transparent" strokeWidth={14} fill="none" onClick={(event) => handleTrackClick(event, conn)} style={{ cursor: "copy" }} />
+              </>
+            );
+          })() : tracks.map((track, index) => {
+            if (conn.crossingType === "bridge") {
+              const middleX = (track.x1 + track.x2) / 2;
+              const middleY = (track.y1 + track.y2) / 2;
+              const deltaX = track.x2 - track.x1;
+              const deltaY = track.y2 - track.y1;
+              const length = Math.hypot(deltaX, deltaY);
+              if (length >= 1) {
+                const offset = Math.min(length * 0.15, 12);
+                const controlX = middleX - (deltaY / length) * offset;
+                const controlY = middleY + (deltaX / length) * offset;
+                return (
+                  <path
+                    key={index}
+                    d={`M${track.x1},${track.y1} Q${controlX},${controlY} ${track.x2},${track.y2}`}
+                    className={className}
+                    fill="none"
+                    style={connTrackStyle}
+                    onClick={(event) => handleTrackClick(event, conn)}
+                  />
+                );
+              }
+            }
+            return (
+              <line
+                key={index}
+                x1={track.x1}
+                y1={track.y1}
+                x2={track.x2}
+                y2={track.y2}
+                className={className}
+                style={connTrackStyle}
+                onClick={(event) => handleTrackClick(event, conn)}
+              />
+            );
+          })}
+          {isSelected && hasControls && controlPoints.map((point) => {
+            const isImplicit = !!point.implicit;
+            return (
+            <g key={point.id} className={`track-control-handle ${isImplicit ? "implicit" : ""}`}>
+              {point.curved && (
+                <>
+                  <line x1={point.x} y1={point.y} x2={point.x + point.handleX} y2={point.y + point.handleY} className={`track-handle-line ${isImplicit ? "implicit" : ""}`} />
+                  {!isImplicit && (
+                  <circle
+                    cx={point.x + point.handleX}
+                    cy={point.y + point.handleY}
+                    r={4}
+                    className="track-handle-dot"
+                    onMouseDown={(event) => handleControlPointHandleMouseDown(event, conn.id, point.id)}
+                  />
+                  )}
+                </>
+              )}
+              <circle
+                cx={point.x}
+                cy={point.y}
+                r={isImplicit ? 4 : 5}
+                className={`track-node ${point.curved ? "curved" : ""} ${isImplicit ? "implicit" : ""}`}
+                onMouseDown={(event) => !isImplicit ? handleControlPointMouseDown(event, conn.id, point.id) : undefined}
+                onDoubleClick={(event) => !isImplicit ? handleControlPointDoubleClick(event, conn.id, point.id) : undefined}
+                style={isImplicit ? { cursor: "default", opacity: 0.6 } : undefined}
+              />
+            </g>
+          )})}
+          {isSelected && conn.crossingPoints.map((point, index) => (
+            <circle
+              key={`crossing-${index}`}
+              cx={point.x}
+              cy={point.y}
+              r={4}
+              className="crossing-point"
+              onMouseDown={(event) => { event.stopPropagation(); removeCrossingPoint(conn.id, index); }}
+            />
+          ))}
+          {isSelected && conn.crossingType !== "plain" && tracks.length > 0 && (
+            <text
+              className="crossing-label"
+              x={(tracks[0].x1 + tracks[0].x2) / 2}
+              y={(tracks[0].y1 + tracks[0].y2) / 2 - 8}
+              textAnchor="middle"
+            >
+              {conn.crossingType === "gap" ? "断" : "桥"}
+            </text>
+          )}
+        </g>
+      );
+    }
+
+    if (entry.kind === "background") {
+      const image = entry.item as BackgroundImageObject;
+      if (!image.visible) return null;
+      const width = image.naturalWidth * image.scale;
+      const height = image.naturalHeight * image.scale;
+      const isSelected = selectedIds.includes(image.id);
+      return <g key={`background-${image.id}`} opacity={layerOpacity * filterOpacity} transform={`rotate(${image.rotation || 0} ${image.x + width / 2} ${image.y + height / 2})`}>
+        {image.previewSrc || image.src ? (
+          <image href={image.previewSrc || image.src} data-export-src={image.src} x={image.x} y={image.y} width={width} height={height} opacity={image.opacity} className={`bg-image ${isSelected ? "selected" : ""} ${image.locked || isLayerLocked(image.layerId) ? "locked" : ""}`} onMouseDown={(event) => handleBgImageMouseDown(event, image)} preserveAspectRatio="xMidYMid meet" />
+        ) : (
+          <g onMouseDown={(event) => handleBgImageMouseDown(event, image)}>
+            <rect x={image.x} y={image.y} width={width} height={height} fill="#f3f5f6" stroke="#b42318" strokeWidth={2} strokeDasharray="8 5" opacity={image.opacity} />
+            <text x={image.x + width / 2} y={image.y + height / 2 - 4} textAnchor="middle" fill="#b42318" fontSize={16} fontWeight={800}>背景素材缺失</text>
+            <text x={image.x + width / 2} y={image.y + height / 2 + 17} textAnchor="middle" fill="#667580" fontSize={11}>{image.name}</text>
+          </g>
+        )}
+        {isSelected && <rect className="bg-image-selection" x={image.x - 2} y={image.y - 2} width={width + 4} height={height + 4} fill="none" stroke="var(--accent)" strokeWidth={1.5} strokeDasharray="4 3" pointerEvents="none" />}
+        {image.locked && (
+          <g
+            className="bg-image-unlock"
+            transform={`translate(${image.x + width / 2}, ${image.y - 14})`}
+            onMouseDown={(event) => {
+              event.stopPropagation();
+              setSelectedIds([image.id]);
+              updateBgImage(image.id, { locked: false }, "解锁背景图");
+            }}
+          >
+            <circle className="bg-image-unlock-ring" r={16} />
+            <text className="bg-image-unlock-icon" y={6} textAnchor="middle" fontSize={16}>🔓</text>
+          </g>
+        )}
+      </g>;
+    }
+
+    if (entry.kind === "module") {
+      const mod = entry.item as DiagramModule;
+      const baseTemplate = templateMap.get(mod.templateId);
+      if (!baseTemplate || !isModuleVisible(mod)) return null;
+      const template = resolvedTemplateMap.get(mod.id) || baseTemplate;
+      const isSelected = selectedIds.includes(mod.id);
+      const attachedLabels = labels.filter((candidate) => candidate.attachedToId === mod.id && candidate.visible !== false);
+      const hasZhStationLabel = attachedLabels.some((candidate) => candidate.language === "zh" || (!candidate.language && /[\u3400-\u9fff]/.test(candidate.text)));
+      const hasEnStationLabel = attachedLabels.some((candidate) => candidate.language === "en" || (!candidate.language && !/[\u3400-\u9fff]/.test(candidate.text) && candidate.text !== "站名"));
+      const showModuleAuxLabels = showAuxLabels && mod.showAuxLabels !== false;
+      const sourceDeleted = unresolvedChanges.some((change) => change.entityType === "station" && change.changeType === "removed" && change.affectedObjectIds.includes(mod.id) && change.status === "unresolved");
+      const modColorSpec = colorSpecs.moduleSpecs.get(mod.id);
+      const modTrackStyle = modColorSpec ? { "--track-stroke": modColorSpec.css } as React.CSSProperties : undefined;
+      const moduleTrackColors = colorSpecs.trackColorSpecs.get(mod.id);
+      const moduleTemplatePlatformSpecs = colorSpecs.templatePlatformColorSpecs.get(mod.id);
+      return <g key={`module-${mod.id}`} transform={`translate(${mod.x},${mod.y}) rotate(${mod.rotation} ${template.width / 2} ${template.height / 2})${moduleMirrorTransform(template.width, template.height, mod.mirrorX, mod.mirrorY)}`} className={`module-group ${isSelected ? "selected" : ""} ${sourceDeleted ? "source-deleted" : ""} ${mod.locked || isLayerLocked(mod.layerId) ? "locked" : ""}`} onMouseDown={(event) => handleModuleMouseDown(event, mod)} opacity={layerOpacity * filterOpacity}>
+        {template.tracks.map((track, index) => {
+          const perTrackColor = moduleTrackColors?.[index];
+          const trackStyle = perTrackColor ? { "--track-stroke": perTrackColor } as React.CSSProperties : modTrackStyle;
+          return track.curved ? <path key={index} className={`track ${track.type}`} d={templateTrackPathD(track)} style={trackStyle} /> : <line key={index} className={`track ${track.type}`} x1={track.x1} y1={track.y1} x2={track.x2} y2={track.y2} style={trackStyle} />;
+        })}
+        {!platforms.some((platform) => platform.moduleId === mod.id) && template.platforms.map((platform, index) => {
+          const platSpec = moduleTemplatePlatformSpecs?.[index];
+          const platStyle = platSpec ? { "--platform-fill": platSpec.css, "--platform-stroke": darkenHex(effectiveColor(platSpec)) } as React.CSSProperties : undefined;
+          const platTwoTone = twoToneColors(platSpec);
+          const lineNames = templatePlatformLineNames(platform, mod, sourceLines, template.tracks, template.platforms, template.trackLinePattern);
+          const platformText = lineNames?.length ? lineNames.join(" · ") : platform.label;
+          return <g key={index}>{platTwoTone ? <><rect className="platform" x={platform.x} y={platform.y} width={platform.width} height={platform.height / 2} rx={2} style={{ "--platform-fill": platTwoTone[0], "--platform-stroke": darkenHex(platTwoTone[0]) } as React.CSSProperties} /><rect className="platform" x={platform.x} y={platform.y + platform.height / 2} width={platform.width} height={platform.height / 2} rx={2} style={{ "--platform-fill": platTwoTone[1], "--platform-stroke": darkenHex(platTwoTone[1]) } as React.CSSProperties} /></> : <rect className="platform" x={platform.x} y={platform.y} width={platform.width} height={platform.height} rx={2} style={platStyle} />}{platformText && showModuleAuxLabels && <text className="platform-label" x={platform.x + platform.width / 2} y={platform.y + platform.height / 2 + 2.5} transform={moduleLabelTextTransform(mod.rotation, mod.mirrorX, mod.mirrorY, platform.x + platform.width / 2, platform.y + platform.height / 2)}>{platformText}</text>}</g>;
+        })}
+        {template.labels.filter((label) => (label.text !== "站名" || !hasZhStationLabel) && (label.text !== "Station" || !hasEnStationLabel) && ((label.fontSize || 13) > 9 || showModuleAuxLabels)).map((label, index) => {
+          const isAux = !!(label.fontSize && label.fontSize <= 9);
+          const modHasRealColor = modColorSpec && (modColorSpec.kind === "gradient" || modColorSpec.css.toLowerCase() !== DEFAULT_TRACK_COLOR.toLowerCase());
+          const labelFillStyle = (!isAux && (mod.labelColorMode ?? "line") === "line" && modHasRealColor)
+            ? { "--label-fill": sampleSpecAt(modColorSpec!, label.x, label.y) } as React.CSSProperties
+            : undefined;
+          return <text key={index} className={isAux ? "aux-label" : "station-label"} x={label.x} y={label.y} textAnchor={label.anchor || "middle"} fill={label.fill || "#202124"} fontSize={label.fontSize || 13} transform={moduleLabelTextTransform(mod.rotation, mod.mirrorX, mod.mirrorY, label.x, label.y)} style={labelFillStyle}>{mod.customLabel && label.text === "站名" ? mod.customLabel : label.text}</text>;
+        })}
+        {(advancedMode || isSelected || activeTool === "connect" || (activeTool === "auto" && connectFrom?.moduleId === mod.id)) && template.ports.map((port) => {
+          const isConnectStart = connectFrom?.moduleId === mod.id && connectFrom?.portId === port.id;
+          const candidate = getConnectionEndpoint(mod.id, port.id, modules, resolvedTemplateMap);
+          const source = connectFrom
+            ? getConnectionEndpoint(connectFrom.moduleId, connectFrom.portId, modules, resolvedTemplateMap)
+            : null;
+          const validation = source && !isConnectStart
+            ? validateConnection(source, candidate, connections)
+            : null;
+          const isOccupied = portIsOccupied(connections, mod.id, port.id);
+          const portState = activeTool !== "connect" && activeTool !== "auto"
+            ? ""
+            : isConnectStart
+              ? "connect-start"
+              : validation
+                ? validation.valid ? "connectable" : "incompatible"
+                : isOccupied ? "incompatible" : "connectable";
+          return (
+            <circle
+              key={port.id}
+              className={`port ${portState}`}
+              cx={port.x}
+              cy={port.y}
+              r={activeTool === "connect" || activeTool === "auto" ? 5 : 3}
+              onMouseDown={activeTool === "connect" || activeTool === "auto" ? (event) => handlePortClick(event, mod, port.id) : undefined}
+              style={{ cursor: (activeTool === "connect" || activeTool === "auto") && (isConnectStart || !validation || validation.valid) && !isOccupied ? "pointer" : "default" }}
+            />
+          );
+        })}
+        {isSelected && <rect className="selection-box" x={-4} y={-4} width={template.width + 8} height={template.height + 8} rx={4} />}
+      </g>;
+    }
+
+    if (entry.kind === "label") {
+      const label = entry.item as LabelObject;
+      if (!label.visible) return null;
+      if (suppressedTransferLabelIds.has(label.id)) return null;
+      const languageMode = filterState.labelLanguageMode || "zh";
+      if ((label.language === "zh" && languageMode === "en") || (label.language === "en" && languageMode === "zh")) return null;
+      // Legacy projects may contain a missing or obsolete anchor value.
+      // Rendering must remain usable; the avoidance layer also treats `top`
+      // as its default geometry.
+      const anchor = LABEL_ANCHOR_MAP[label.anchor] || LABEL_ANCHOR_MAP.top;
+      const isSelected = selectedIds.includes(label.id);
+      const labelSpec = colorSpecs.labelSpecs.get(label.id);
+      const labelFill = labelSpec?.css ?? label.fill;
+      const localLabelBox = computeLabelLocalBox(label);
+      const backgroundPadding = label.backgroundPadding ?? 4;
+      // 物化的中文站名标签跟随模块的"自定义标签"（覆盖站名）
+      const ownerMod = label.attachedToId ? modules.find((candidate) => candidate.id === label.attachedToId) : undefined;
+      const effectiveText = label.language === "zh" && ownerMod?.customLabel ? ownerMod.customLabel : label.text;
+      // 编号标注：text 存纯数字，渲染时加前缀（股道编号加"道"，道岔编号加"#"）
+      const displayText = label.numeralType === "track" ? `${effectiveText}道` : label.numeralType === "switch" ? `#${effectiveText}` : effectiveText;
+      return <g key={`label-${label.id}`} transform={`translate(${label.x},${label.y}) rotate(${label.rotation})`} opacity={layerOpacity * filterOpacity}>
+        {label.backgroundEnabled && <rect className="label-background" x={localLabelBox.x - backgroundPadding} y={localLabelBox.y - backgroundPadding} width={localLabelBox.w + backgroundPadding * 2} height={localLabelBox.h + backgroundPadding * 2} rx={Math.min(4, backgroundPadding)} fill={label.backgroundColor || "#ffffff"} pointerEvents="none" />}
+        <text data-numeral-type={label.numeralType ?? undefined} className={`independent-label ${isSelected ? "selected" : ""} ${label.locked || isLayerLocked(label.layerId) ? "locked" : ""}`} textAnchor={anchor.textAnchor} dominantBaseline={anchor.dominantBaseline} fontSize={label.fontSize} fontWeight={label.fontWeight} fill={labelFill} paintOrder={label.backgroundMask ? "stroke fill" : "normal"} stroke={label.backgroundMask ? (label.outlineColor || "#ffffff") : "none"} strokeWidth={label.backgroundMask ? label.maskStrokeWidth : 0} strokeLinejoin="round" onMouseDown={(event) => handleLabelMouseDown(event, label)} onDoubleClick={(event) => handleLabelDoubleClick(event, label)} style={{ cursor: label.locked || isLayerLocked(label.layerId) ? "default" : "move", userSelect: "none" }}>{displayText}</text>
+        {isSelected && <circle className="label-anchor" cx={0} cy={0} r={2} fill="var(--accent)" stroke="white" strokeWidth={1} pointerEvents="none" />}
+        {/* 单独锁定的标签：画布上直接显示解锁徽标 */}
+        {isSelected && label.locked && (
+          <g
+            className="bg-image-unlock"
+            transform={`translate(${localLabelBox.x + localLabelBox.w / 2}, ${localLabelBox.y - 14})`}
+            onMouseDown={(event) => {
+              event.stopPropagation();
+              updateLabel(label.id, { locked: false }, "解锁标签");
+            }}
+          >
+            <circle className="bg-image-unlock-ring" r={16} />
+            <text className="bg-image-unlock-icon" y={6} textAnchor="middle" fontSize={16}>🔓</text>
+          </g>
+        )}
+      </g>;
+    }
+
+	    if (entry.kind === "platform") {
+	      const platform = entry.item as PlatformObject;
+	      if (platform.visible === false) return null;
+	      const isSelected = selectedIds.includes(platform.id);
+	      // 独立站台（无 moduleId）或处于编辑模式下的站台才可单独交互
+	      const isInEditMode = platform.moduleId != null && editingPlatformModuleId === platform.moduleId;
+	      const interactive = platform.moduleId == null || isInEditMode;
+	      const ownerSelected = platform.moduleId != null && selectedIds.includes(platform.moduleId);
+	      const platColorSpec = colorSpecs.platformSpecs.get(platform.id);
+	      const platFillStyle = platColorSpec ? { "--platform-fill": platColorSpec.css, "--platform-stroke": darkenHex(effectiveColor(platColorSpec)) } as React.CSSProperties : undefined;
+		      const platTwoTone = twoToneColors(platColorSpec);
+		      const platClass = `platform independent-platform ${isSelected && interactive ? "selected" : ""} ${ownerSelected && !interactive ? "owner-selected" : ""}`;
+	      // 站台类型文字（岛式/侧式/终点/折返站台）随"辅助标识"开关隐藏；物化站台按所属模块的开关判定
+	      const platformOwner = platform.moduleId ? modules.find((m) => m.id === platform.moduleId) : undefined;
+	      const showPlatformTypeLabel = showAuxLabels && platformOwner?.showAuxLabels !== false;
+		      const platLineNames = colorSpecs.platformLineNames.get(platform.id);
+		      const platLabelText = platLineNames?.length ? platLineNames.join(" · ") : platform.label;
+	      return <g key={`platform-${platform.id}`} transform={`translate(${platform.x},${platform.y}) rotate(${platform.rotation} ${platform.width / 2} ${platform.height / 2})`} opacity={layerOpacity * filterOpacity} onMouseDown={(event) => handlePlatformMouseDown(event, platform)} style={{ cursor: platform.locked ? "default" : interactive ? "move" : "pointer" }}>
+	        {platTwoTone ? <><rect className={platClass} width={platform.width} height={platform.height / 2} rx={2} style={{ "--platform-fill": platTwoTone[0], "--platform-stroke": darkenHex(platTwoTone[0]) } as React.CSSProperties} /><rect className={platClass} y={platform.height / 2} width={platform.width} height={platform.height / 2} rx={2} style={{ "--platform-fill": platTwoTone[1], "--platform-stroke": darkenHex(platTwoTone[1]) } as React.CSSProperties} /></> : <rect className={platClass} width={platform.width} height={platform.height} rx={2} style={platFillStyle} />}
+        {showPlatformTypeLabel && platLabelText && <text className="platform-label" x={platform.width / 2} y={platform.height / 2 + 3} transform={`rotate(${readableLabelRotation(platform.rotation) - platform.rotation} ${platform.width / 2} ${platform.height / 2})`}>{platLabelText}</text>}
+	        {interactive && isSelected && <rect className="selection-box" x={-4} y={-4} width={platform.width + 8} height={platform.height + 8} rx={4} />}
+	        {interactive && isSelected && !platform.locked && !isLayerLocked(platform.layerId) && <rect className="object-resize-handle" x={platform.width - 3} y={platform.height - 3} width={6} height={6} onMouseDown={(event) => handlePlatformResizeMouseDown(event, platform)} />}
+	      </g>;
+	    }
+
+    if (entry.kind === "graphic") {
+      const graphic = entry.item as AttachedGraphic;
+      if (graphic.visible === false) return null;
+      const asset = assets.find((candidate) => candidate.id === graphic.assetId);
+      const isSelected = selectedIds.includes(graphic.id);
+      return <g key={`graphic-${graphic.id}`} transform={`translate(${graphic.x},${graphic.y}) rotate(${graphic.rotation} ${graphic.width / 2} ${graphic.height / 2})${moduleMirrorTransform(graphic.width, graphic.height, graphic.mirrorX, graphic.mirrorY)}`} opacity={layerOpacity * filterOpacity * graphic.opacity} onMouseDown={(event) => handleGraphicMouseDown(event, graphic)} style={{ cursor: graphic.locked ? "default" : "move" }}>
+        {graphic.shapeType ? (
+          <g className="shape-graphic" data-shape-type={graphic.shapeType}>
+            <ShapeGraphic shapeType={graphic.shapeType} width={graphic.width} height={graphic.height} fill={graphic.fill} stroke={graphic.stroke} />
+          </g>
+        ) : asset?.dataUrl ? <image href={asset.dataUrl} width={graphic.width} height={graphic.height} preserveAspectRatio="xMidYMid meet" /> : <rect width={graphic.width} height={graphic.height} fill="#f8d7da" stroke="#b42318" strokeDasharray="4 2" />}
+        {isSelected && <rect className="selection-box" x={-4} y={-4} width={graphic.width + 8} height={graphic.height + 8} rx={4} />}
+        {isSelected && !graphic.locked && !isLayerLocked(graphic.layerId) && <rect className="object-resize-handle" x={graphic.width - 3} y={graphic.height - 3} width={6} height={6} onMouseDown={(event) => handleGraphicResizeMouseDown(event, graphic)} />}
+        {/* 单独锁定的图形：在画布上直接显示解锁徽标（复用背景图解锁模式） */}
+        {isSelected && graphic.locked && (
+          <g
+            className="bg-image-unlock"
+            transform={`translate(${graphic.width / 2}, -14)`}
+            onMouseDown={(event) => {
+              event.stopPropagation();
+              updateGraphic(graphic.id, { locked: false }, "解锁图形");
+            }}
+          >
+            <circle className="bg-image-unlock-ring" r={16} />
+            <text className="bg-image-unlock-icon" y={6} textAnchor="middle" fontSize={16}>🔓</text>
+          </g>
+        )}
+      </g>;
+    }
+
+    const group = entry.item as TransferGroup;
+    if (!group.visible) return null;
+    const bounds = getTransferGroupBounds(group);
+    if (!bounds) return null;
+    const isSelected = selectedIds.includes(group.id);
+    const accent = group.accentColor || "var(--accent)";
+    return (
+      <g
+        key={`transfer-${group.id}`}
+        className={`transfer-group ${isSelected ? "selected" : ""}`}
+        opacity={layerOpacity * filterOpacity}
+        onMouseDown={(event) => handleTransferGroupMouseDown(event, group)}
+        onDoubleClick={(event) => handleTransferGroupDoubleClick(event, group)}
+        style={{ cursor: group.locked || isLayerLocked(group.layerId) ? "default" : "move" }}
+      >
+        <rect x={bounds.x} y={bounds.y} width={bounds.w} height={bounds.h} fill="none" stroke={accent} strokeWidth={1.5} strokeDasharray="8 4" rx={6} opacity={isSelected ? 0.9 : 0.6} />
+        <g transform={`translate(${bounds.x + 8}, ${bounds.y - 8})`}>
+          <rect x={-4} y={-14} width={group.name.length * 12 + 16} height={20} rx={4} fill={isSelected ? accent : "white"} stroke={accent} strokeWidth={1} opacity={0.95} />
+          <text x={4} y={0} className="transfer-group-label" fill={isSelected ? "white" : accent} style={{ fontSize: 11, fontWeight: 600, pointerEvents: "none" }}>{group.name}</text>
+        </g>
+        {group.lineIds.length > 0 && (
+          <g transform={`translate(${bounds.x + bounds.w - group.lineIds.length * 14 - 8}, ${bounds.y - 8})`}>
+            {group.lineIds.map((lineId, index) => {
+              const line = data?.lines.find((candidate) => candidate.id === lineId);
+              return <circle key={lineId} cx={index * 14 + 6} cy={-4} r={5} fill={line?.lineColor || "#999"} stroke="white" strokeWidth={1.5} />;
+            })}
+          </g>
+        )}
+      </g>
+    );
+  }
+
+  return (
+    <div className="wiring-editor-shell" onContextMenu={handleContextMenu}>
+      {/* ══════════ 顶部工具栏 ══════════ */}
+      <header className="wiring-toolbar">
+        {/* ── Row 1: 核心操作 ── */}
+        <div className="wiring-toolbar-row">
+          <div className="wiring-toolbar-group">
+            <span className="brand-mark"><img src="/assets/rail-transit-icon.png" alt="" /></span>
+            <div className="wiring-toolbar-title">
+              <h1>配线图编辑器</h1>
+              <p>Simplified Metro Track Layout</p>
+            </div>
+          </div>
+
+          <div className="wiring-toolbar-group">
+            <button className="wiring-btn" onClick={() => setNewCanvasOpen(true)}>新建画布</button>
+            <select className="wiring-page-select" value={activePageId} onChange={(e) => switchCanvasPage(e.target.value)} title="切换画布">
+              {pages.map((page) => <option key={page.id} value={page.id}>{page.name}</option>)}
+            </select>
+            <button className="wiring-btn icon-only" onClick={renameActivePage} title="重命名画布">✎</button>
+            <button className="wiring-btn icon-only danger" onClick={deleteActivePage} disabled={pages.length < 2} title="删除画布">×</button>
+          </div>
+
+          <div className="wiring-toolbar-group">
+            <button className="wiring-btn" onClick={() => void handleSaveProject()} title="保存到当前城市项目 (Ctrl+S)">💾 保存</button>
+          </div>
+
+          <div className="wiring-toolbar-group">
+            <button className="wiring-btn icon-only" onClick={handleUndo} disabled={!history.canUndo} title={`撤销 (Ctrl+Z)${history.lastOperation ? `：${history.lastOperation}` : ""}`}>↶</button>
+            <button className="wiring-btn icon-only" onClick={handleRedo} disabled={!history.canRedo} title={`重做 (Ctrl+Shift+Z)${history.nextOperation ? `：${history.nextOperation}` : ""}`}>↷</button>
+            <button className="wiring-btn icon-only wiring-tutorial-btn" onClick={resetTutorial} title="查看使用教程">?</button>
+          </div>
+
+          <div className="wiring-toolbar-spacer" />
+
+          <div className="wiring-toolbar-group">
+            <PopoverMenu label="导入" icon="📥" items={importMenuItems} />
+            <PopoverMenu label="导出" icon="📤" items={exportMenuItems} />
+            <PopoverMenu label="筛选" icon="🔽" badge={activeFilterCount > 0 ? activeFilterCount : undefined} items={filterMenuItems} minWidth={220} />
+          </div>
+
+          <div className="wiring-toolbar-group">
+            <button className="wiring-btn danger" onClick={deleteSelected} disabled={!selectedIds.length}>🗑 删除</button>
+          </div>
+        </div>
+
+        {/* ── Row 2: 工具 + 选项 + 视图 ── */}
+        <div className="wiring-toolbar-row">
+          <div className="wiring-toolbar-group">
+            <div className="wiring-segmented">
+              <button className={activeTool === "auto" ? "active" : ""} onClick={() => { setActiveTool("auto"); setActiveTemplateId(null); setPendingElement(null); setConnectFrom(null); }} title="自动工具：选择、移动模块；选中模块后可直接点击端口连接">自动</button>
+              <button className={activeTool === "select" ? "active" : ""} onClick={() => { setActiveTool("select"); setActiveTemplateId(null); setPendingElement(null); }} title="选择工具 (V)">选择</button>
+              <button className={activeTool === "pan" ? "active" : ""} onClick={() => { setActiveTool("pan"); setPendingElement(null); }} title="平移工具 (H)">平移</button>
+              <button className={activeTool === "label" ? "active" : ""} onClick={() => { setSelectedIds([]); setActiveTool("label"); setActiveTemplateId(null); setPendingElement(null); }} title="文字标签工具：点击画布放置文字标签">文字</button>
+              <button className={activeTool === "connect" ? "active" : ""} onClick={() => { setActiveTool("connect"); setActiveTemplateId(null); setPendingElement(null); setConnectFrom(null); }} title="连接工具：点击两个端口创建轨道连接 (C)">连接</button>
+            </div>
+            <button
+              className="wiring-btn"
+              onClick={() => createTransferGroupFromSelection()}
+              disabled={modules.filter((m) => selectedIds.includes(m.id)).length < 2}
+              title={modules.filter((m) => selectedIds.includes(m.id)).length < 2 ? "请至少选择两个站台" : "将选中的站台创建为换乘组"}
+            >
+              换乘
+            </button>
+            <button className="wiring-btn" onClick={() => applyLabelAvoidance(true)} title="自动调整站名和图标位置，避免相互遮挡">🔀 自动避让</button>
+          </div>
+
+          <div className="wiring-toolbar-group">
+            <label className="wiring-check"><input type="checkbox" checked={advancedMode} onChange={(e) => { const enabled = e.target.checked; setAdvancedMode(enabled); if (!enabled) { setPlacementRotation(0); setPlacementMirrorX(false); setPlacementMirrorY(false); } }} />高级模式</label>
+            <label className="wiring-check" title="控制辅助小字与站台类型文字（岛式/侧式/终点/折返等）的全局显示；不会修改各组件自己的设置"><input type="checkbox" checked={showAuxLabels} onChange={(e) => setShowAuxLabels(e.target.checked)} />辅助标识</label>
+          </div>
+
+          <div className="wiring-toolbar-group">
+            <label className="wiring-check"><input type="checkbox" checked={showGrid} onChange={(e) => setShowGrid(e.target.checked)} />网格</label>
+            <label className="wiring-check"><input type="checkbox" checked={snapEnabled} onChange={(e) => setSnapEnabled(e.target.checked)} />吸附</label>
+            <label className="wiring-check"><input type="checkbox" checked={autoConnect} onChange={(e) => setAutoConnect(e.target.checked)} />自动连接</label>
+            <label className="wiring-check" title="连接标准上、下行端口时，同时创建另一条正线连接"><input type="checkbox" checked={doubleTrackConnect} onChange={(e) => setDoubleTrackConnect(e.target.checked)} />双线连接</label>
+            <label className="wiring-check"><input type="checkbox" checked={continuousPlace} onChange={(e) => setContinuousPlace(e.target.checked)} title="连续放置模式：选择模板后可多次点击放置" />连续放置</label>
+          </div>
+
+          <div className="wiring-toolbar-group">
+            <button className="wiring-btn" onClick={fitCanvas}>适应画布</button>
+            <button className="wiring-btn" onClick={() => setViewport({ panX: 0, panY: 0, scale: 1 })}>原始尺寸</button>
+            <button className="wiring-btn" onClick={centerCanvas}>居中</button>
+          </div>
+        </div>
+
+        {/* ── Row 3: 高级选项 + 隐藏输入 ── */}
+        <div className="wiring-toolbar-hidden-inputs" aria-hidden="true">
+          <input ref={csvImportRef} type="file" accept=".csv,text/csv" multiple onChange={(event) => { void handleCsvImportSelect(event); }} style={{ display: "none" }} />
+          <input ref={bgImageInputRef} type="file" accept="image/*" onChange={handleBgImageInputChange} style={{ display: "none" }} />
+          <input ref={iconArchiveInputRef} type="file" accept=".zip,application/zip" onChange={(event) => { void handleIconArchiveInput(event); }} style={{ display: "none" }} />
+          <input ref={iconDirectoryInputRef} type="file" accept="image/*" multiple {...({ webkitdirectory: "", directory: "" } as React.InputHTMLAttributes<HTMLInputElement>)} onChange={(event) => { void handleIconDirectoryInput(event); }} style={{ display: "none" }} />
+        </div>
+      </header>
+
+      {showCsvImport && csvImportPreview && (
+        <div className="wiring-dialog-backdrop" role="presentation" onMouseDown={cancelCsvImport}>
+          <section className="wiring-dialog wiring-csv-import-modal" role="dialog" aria-modal="true" aria-labelledby="wiring-csv-title" onMouseDown={(event) => event.stopPropagation()}>
+            <header><h2 id="wiring-csv-title">导入 CSV 预览</h2><button className="wiring-btn icon-only" onClick={cancelCsvImport} title="关闭">×</button></header>
+            <div className="wiring-csv-body">
+              <div className="wiring-csv-files">
+                {csvImportPreview.files.map((file) => <span key={file.type}><b>{file.name}</b><small>{file.rowCount} 行</small></span>)}
+                {csvImportPreview.missingTypes.map((type) => <span key={type} className="missing"><b>{type}.csv</b><small>保留当前数据</small></span>)}
+              </div>
+              <div className="wiring-csv-diff">
+                <span>线路 <b>+{csvImportPreview.diff.addedLines}</b> / <i>-{csvImportPreview.diff.removedLines}</i> / ~{csvImportPreview.diff.changedLines}</span>
+                <span>站点 <b>+{csvImportPreview.diff.addedStations}</b> / <i>-{csvImportPreview.diff.removedStations}</i> / ~{csvImportPreview.diff.changedStations}</span>
+                <span>换乘 <b>+{csvImportPreview.diff.addedTransfers}</b> / <i>-{csvImportPreview.diff.removedTransfers}</i> / ~{csvImportPreview.diff.changedTransfers}</span>
+              </div>
+              {csvImportPreview.issues.length ? <div className="wiring-csv-issues">{csvImportPreview.issues.map((issue, index) => <p key={index} className={issue.severity === "错误" ? "error" : "warning"}><b>{issue.severity}</b>{issue.fileName && <code>{issue.fileName}{issue.rowNumber ? `:${issue.rowNumber}` : ""}{issue.field ? ` · ${issue.field}` : ""}</code>}{issue.category}：{issue.message}</p>)}</div> : <p className="wiring-csv-ok">校验通过，未发现问题</p>}
+              <details className="wiring-csv-preview-data"><summary>导入预览（{csvImportPreview.lines.length} 线路 / {csvImportPreview.stations.length} 站点 / {csvImportPreview.transfers.length} 换乘）</summary><div>{csvImportPreview.stations.slice(0, 12).map((station) => <span key={station.id}>{station.lineId} · {station.sequence} · {station.nameZh}</span>)}</div></details>
+            </div>
+            <footer><button className="wiring-btn" onClick={cancelCsvImport}>取消</button><button className="wiring-btn primary" onClick={confirmCsvImport} disabled={hasBlockingIssues(csvImportPreview.issues)}>{hasBlockingIssues(csvImportPreview.issues) ? "存在错误，无法导入" : "确认导入"}</button></footer>
+          </section>
+        </div>
+      )}
+
+      {newCanvasOpen && (
+        <div className="wiring-dialog-backdrop" role="presentation" onMouseDown={() => setNewCanvasOpen(false)}>
+          <section className="wiring-dialog" role="dialog" aria-modal="true" aria-labelledby="new-canvas-title" onMouseDown={(event) => event.stopPropagation()}>
+            <header><h2 id="new-canvas-title">新建画布</h2><button className="wiring-btn icon-only" onClick={() => setNewCanvasOpen(false)} title="关闭">×</button></header>
+            <div className="wiring-dialog-grid">
+              <label>预设<select defaultValue="hd" onChange={(event) => applyCanvasPreset(event.target.value)}><option value="custom">自定义</option>{CANVAS_PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}</select></label>
+              <label>画布名称<input value={newCanvasDraft.name} onChange={(event) => setNewCanvasDraft((prev) => ({ ...prev, name: event.target.value }))} /></label>
+              <label>宽度<input type="number" min={320} value={newCanvasDraft.width} onChange={(event) => setNewCanvasDraft((prev) => ({ ...prev, width: Number(event.target.value) }))} /></label>
+              <label>高度<input type="number" min={320} value={newCanvasDraft.height} onChange={(event) => setNewCanvasDraft((prev) => ({ ...prev, height: Number(event.target.value) }))} /></label>
+              <label>背景色<input type="color" value={newCanvasDraft.backgroundColor} onChange={(event) => setNewCanvasDraft((prev) => ({ ...prev, backgroundColor: event.target.value }))} /></label>
+              <label>方向<select value={newCanvasDraft.orientation} onChange={(event) => setNewCanvasDraft((prev) => {
+                const orientation = event.target.value as "landscape" | "portrait";
+                const shouldSwap = (orientation === "landscape" && prev.width < prev.height) || (orientation === "portrait" && prev.width > prev.height);
+                return { ...prev, orientation, ...(shouldSwap ? { width: prev.height, height: prev.width } : {}) };
+              })}><option value="landscape">横向</option><option value="portrait">纵向</option></select></label>
+              <label>网格间距<input type="number" min={5} value={newCanvasDraft.gridSize} onChange={(event) => setNewCanvasDraft((prev) => ({ ...prev, gridSize: Number(event.target.value) }))} /></label>
+              <label className="wiring-check"><input type="checkbox" checked={newCanvasDraft.showGrid} onChange={(event) => setNewCanvasDraft((prev) => ({ ...prev, showGrid: event.target.checked }))} />显示网格</label>
+            </div>
+            <footer><button className="wiring-btn" onClick={() => setNewCanvasOpen(false)}>取消</button><button className="wiring-btn primary" onClick={createNewCanvas}>创建画布</button></footer>
+          </section>
+        </div>
+      )}
+
+      {/* ══════════ 三栏主体 ══════════ */}
+      <div className="wiring-body">
+        {/* ── 左侧面板 ── */}
+        <aside className="wiring-left-panel">
+          <div className="wiring-left-content">
+            {/* ── 区段 1: 元件库（默认展开）── */}
+            <div className={`wiring-accordion-section ${expandedSections.library ? "open" : ""}`}>
+              <button className="wiring-accordion-header" onClick={() => toggleSection("library")}>
+                <span className="wiring-accordion-arrow">▸</span>
+                <span className="wiring-accordion-title">元件库</span>
+                <small className="wiring-accordion-meta">{Object.keys(templateGroups).length + 2} 类 · {MODULE_TEMPLATES.length + 11} 元件</small>
+              </button>
+              {expandedSections.library && (
+                <div className="wiring-accordion-body">
+                  <div className={`wiring-template-category wiring-text-tool-category ${collapsedCats.base ? "collapsed" : ""}`}>
+                    <button className="wiring-library-cat-header" onClick={() => toggleCat("base")} title={collapsedCats.base ? "展开基础元素" : "收起基础元素"}>
+                      <span className="wiring-accordion-arrow">▸</span>
+                      <h4>基础元素</h4>
+                    </button>
+                    <div className="wiring-template-grid">
+                      <div
+                        className={`wiring-template-card wiring-text-tool-card ${activeTool === "label" ? "active" : ""}`}
+                        onClick={() => {
+                          setSelectedIds([]);
+                          setActiveTemplateId(null);
+                          setPendingElement(null);
+                          setActiveTool("label");
+                          setStatus("文字工具：点击画布放置独立文字");
+                        }}
+                      >
+                        <div className="wiring-template-preview wiring-text-tool-preview"><span>Aa</span></div>
+                        <div className="wiring-template-info">
+                          <b>文字工具</b>
+                          <small>独立文字、线路标注和说明，不参与自动避障</small>
+                        </div>
+                      </div>
+                      {SHAPE_CARDS.map((card) => (
+                        <div
+                          key={card.shapeType}
+                          data-shape={card.shapeType}
+                          className={`wiring-template-card ${activeTool === "shape" && pendingElement?.kind === "shape" && pendingElement.shapeType === card.shapeType ? "active" : ""}`}
+                          onClick={() => selectShape(card.shapeType)}
+                        >
+                          <div className="wiring-template-preview"><ShapePreview shapeType={card.shapeType} /></div>
+                          <div className="wiring-template-info">
+                            <b>{SHAPE_META[card.shapeType].label}</b>
+                            <small>{card.description}</small>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className={`wiring-template-category ${collapsedCats.signals ? "collapsed" : ""}`}>
+                    <button className="wiring-library-cat-header" onClick={() => toggleCat("signals")} title={collapsedCats.signals ? "展开工程图标" : "收起工程图标"}>
+                      <span className="wiring-accordion-arrow">▸</span>
+                      <h4>工程图标</h4>
+                    </button>
+                    <div className="wiring-template-grid">
+                      {SIGNAL_CARDS.map((card) => (
+                        <div
+                          key={card.shapeType}
+                          data-signal={card.shapeType}
+                          className={`wiring-template-card ${activeTool === "shape" && pendingElement?.kind === "shape" && pendingElement.shapeType === card.shapeType ? "active" : ""}`}
+                          onClick={() => selectShape(card.shapeType)}
+                        >
+                          <div className="wiring-template-preview"><ShapePreview shapeType={card.shapeType} /></div>
+                          <div className="wiring-template-info">
+                            <b>{SHAPE_META[card.shapeType].label}</b>
+                            <small>{card.description}</small>
+                          </div>
+                        </div>
+                      ))}
+                      {NUMBER_CARDS.map((card) => (
+                        <div
+                          key={card.numeralType}
+                          data-number={card.numeralType}
+                          className={`wiring-template-card ${activeTool === "shape" && pendingElement?.kind === "number" && pendingElement.numeralType === card.numeralType ? "active" : ""}`}
+                          onClick={() => selectNumber(card.numeralType)}
+                        >
+                          <div className="wiring-template-preview"><svg width={54} height={38}><text x={27} y={26} textAnchor="middle" fontSize={18} fontWeight={700} fill="#202124">{card.numeralType === "track" ? "1道" : "1#"}</text></svg></div>
+                          <div className="wiring-template-info">
+                            <b>{card.numeralType === "track" ? "股道编号" : "道岔编号"}</b>
+                            <small>{card.description}</small>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  {(Object.entries(templateGroups) as [TemplateCategory, ModuleTemplate[]][]).map(([cat, tpls]) => (
+                    <div key={cat} className={`wiring-template-category ${collapsedCats[cat] ? "collapsed" : ""}`}>
+                      <button className="wiring-library-cat-header" onClick={() => toggleCat(cat)} title={collapsedCats[cat] ? `展开${tpls[0]?.categoryName}` : `收起${tpls[0]?.categoryName}`}>
+                        <span className="wiring-accordion-arrow">▸</span>
+                        <h4>{tpls[0]?.categoryName}</h4>
+                      </button>
+                      <div className="wiring-template-grid">
+                        {tpls.map((tpl) => (
+                          <div
+                            key={tpl.id}
+                            className={`wiring-template-card ${activeTemplateId === tpl.id ? "active" : ""}`}
+                            onClick={() => selectTemplate(tpl.id)}
+                          >
+                            <div className="wiring-template-preview"><TemplatePreviewSvg template={tpl} /></div>
+                            <div className="wiring-template-info">
+                              <b>{tpl.name}</b>
+                              <small>{tpl.description}</small>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* ── 区段 2: 线路站点（默认展开）── */}
+            <div className={`wiring-accordion-section ${expandedSections.stations ? "open" : ""}`}>
+              <button className="wiring-accordion-header" onClick={() => toggleSection("stations")}>
+                <span className="wiring-accordion-arrow">▸</span>
+                <span className="wiring-accordion-title">线路站点</span>
+                {data && <small className="wiring-accordion-meta">{data.lines.length} 线 · {data.stations.length} 站</small>}
+              </button>
+              {expandedSections.stations && (
+                <div className="wiring-accordion-body">
+                  <input className="wiring-data-search" placeholder="搜索站点…" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
+                  <label className="wiring-check" style={{ marginBottom: 10 }}><input type="checkbox" checked={showPlacedOnly} onChange={(e) => setShowPlacedOnly(e.target.checked)} />只看已放置</label>
+                  <label className="wiring-check" style={{ marginBottom: 10 }}><input type="checkbox" checked={filterState.placement === "unplaced"} onChange={(e) => updateFilters({ placement: e.target.checked ? "unplaced" : "all" })} />只看未放置</label>
+                  {pendingSourcePlacements.length > 0 && <div className="wiring-pending-tray"><b>待放置站点（{pendingSourcePlacements.length}）</b>{pendingSourcePlacements.map((change) => { const context = adjacentStationContext(change.entityId); return <span key={change.id}><span>{context?.station.nameZh || change.entityId} · {context?.line?.nameZh || context?.station.lineId || "未知线路"}<small>{context?.previous?.nameZh || "起点"} → {context?.next?.nameZh || "终点"}</small></span><button className="wiring-btn" onClick={() => beginStationPlacement(change.entityId)}>手动放置</button><button className="wiring-btn" disabled={!context?.previousModule || !context.nextModule} onClick={() => insertStationBetweenNeighbors(change.entityId)}>插入相邻模块之间</button></span>; })}</div>}
+                  {advancedMode && physicalStationSuggestions.length > 0 && <div className="wiring-change-panel"><header><b>物理站映射建议</b></header>{physicalStationSuggestions.map((suggestion) => <div className={`wiring-change-row ${suggestion.ambiguous ? "warning" : "info"}`} key={suggestion.id}><span>{suggestion.displayName} · {suggestion.sourceStationIds.join(" / ")}{suggestion.ambiguous ? "（存在歧义）" : ""}</span><button onClick={() => confirmPhysicalMapping(suggestion)}>确认合并</button></div>)}</div>}
+                  {unresolvedChanges.length > 0 && <div className="wiring-change-panel"><header><b>数据变更</b><select value={changeSeverity} onChange={(e) => setChangeSeverity(e.target.value as typeof changeSeverity)}><option value="all">全部</option><option value="error">错误</option><option value="warning">警告</option><option value="info">信息</option></select><button onClick={acceptInformationalChanges}>接受全部信息项</button></header>{unresolvedChanges.filter((change) => change.status === "unresolved" && (changeSeverity === "all" || change.severity === changeSeverity)).map((change) => <div className={`wiring-change-row ${change.severity}`} key={change.id}><span>{change.entityType} {change.entityId}: {change.changeType}</span><details><summary>新旧值</summary><code>{JSON.stringify(change.oldValue)} → {JSON.stringify(change.newValue)}</code></details><button onClick={() => locateSourceChange(change)}>定位/手动</button><button onClick={() => resolveSourceChange(change, "accepted")}>接受</button><button onClick={() => resolveSourceChange(change, "ignored")}>忽略</button></div>)}</div>}
+                  {Array.from(filteredStations.entries()).map(([lineId, stations]) => {
+                    const line = data.lines.find((l) => l.id === lineId);
+                    if (!line) return null;
+                    return (
+                      <div key={lineId} className="wiring-line-group">
+                        <header>
+                          <i style={{ background: line.lineColor }} />
+                          <b>{line.nameZh}</b>
+                          <small>{stations.length} 站</small>
+                        </header>
+                        {stations.map((st) => {
+                          const placed = placedStationIds.has(st.id);
+                          return (
+                            <div
+                              key={st.id}
+                              className={`wiring-station-row ${placed ? "placed" : ""}`}
+                              draggable={!placed}
+                              onDragStart={(event) => { event.dataTransfer.setData("application/x-transit-station", st.id); event.dataTransfer.effectAllowed = "copy"; }}
+                              onDoubleClick={() => !placed && beginStationPlacement(st.id)}
+                              onClick={() => {
+                                if (placed) {
+                                  const mod = modules.find((module) => isOnActivePage(module.pageId) && module.sourceStationIds.includes(st.id));
+                                  if (mod) { setSelectedIds([mod.id]); setStatus(`已定位「${st.nameZh}」`); }
+                                } else {
+                                  beginStationPlacement(st.id);
+                                  setStatus(`选择模板放置「${st.nameZh}」`);
+                                }
+                              }}
+                            >
+                              <span className="seq">{st.sequence}</span>
+                              {st.icon ? <ProjectStationIcon repository={projectRepository} projectId={projectId} name={st.icon} embeddedSrc={findAssetByFilename(assets, st.icon)?.dataUrl} /> : <span className="station-icon-missing" title="未配置图标">!</span>}
+                              <span className="name">{st.nameZh}</span>
+                              {!st.isOpen && <span className="badge closed">未开通</span>}
+                              {(st.terminalType === "terminal" || st.terminalType === "through-start" || st.terminalType === "through-end") && <span className="badge terminal">终点</span>}
+                              {placed && <span className="badge" style={{ color: "var(--accent-strong)", background: "var(--accent-soft)" }}>已放置</span>}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* ── 区段 4: 图标资源（无资源时隐藏）── */}
+            {assets.length > 0 && (
+              <div className={`wiring-accordion-section ${expandedSections.assets ? "open" : ""}`}>
+                <button className="wiring-accordion-header" onClick={() => toggleSection("assets")}>
+                  <span className="wiring-accordion-arrow">▸</span>
+                  <span className="wiring-accordion-title">图标资源</span>
+                  <small className="wiring-accordion-meta">{assets.length} 项</small>
+                </button>
+                {expandedSections.assets && (
+                  <div className="wiring-accordion-body">
+                    <div className="wiring-asset-grid">{assets.map((asset) => <div key={asset.id} className="wiring-asset-item"><button className="wiring-asset-place" onClick={() => placeGraphic(asset)} title={`放置 ${asset.name}`}>{asset.dataUrl ? <img src={asset.dataUrl} alt="" /> : <span>!</span>}<small>{asset.name}</small></button><button className="wiring-asset-remove" onClick={() => deleteAsset(asset)} title={`删除 ${asset.name}`}>×</button></div>)}</div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── 区段 5: 图层（默认折叠）── */}
+            <div className={`wiring-accordion-section ${expandedSections.layers ? "open" : ""}`}>
+              <button className="wiring-accordion-header" onClick={() => toggleSection("layers")}>
+                <span className="wiring-accordion-arrow">▸</span>
+                <span className="wiring-accordion-title">图层</span>
+                <small className="wiring-accordion-meta">{layers.length} 层</small>
+              </button>
+              {expandedSections.layers && (
+                <div className="wiring-accordion-body">
+                  <div className="wiring-layer-tree">
+                    <button className="wiring-btn wiring-layer-add-btn" onClick={() => createSubLayer(null)}>＋ 新建图层</button>
+                    {getRootLayers(layers).map((layer) => renderLayerNode(layer, 0))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </aside>
+
+        {/* ── 中央画布 ── */}
+        <div className="wiring-canvas-area">
+          <svg
+            ref={svgRef}
+            className={`wiring-svg wiring-canvas-svg tool-${activeTool}`}
+            onMouseDown={handleSvgMouseDown}
+            onWheel={handleWheel}
+            onDragOver={(event) => { if (event.dataTransfer.types.includes("application/x-transit-station")) event.preventDefault(); }}
+            onDrop={(event) => { const stationId = event.dataTransfer.getData("application/x-transit-station"); if (!stationId) return; event.preventDefault(); const point = toWorld(event.clientX, event.clientY); placeModule(point.x, point.y, "island_platform", stationId); }}
+          >
+            {/* 渐变定义：线路颜色渐变（双线站台/异色区间） */}
+            {colorSpecs.gradientDefs.length > 0 && (
+              <defs>
+                {colorSpecs.gradientDefs.map((def) => (
+                  <linearGradient
+                    key={def.id}
+                    id={def.id}
+                    x1={def.x1}
+                    y1={def.y1}
+                    x2={def.x2}
+                    y2={def.y2}
+                    gradientUnits="userSpaceOnUse"
+                  >
+                    {def.stops.map((stop, stopIndex) => (
+                      <stop key={stopIndex} offset={stop.offset} stopColor={stop.color} />
+                    ))}
+                  </linearGradient>
+                ))}
+              </defs>
+            )}
+            {/* 背景 */}
+            <rect className="canvas-bg" x={0} y={0} width="100%" height="100%" fill="#e9eef1" />
+
+            {/* 视口变换组 */}
+            <g transform={transform}>
+              {/* 画布纸张 */}
+              <rect className="canvas-paper" x={0} y={0} width={pageWidth} height={pageHeight} fill={activePage?.backgroundColor || "#FFFFFF"} stroke="#dce4e8" strokeWidth={1} />
+
+              {/* 网格 */}
+              {showGrid && (
+                <g className="grid-group">
+                  {gridLines.v.map((x, i) => (
+                    <line key={`v${i}`} x1={x} y1={0} x2={x} y2={pageHeight} className={`grid-line ${x % (pageGridSize * 5) === 0 ? "major" : ""}`} />
+                  ))}
+                  {gridLines.h.map((y, i) => (
+                    <line key={`h${i}`} x1={0} y1={y} x2={pageWidth} y2={y} className={`grid-line ${y % (pageGridSize * 5) === 0 ? "major" : ""}`} />
+                  ))}
+                </g>
+              )}
+
+              {/* 统一对象序列：图层树 -> zIndex -> 创建顺序，跨类别也保持同一规则。 */}
+              {orderedRenderItems.map(renderCanvasItem)}
+
+              {(activeTool === "connect" || activeTool === "auto") && connectFrom && (() => {
+                const source = getConnectionEndpoint(connectFrom.moduleId, connectFrom.portId, modules, resolvedTemplateMap);
+                if (!source) return null;
+                const start = worldPortPosition(source.module, source.template, source.portId);
+                const edx = mouseWorld.x - start.x;
+                const edy = mouseWorld.y - start.y;
+                const edist = Math.hypot(edx, edy);
+                const destination = previewDestinationFor(source);
+                if (destination) {
+                  return connectionPreviewPaths(source, destination).map((path, index) => (
+                    <path key={`connection-preview-${index}`} className="connection-preview" d={path} fill="none" pointerEvents="none" />
+                  ));
+                }
+                // 预览曲线：与 makeConnection 的双控制点逻辑一致
+                if (Math.abs(edx) > 12 && Math.abs(edy) > 12 && edist > 20) {
+                  const fromDir = start.direction;
+                  const fromRad = (fromDir * Math.PI) / 180;
+                  const extDist = Math.min(edist * 0.35, 150);
+                  const cp1x = start.x + Math.cos(fromRad) * extDist;
+                  const cp1y = start.y + Math.sin(fromRad) * extDist;
+                  // 假定终点端口朝向与起点相反（180°差），计算进入方向
+                  const toRad = ((fromDir + 180) % 360) * Math.PI / 180;
+                  const cp2x = mouseWorld.x - Math.cos(toRad) * extDist;
+                  const cp2y = mouseWorld.y - Math.sin(toRad) * extDist;
+                  // CP1 曲率手柄指向 CP2
+                  const d1x = cp2x - cp1x, d1y = cp2y - cp1y;
+                  const d1Len = Math.hypot(d1x, d1y) || 1;
+                  const h1 = Math.min(d1Len * 0.4, 80);
+                  // CP2 曲率手柄指向终点
+                  const d2x = mouseWorld.x - cp2x, d2y = mouseWorld.y - cp2y;
+                  const d2Len = Math.hypot(d2x, d2y) || 1;
+                  const h2 = Math.min(d2Len * 0.4, 60);
+                  return (
+                    <path
+                      className="connection-preview"
+                      d={`M${start.x.toFixed(1)},${start.y.toFixed(1)} Q${(cp1x + d1x / d1Len * h1).toFixed(1)},${(cp1y + d1y / d1Len * h1).toFixed(1)} ${cp1x.toFixed(1)},${cp1y.toFixed(1)} Q${(cp2x + d2x / d2Len * h2).toFixed(1)},${(cp2y + d2y / d2Len * h2).toFixed(1)} ${cp2x.toFixed(1)},${cp2y.toFixed(1)} L${mouseWorld.x.toFixed(1)},${mouseWorld.y.toFixed(1)}`}
+                      fill="none" pointerEvents="none"
+                    />
+                  );
+                }
+                return <line className="connection-preview" x1={start.x} y1={start.y} x2={mouseWorld.x} y2={mouseWorld.y} pointerEvents="none" />;
+              })()}
+
+              {/* 放置预览（ghost） */}
+              {activeTool === "place" && activeTemplateId && (() => {
+                const tpl = templateMap.get(activeTemplateId);
+                if (!tpl) return null;
+                return (
+                  <g transform={`translate(${mouseWorld.x},${mouseWorld.y}) rotate(${placementRotation} ${tpl.width / 2} ${tpl.height / 2})${moduleMirrorTransform(tpl.width, tpl.height, placementMirrorX, placementMirrorY)}`} className="module-ghost" pointerEvents="none">
+                    {tpl.tracks.map((track, index) => track.curved
+                      ? <path key={index} className={`track ${track.type}`} d={templateTrackPathD(track)} />
+                      : <line key={index} className={`track ${track.type}`} x1={track.x1} y1={track.y1} x2={track.x2} y2={track.y2} />
+                    )}
+                    {tpl.platforms.map((p, i) => (
+                      <rect key={i} className="platform" x={p.x} y={p.y} width={p.width} height={p.height} rx={2} />
+                    ))}
+                  </g>
+                );
+              })()}
+
+              {/* 形状/编号放置预览（ghost） */}
+              {activeTool === "shape" && pendingElement && (() => {
+                if (pendingElement.kind === "shape") {
+                  const meta = SHAPE_META[pendingElement.shapeType];
+                  return (
+                    <g transform={`translate(${mouseWorld.x},${mouseWorld.y})${moduleMirrorTransform(meta.width, meta.height, placementMirrorX, placementMirrorY)}`} className="module-ghost" pointerEvents="none">
+                      <g opacity={0.65}>
+                        <ShapeGraphic shapeType={pendingElement.shapeType} width={meta.width} height={meta.height} fill={meta.defaultFill} stroke={meta.defaultStroke} />
+                      </g>
+                    </g>
+                  );
+                }
+                return (
+                  <g transform={`translate(${mouseWorld.x},${mouseWorld.y})`} className="module-ghost" pointerEvents="none">
+                    <text fontSize={16} fontWeight={700} fill="#202124" opacity={0.65}>{pendingElement.numeralType === "track" ? "1道" : "1#"}</text>
+                  </g>
+                );
+              })()}
+
+              {/* 框选矩形 */}
+              {selectionBox && (() => {
+                const w1 = toWorld(selectionBox.x1, selectionBox.y1);
+                const w2 = toWorld(selectionBox.x2, selectionBox.y2);
+                return (
+                  <rect
+                    x={Math.min(w1.x, w2.x)}
+                    y={Math.min(w1.y, w2.y)}
+                    width={Math.abs(w2.x - w1.x)}
+                    height={Math.abs(w2.y - w1.y)}
+                    fill="rgba(8,127,164,0.1)"
+                    stroke="var(--accent)"
+                    strokeWidth={1.5 / viewport.scale}
+                    strokeDasharray={`${4 / viewport.scale} ${3 / viewport.scale}`}
+                    pointerEvents="none"
+                  />
+                );
+              })()}
+            </g>
+          </svg>
+
+          {/* 画布工具栏 */}
+          <div className="wiring-canvas-toolbar">
+            <button onClick={() => zoomBy(1.2)} title="放大">+</button>
+            <span className="zoom-display">{Math.round(viewport.scale * 100)}%</span>
+            <button onClick={() => zoomBy(0.83)} title="缩小">−</button>
+            <button onClick={resetViewport} title="重置视图">⊙</button>
+          </div>
+
+          {/* 提示 */}
+          {activeTool === "place" && activeTemplateId && (
+            <div className="wiring-canvas-hint">
+              点击画布放置「{templateMap.get(activeTemplateId)?.name}」· Esc 取消
+            </div>
+          )}
+          {activeTool === "label" && (
+            <div className="wiring-canvas-hint">
+              点击画布放置文字标签 · 双击编辑文字 · Esc 取消
+            </div>
+          )}
+          {activeTool === "shape" && pendingElement && (
+            <div className="wiring-canvas-hint">
+              {pendingElement.kind === "number"
+                ? `点击画布放置${pendingElement.numeralType === "track" ? "股道编号" : "道岔编号"} · Esc 取消`
+                : `点击画布放置「${SHAPE_META[pendingElement.shapeType].label}」 · Esc 取消`}
+            </div>
+          )}
+          {(activeTool === "connect" || activeTool === "auto") && (
+            <div className="wiring-canvas-hint">
+              {connectFrom ? "选择兼容端口完成连接 · 单击空白处、右键或 Esc 取消" : "选择起点端口；标准上、下行端口可一次建立双线区间"}
+            </div>
+          )}
+        </div>
+
+        {/* ── 右侧属性面板 ── */}
+        <aside className="wiring-right-panel">
+          <div className="wiring-right-header">
+            <h3>{selectedMod ? selectedMod.name : selectedPlatform ? "站台" : selectedGraphic ? (selectedGraphic.shapeType ? (SHAPE_META[selectedGraphic.shapeType]?.label || "图形") : "图标") : selectedLabel ? (selectedLabel.numeralType === "track" ? `股道编号` : selectedLabel.numeralType === "switch" ? `道岔编号` : `文字标签`) : selectedConnection ? `轨道连接` : selectedBgImage ? `背景图：${selectedBgImage.name}` : selectedTransferGroup ? `换乘组合` : placementTargetName ? "放置属性" : "属性面板"}</h3>
+            <p>{selectedMod ? `${selectedTemplate?.name || ""} · ${selectedMod.id.slice(-6)}` : selectedPlatform ? `${selectedPlatform.platformType} · ${selectedPlatform.id.slice(-6)}` : selectedGraphic ? (selectedGraphic.shapeType ? `${SHAPE_META[selectedGraphic.shapeType]?.label || "图形"} · ${selectedGraphic.id.slice(-6)}` : `${assets.find((asset) => asset.id === selectedGraphic.assetId)?.name || "资源缺失"} · ${selectedGraphic.id.slice(-6)}`) : selectedLabel ? `${selectedLabel.text.slice(0, 12)}${selectedLabel.text.length > 12 ? "…" : ""} · ${selectedLabel.id.slice(-6)}` : selectedConnection ? `${selectedConnection.crossingType === "plain" ? "平面交叉" : selectedConnection.crossingType === "gap" ? "断开" : "桥梁跨越"} · ${selectedConnection.id.slice(-6)}` : selectedBgImage ? `${selectedBgImage.naturalWidth}×${selectedBgImage.naturalHeight}` : selectedTransferGroup ? `${selectedTransferGroup.moduleIds.length} 个模块` : placementTargetName ? `下一次放置：${placementTargetName}` : "设置下一次放置的默认属性"}</p>
+          </div>
+          <div className="wiring-right-content">
+            {selectedConnection && !selectedMod && !selectedLabel ? (
+              <>
+                <div className="wiring-prop-group">
+                  <h5>连接属性</h5>
+                  <div className="wiring-prop-row">
+                    <label>连接 ID</label>
+                    <input type="text" value={selectedConnection.id.slice(-8)} readOnly style={{ fontFamily: "Consolas, monospace", color: "var(--muted)" }} />
+                  </div>
+                  <div className="wiring-prop-row">
+                    <label>起点模块</label>
+                    <input type="text" value={modules.find((m) => m.id === selectedConnection.fromModuleId)?.name || "?"} readOnly style={{ color: "var(--muted)" }} />
+                  </div>
+                  <div className="wiring-prop-row">
+                    <label>终点模块</label>
+                    <input type="text" value={modules.find((m) => m.id === selectedConnection.toModuleId)?.name || "?"} readOnly style={{ color: "var(--muted)" }} />
+                  </div>
+                  <div className="wiring-prop-row" style={{ gridTemplateColumns: "1fr" }}>
+                    <div className="wiring-crossing-buttons">
+                      <button
+                        className={`wiring-btn ${(selectedConnection.zIndexMode ?? "auto") === "auto" ? "active" : ""}`}
+                        onClick={() => {
+                          if ((selectedConnection.zIndexMode ?? "auto") === "auto") return;
+                          history.captureSnapshot("连接层级改为自动");
+                          setConnections((prev) => updateConnectionAndPairedRail(prev, selectedConnection.id, (connection) => ({ ...connection, zIndexMode: "auto" })));
+                          setHasUnsavedChanges(true);
+                        }}
+                      >
+                        自动层级
+                      </button>
+                      <button
+                        className={`wiring-btn ${selectedConnection.zIndexMode === "manual" ? "active" : ""}`}
+                        onClick={() => {
+                          if (selectedConnection.zIndexMode === "manual") return;
+                          const currentIndex = effectiveConnectionZIndex(selectedConnection, modules);
+                          history.captureSnapshot("连接层级改为手动");
+                          setConnections((prev) => updateConnectionAndPairedRail(prev, selectedConnection.id, (connection) => ({ ...connection, zIndexMode: "manual", zIndex: currentIndex })));
+                          setHasUnsavedChanges(true);
+                        }}
+                      >
+                        手动层级
+                      </button>
+                    </div>
+                  </div>
+                  <div className="wiring-prop-row">
+                    <label>Z-Index</label>
+                    {(selectedConnection.zIndexMode ?? "auto") === "auto" ? (
+                      <input type="number" step={0.5} value={effectiveConnectionZIndex(selectedConnection, modules)} readOnly />
+                    ) : (
+                      <input
+                        key={`${selectedConnection.id}:${selectedConnection.zIndex}`}
+                        type="number"
+                        step={0.5}
+                        defaultValue={selectedConnection.zIndex}
+                        onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}
+                        onBlur={(event) => {
+                          const zIndex = Number(event.target.value);
+                          if (!Number.isFinite(zIndex) || zIndex === selectedConnection.zIndex) return;
+                          history.captureSnapshot("修改连接层级");
+                          setConnections((prev) => updateConnectionAndPairedRail(prev, selectedConnection.id, (connection) => ({ ...connection, zIndexMode: "manual", zIndex })));
+                          setHasUnsavedChanges(true);
+                        }}
+                      />
+                    )}
+                  </div>
+                  <p style={{ fontSize: 10, color: "var(--muted)", margin: "4px 0 0" }}>
+                    {(selectedConnection.zIndexMode ?? "auto") === "auto"
+                      ? "动态取两端模块 Z-Index 的中间值；端点层级变化时自动更新"
+                      : "使用手动 Z-Index；双线区间的配对轨道会同步更新"}
+                  </p>
+                </div>
+
+                <div className="wiring-prop-group">
+                  <h5>交叉类型</h5>
+                  <div className="wiring-prop-row" style={{ gridTemplateColumns: "1fr" }}>
+                    <div className="wiring-crossing-buttons">
+                      <button
+                        className={`wiring-btn ${selectedConnection.crossingType === "plain" ? "active" : ""}`}
+                        onClick={() => updateConnection(selectedConnection.id, { crossingType: "plain" }, "设置平面交叉")}
+                      >
+                        平面交叉
+                      </button>
+                      <button
+                        className={`wiring-btn ${selectedConnection.crossingType === "gap" ? "active" : ""}`}
+                        onClick={() => updateConnection(selectedConnection.id, { crossingType: "gap" }, "设置断开")}
+                      >
+                        断开
+                      </button>
+                      <button
+                        className={`wiring-btn ${selectedConnection.crossingType === "bridge" ? "active" : ""}`}
+                        onClick={() => updateConnection(selectedConnection.id, { crossingType: "bridge" }, "设置桥梁")}
+                      >
+                        桥梁
+                      </button>
+                    </div>
+                  </div>
+                  <p style={{ fontSize: 11, color: "var(--muted)", margin: "4px 0 0" }}>
+                    {selectedConnection.crossingType === "plain" && "两条轨道在同一平面交叉，列车通过道岔切换。"}
+                    {selectedConnection.crossingType === "gap" && "轨道在此处断开，两条线路立体分离，无道岔连接。"}
+                    {selectedConnection.crossingType === "bridge" && "一条轨道以桥梁形式跨越另一条轨道，无平面交叉。"}
+                  </p>
+                </div>
+
+                <div className="wiring-prop-group">
+                  <h5>线型</h5>
+                  <div className="wiring-prop-row" style={{ gridTemplateColumns: "1fr" }}>
+                    <div className="wiring-crossing-buttons">
+                      <button
+                        className={`wiring-btn ${(selectedConnection.lineStyle ?? "solid") === "solid" ? "active" : ""}`}
+                        onClick={() => setConnectionLineStyle(selectedConnection.id, "solid")}
+                      >
+                        实线
+                      </button>
+                      <button
+                        className={`wiring-btn ${selectedConnection.lineStyle === "dashed" ? "active" : ""}`}
+                        onClick={() => setConnectionLineStyle(selectedConnection.id, "dashed")}
+                      >
+                        虚线
+                      </button>
+                    </div>
+                  </div>
+                  <p style={{ fontSize: 11, color: "var(--muted)", margin: "4px 0 0" }}>
+                    {selectedConnection.lineStyle === "dashed"
+                      ? "虚线表示预留段、未开通段或地下隧道段等非在用轨道"
+                      : "实线表示在用轨道；虚线可用于预留段、未开通段或地下隧道段"}
+                  </p>
+                </div>
+
+                <div className="wiring-prop-group">
+                  <h5>交叉点（{selectedConnection.crossingPoints.length}）</h5>
+                  {selectedConnection.crossingPoints.length === 0 ? (
+                    <p style={{ fontSize: 11, color: "var(--muted)", margin: "4px 0" }}>暂无交叉点</p>
+                  ) : (
+                    <div className="wiring-crossing-list">
+                      {selectedConnection.crossingPoints.map((cp, i) => (
+                        <div key={i} className="wiring-crossing-row">
+                          <span>#{i + 1} ({Math.round(cp.x)}, {Math.round(cp.y)})</span>
+                          <button className="wiring-btn danger" onClick={() => removeCrossingPoint(selectedConnection.id, i)}>删除</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <p style={{ fontSize: 10, color: "var(--muted)", margin: "6px 0 0" }}>
+                    双击连接切换交叉类型 · 点击轨道线上的圆点删除交叉点
+                  </p>
+                </div>
+
+                <div className="wiring-prop-group">
+                  <h5>贝塞尔曲线</h5>
+                  {(() => {
+                    const manualOn = selectedConnection.autoCurve === false || manualCurveEditingId === selectedConnection.id;
+                    const autoOn = !manualOn && selectedConnection.autoCurve !== false;
+                    const straightOn = selectedConnection.autoCurve === false && selectedConnection.controlPoints.length === 0;
+                    return (
+                      <div className="wiring-segmented" style={{ margin: "4px 0" }}>
+                        <button
+                          className={straightOn ? "active" : ""}
+                          onClick={() => {
+                            if (straightOn) return;
+                            history.captureSnapshot("切换为直线连接");
+                            const conn = connections.find((c) => c.id === selectedConnection.id);
+                            if (!conn) return;
+                            const ends = getConnectionEndpoints(conn);
+                            setConnections((prev) => updateConnectionAndPairedRail(prev, selectedConnection.id, (c) => ({
+                              ...c,
+                              autoCurve: false,
+                              controlPoints: [],
+                            })));
+                            setHasUnsavedChanges(true);
+                            setStatus("已切换为直线连接");
+                          }}
+                          title="直线连接，不生成控制点"
+                        >
+                          直线
+                        </button>
+                        <button
+                          className={manualOn ? "active" : ""}
+                          onClick={() => {
+                            if (manualOn) return;
+                            const conn = connections.find((c) => selectedConnection && c.id === selectedConnection.id);
+                            if (!conn) return;
+                            history.captureSnapshot("切换为手动曲线");
+                            // 从直线切换过来 → 生成隐式锚点让用户有起点
+                            const ends = getConnectionEndpoints(conn);
+                            const cps = ends
+                              ? createAutoControlPoints(ends.from, ends.to, ends.fromDir, ends.toDir, {
+                                  middle: `${conn.fromModuleId}:${conn.fromPortId}:${conn.toModuleId}:${conn.toPortId}:middle`,
+                                })
+                              : [];
+                            setManualCurveEditingId(conn.id);
+                            setConnections((prev) => updateConnectionAndPairedRail(prev, conn.id, (c) => ({
+                              ...c,
+                              autoCurve: false,
+                              controlPoints: cps,
+                            })));
+                            setHasUnsavedChanges(true);
+                            setStatus("已切换为手动曲线模式，可自由调整轨道节点");
+                          }}
+                          title="手动调整轨道节点和曲率"
+                        >
+                          手动曲线
+                        </button>
+                        <button
+                          className={autoOn ? "active" : ""}
+                          onClick={() => {
+                            if (autoOn) return;
+                            setManualCurveEditingId(null);
+                            history.captureSnapshot("切换为自动曲线");
+                            setConnections((prev) => updateConnectionAndPairedRail(prev, selectedConnection.id, (c) => ({
+                              ...c,
+                              autoCurve: true,
+                            })));
+                            setHasUnsavedChanges(true);
+                            setTimeout(() => regenerateAutoControlPoints(selectedConnection.id), 0);
+                          }}
+                          title="根据端口位置自动生成对称贝塞尔曲线"
+                        >
+                          自动曲线
+                        </button>
+                      </div>
+                    );
+                  })()}
+                  <p style={{ fontSize: 10, color: "var(--muted)", margin: "2px 0" }}>
+                    直线：无控制点, 直线连接 · 手动：自由调整 · 自动：端口移动时自动更新
+                  </p>
+                </div>
+
+                <div className="wiring-prop-group">
+                  <h5>连接轨道颜色</h5>
+                  <div className="wiring-prop-row" style={{ gridTemplateColumns: "1fr" }}>
+                    <div className="wiring-crossing-buttons">
+                      <button
+                        className={`wiring-btn ${(selectedConnection.colorMode ?? "auto") === "auto" ? "active" : ""}`}
+                        onClick={() => updateConnection(selectedConnection.id, { colorMode: "auto" }, "设置自动轨道颜色")}
+                      >
+                        自动跟随
+                      </button>
+                      <button
+                        className={`wiring-btn ${selectedConnection.colorMode === "manual" ? "active" : ""}`}
+                        onClick={() => updateConnection(selectedConnection.id, { colorMode: "manual" }, "设置手动轨道颜色")}
+                      >
+                        手动
+                      </button>
+                    </div>
+                  </div>
+                  {(selectedConnection.colorMode ?? "auto") === "manual" && (
+                    <div className="wiring-prop-row">
+                      <label>颜色</label>
+                      <div className="wiring-prop-color">
+                        <input type="color" value={selectedConnection.color || "#202124"} onChange={(e) => updateConnection(selectedConnection.id, { color: e.target.value }, "设置连接颜色")} />
+                        <input type="text" value={selectedConnection.color || "#202124"} onChange={(e) => updateConnection(selectedConnection.id, { color: e.target.value }, "设置连接颜色")} />
+                      </div>
+                    </div>
+                  )}
+                  <p style={{ fontSize: 10, color: "var(--muted)", margin: "4px 0 0" }}>
+                    {(selectedConnection.colorMode ?? "auto") === "auto"
+                      ? "根据两端模块的线路颜色自动填充；两端颜色不同时显示渐变色"
+                      : "使用手动指定的颜色"}
+                  </p>
+                </div>
+
+                <div className="wiring-prop-group">
+                  {(() => {
+                    const visibleCPs = selectedConnection.controlPoints.filter((cp) => !cp.implicit);
+                    const implicitCount = selectedConnection.controlPoints.length - visibleCPs.length;
+                    return (
+                      <>
+                        <h5>轨道节点（{visibleCPs.length}{implicitCount > 0 ? ` + ${implicitCount} 隐式` : ""}）</h5>
+                        <div className="wiring-prop-row" style={{ gridTemplateColumns: "1fr" }}>
+                          <div className="wiring-crossing-buttons">
+                            <button className="wiring-btn" onClick={() => addControlPointMidpoint(selectedConnection.id)}>
+                              添加节点
+                            </button>
+                            <button
+                              className="wiring-btn danger"
+                              disabled={selectedConnection.controlPoints.length === 0}
+                              onClick={() => straightenConnection(selectedConnection.id)}
+                            >
+                              拉直轨道
+                            </button>
+                          </div>
+                        </div>
+                        {visibleCPs.length === 0 && implicitCount === 0 ? (
+                          <p style={{ fontSize: 11, color: "var(--muted)", margin: "4px 0" }}>
+                            暂无节点（直线连接）
+                          </p>
+                        ) : (
+                          <div className="wiring-crossing-list">
+                            {visibleCPs.map((cp, i) => (
+                              <div key={cp.id} className="wiring-crossing-row">
+                                <span>
+                                  #{i + 1} ({Math.round(cp.x)}, {Math.round(cp.y)}){cp.curved ? " · 曲" : ""}
+                                </span>
+                                <button className="wiring-btn danger" onClick={() => removeControlPoint(selectedConnection.id, cp.id)}>
+                                  删除
+                                </button>
+                              </div>
+                            ))}
+                            {implicitCount > 0 && (
+                              <p style={{ fontSize: 10, color: "var(--muted)", margin: "2px 0" }}>
+                                · {implicitCount} 个隐式锚点（靠近端口，自动平滑）
+                              </p>
+                            )}
+                          </div>
+                        )}
+                        <p style={{ fontSize: 10, color: "var(--muted)", margin: "6px 0 0" }}>
+                          Alt+点击轨道添加节点 · 拖拽节点移动 · 双击节点切换曲率 · 拖拽手柄调整弧度
+                        </p>
+                      </>
+                    );
+                  })()}
+                </div>
+
+                <div className="wiring-prop-actions">
+                  <button onClick={() => cycleCrossingType(selectedConnection.id)}>切换交叉类型</button>
+                  <button className="danger" onClick={() => {
+                    history.captureSnapshot("删除连接");
+                    const pairedId = selectedConnection.pairedConnectionId;
+                    setConnections((prev) => prev.filter((c) => c.id !== selectedConnection.id && c.id !== pairedId));
+                    setSelectedIds([]);
+                    setHasUnsavedChanges(true);
+                    setStatus("已删除连接");
+                  }}>🗑 删除连接</button>
+                </div>
+              </>
+            ) : selectedBgImage && !selectedMod ? (
+              <>
+                <div className="wiring-prop-group">
+                  <h5>背景图属性{bgLocked ? <span style={{ fontSize: 10, color: "var(--muted)" }}>（已锁定，全部参数不可修改）</span> : null}</h5>
+                  <div className="wiring-prop-row">
+                    <label>名称</label>
+                    <input type="text" value={selectedBgImage.name} disabled={bgLocked} onChange={(e) => updateBgImage(selectedBgImage.id, { name: e.target.value })} />
+                  </div>
+                  <div className="wiring-prop-row">
+                    <label>X 坐标</label>
+                    <input type="number" value={Math.round(selectedBgImage.x)} disabled={bgLocked} onChange={(e) => updateBgImage(selectedBgImage.id, { x: parseFloat(e.target.value) || 0 })} />
+                  </div>
+                  <div className="wiring-prop-row">
+                    <label>Y 坐标</label>
+                    <input type="number" value={Math.round(selectedBgImage.y)} disabled={bgLocked} onChange={(e) => updateBgImage(selectedBgImage.id, { y: parseFloat(e.target.value) || 0 })} />
+                  </div>
+                  <div className="wiring-prop-row">
+                    <label>缩放</label>
+                    <input type="number" step="0.1" min="0.05" value={selectedBgImage.scale.toFixed(2)} disabled={bgLocked} onChange={(e) => updateBgImage(selectedBgImage.id, { scale: parseFloat(e.target.value) || 0.1 })} />
+                  </div>
+                  <div className="wiring-prop-row"><label>旋转</label><input type="number" value={selectedBgImage.rotation || 0} disabled={bgLocked} onChange={(e) => updateBgImage(selectedBgImage.id, { rotation: Number(e.target.value) })} /></div>
+                  <div className="wiring-prop-row">
+                    <label>不透明度</label>
+                    <input type="range" min="0.05" max="1" step="0.05" value={selectedBgImage.opacity} disabled={bgLocked} onChange={(e) => updateBgImage(selectedBgImage.id, { opacity: parseFloat(e.target.value) })} />
+                  </div>
+                  <div className="wiring-prop-row">
+                    <label>图层</label>
+                    <select value={selectedBgImage.layerId} disabled={bgLocked} onChange={(e) => updateBgImage(selectedBgImage.id, { layerId: e.target.value })}>
+                      {layers.filter((l) => selectableLayers.includes(l.id)).map((l) => (
+                        <option key={l.id} value={l.id}>{l.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div className="wiring-prop-actions">
+                  <button disabled={bgLocked} onClick={() => updateBgImage(selectedBgImage.id, fitBackgroundToCanvas(selectedBgImage, activePage), "背景图适应画布")}>适应画布</button>
+                  <button disabled={bgLocked} onClick={() => updateBgImage(selectedBgImage.id, centerBackgroundOnCanvas(selectedBgImage, activePage), "背景图居中")}>居中</button>
+                  <button disabled={bgLocked} onClick={() => updateBgImage(selectedBgImage.id, restoreBackgroundSize(selectedBgImage), "恢复背景原始尺寸")}>原始尺寸</button>
+                  <button disabled={bgLocked} onClick={() => replaceBackgroundInputRef.current?.click()}>替换</button>
+                  <input ref={replaceBackgroundInputRef} type="file" accept="image/*" onChange={handleReplaceBackgroundInput} style={{ display: "none" }} />
+                  <button onClick={() => updateBgImage(selectedBgImage.id, { locked: !selectedBgImage.locked })}>
+                    {selectedBgImage.locked ? "🔓 解锁背景图" : "🔒 锁定背景图"}
+                  </button>
+                  <button disabled={bgLocked} onClick={() => updateBgImage(selectedBgImage.id, { visible: !selectedBgImage.visible })}>
+                    {selectedBgImage.visible ? "🙈 隐藏背景图" : "👁 显示背景图"}
+                  </button>
+                  <button className="danger" onClick={() => deleteBgImage(selectedBgImage.id)}>🗑 删除背景图</button>
+                </div>
+              </>
+            ) : selectedMod && selectedTemplate ? (
+              <>
+                {isLayerLocked(selectedMod.layerId) && (
+                  <p style={{ fontSize: 11, color: "#b45309", background: "#fef3c7", border: "1px solid #f59e0b", borderRadius: 6, padding: "6px 8px", margin: "0 0 10px", lineHeight: 1.45 }}>
+                    该模块所在图层已锁定，此面板中的修改（含站点关联）不会生效。请在左侧图层面板解锁后再编辑。
+                  </p>
+                )}
+                <div className="wiring-prop-group">
+                  <h5>基本信息</h5>
+                  <div className="wiring-prop-row">
+                    <label>名称</label>
+                    <input type="text" value={selectedMod.name} onChange={(e) => updateModule(selectedMod.id, { name: e.target.value })} />
+                  </div>
+                  <div className="wiring-prop-row">
+                    <label>自定义标签</label>
+                    <input type="text" value={selectedMod.customLabel || ""} placeholder="覆盖站名" onChange={(e) => updateModule(selectedMod.id, { customLabel: e.target.value })} />
+                  </div>
+                  <div className="wiring-prop-row">
+                    <label>模板</label>
+                    <select value={selectedMod.templateId} onChange={(e) => {
+                      const newTplId = e.target.value;
+                      const newTemplate = templateMap.get(newTplId);
+                      const patch: Partial<DiagramModule> = { templateId: newTplId };
+                      if (newTemplate?.params?.length) {
+                        patch.customParams = Object.fromEntries(newTemplate.params.map(p => [p.key, p.default]));
+                      } else {
+                        patch.customParams = undefined;
+                      }
+                      if (!newTemplate || !supportsAvoidanceTracks(newTemplate.id)) patch.avoidanceTracks = undefined;
+                      updateModule(selectedMod.id, patch);
+                    }}>
+                      {MODULE_TEMPLATES.map((t) => (
+                        <option key={t.id} value={t.id}>{t.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {supportsAvoidanceTracks(selectedTemplate.id) && (
+                  <div className="wiring-prop-group">
+                    <h5>站台与股道</h5>
+                    <label className="wiring-check" title="避让线在当前站点元件内部从正线分出并接回，不会增加对外连接点">
+                      <input
+                        type="checkbox"
+                        checked={selectedMod.avoidanceTracks === true}
+                        onChange={(event) => updateModule(
+                          selectedMod.id,
+                          { avoidanceTracks: event.target.checked },
+                          event.target.checked ? "启用避让线" : "关闭避让线",
+                        )}
+                      />
+                      显示避让线
+                    </label>
+                    <p style={{ fontSize: 10, color: "var(--muted)", margin: "6px 0 0" }}>
+                      岛式位于正线外侧，侧式位于两条正线之间；同台换乘同时显示外侧与中央避让线。
+                    </p>
+                  </div>
+                )}
+
+                <div className="wiring-prop-group">
+                  <h5>位置与变换</h5>
+                  <div className="wiring-prop-row">
+                    <label>X 坐标</label>
+                    <input type="number" value={selectedMod.x} onChange={(e) => updateModule(selectedMod.id, { x: parseInt(e.target.value) || 0 })} />
+                  </div>
+                  <div className="wiring-prop-row">
+                    <label>Y 坐标</label>
+                    <input type="number" value={selectedMod.y} onChange={(e) => updateModule(selectedMod.id, { y: parseInt(e.target.value) || 0 })} />
+                  </div>
+                  <div className="wiring-prop-row wiring-module-direction">
+                    <label>方向</label>
+                    <div className="wiring-direction-control" aria-label="模块旋转方向">
+                      <div className="wiring-rotation-grid">
+                        {(advancedMode ? [
+                          { rotation: 225, icon: "↖", label: "左上 225°", position: "top-left" },
+                          { rotation: 270, icon: "↑", label: "向上 270°", position: "top" },
+                          { rotation: 315, icon: "↗", label: "右上 315°", position: "top-right" },
+                          { rotation: 180, icon: "←", label: "向左 180°", position: "left" },
+                          { rotation: 0, icon: "·", label: "恢复默认 0°", position: "center", reset: true },
+                          { rotation: 0, icon: "→", label: "向右 0°", position: "right" },
+                          { rotation: 135, icon: "↙", label: "左下 135°", position: "bottom-left" },
+                          { rotation: 90, icon: "↓", label: "向下 90°", position: "bottom" },
+                          { rotation: 45, icon: "↘", label: "右下 45°", position: "bottom-right" },
+                        ] : [
+                          { rotation: 270, icon: "↑", label: "向上 270°", position: "top" },
+                          { rotation: 180, icon: "←", label: "向左 180°", position: "left" },
+                          { rotation: 0, icon: "→", label: "向右 0°", position: "right" },
+                          { rotation: 90, icon: "↓", label: "向下 90°", position: "bottom" },
+                        ]).map((option) => (
+                          <button
+                            key={option.position}
+                            type="button"
+                            className={`${option.position} ${!option.reset && selectedMod.rotation === option.rotation ? "active" : ""}`}
+                            onClick={() => updateModule(selectedMod.id, { rotation: option.rotation }, "旋转模块")}
+                            title={option.label}
+                            aria-label={option.label}
+                          >
+                            {option.icon}
+                          </button>
+                        ))}
+                        {!advancedMode && <span className="wiring-direction-center" aria-hidden="true">·</span>}
+                      </div>
+                      <span>{selectedMod.rotation}°</span>
+                    </div>
+                  </div>
+                  <div className="wiring-prop-row">
+                    <label>镜像</label>
+                    <MirrorToggle mirrorX={selectedMod.mirrorX} mirrorY={selectedMod.mirrorY} onChange={(next) => updateModule(selectedMod.id, next, "镜像模块")} />
+                  </div>
+                  <div className="wiring-prop-row">
+                    <label>层级</label>
+                    <select value={selectedMod.layerId} onChange={(e) => updateModule(selectedMod.id, { layerId: e.target.value })}>
+                      {layers.filter((l) => selectableLayers.includes(l.id)).map((l) => (
+                        <option key={l.id} value={l.id}>{l.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  {advancedMode && (
+                    <div className="wiring-prop-row">
+                      <label>Z-Index</label>
+                      <input type="number" value={selectedMod.zIndex} onChange={(e) => updateModule(selectedMod.id, { zIndex: parseInt(e.target.value) || 0 })} />
+                    </div>
+                  )}
+                  {selectedTemplate.labels.some((label) => (label.fontSize || 13) <= 9) && (
+                    <label className="wiring-check" title="只影响本组件的左开、右开、折返等辅助小字">
+                      <input type="checkbox" checked={selectedMod.showAuxLabels !== false} onChange={(e) => updateModule(selectedMod.id, { showAuxLabels: e.target.checked })} />显示辅助标识
+                    </label>
+                  )}
+                </div>
+
+                {selectedTemplate.params && selectedTemplate.params.length > 0 && (
+                  <div className="wiring-prop-group">
+                    <h5>道岔参数</h5>
+                    {selectedTemplate.params.map((param) => (
+                      <div key={param.key} className="wiring-prop-row wiring-param-slider">
+                        <label>{param.label}</label>
+                        <input
+                          type="range"
+                          min={param.min}
+                          max={param.max}
+                          step={param.step || 1}
+                          value={selectedMod.customParams?.[param.key] ?? param.default}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value);
+                            updateModule(selectedMod.id, {
+                              customParams: { ...(selectedMod.customParams || {}), [param.key]: val },
+                            });
+                          }}
+                        />
+                        <span className="wiring-param-value">
+                          {selectedMod.customParams?.[param.key] ?? param.default}{param.unit || ""}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="wiring-prop-group">
+                  <h5>线路关联</h5>
+                  <div className="wiring-line-picker">
+                    {data.lines.map((line) => {
+                      const checked = selectedMod.lineIds.includes(line.id);
+                      return (
+                        <label key={line.id} className="wiring-line-option" title={`${line.id} · ${line.nameZh}`}>
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => updateModule(
+                              selectedMod.id,
+                              { lineIds: checked ? selectedMod.lineIds.filter((id) => id !== line.id) : [...selectedMod.lineIds, line.id] },
+                              checked ? "取消关联线路" : "关联线路",
+                            )}
+                          />
+                          <span className="wiring-line-swatch" style={{ background: line.lineColor || "#202124" }} />
+                          <span className="wiring-line-name">{line.id} · {line.nameZh}</span>
+                        </label>
+                      );
+                    })}
+                    {!data.lines.length && <p style={{ fontSize: 11, color: "var(--muted)", margin: "4px 0" }}>暂无线路数据</p>}
+                  </div>
+                </div>
+
+                <div className="wiring-prop-group">
+                  <h5>元件轨道颜色</h5>
+                  <div className="wiring-prop-row" style={{ gridTemplateColumns: "1fr" }}>
+                    <div className="wiring-crossing-buttons">
+                      <button
+                        className={`wiring-btn ${selectedMod.trackColorMode === "default" ? "active" : ""}`}
+                        onClick={() => updateModule(selectedMod.id, { trackColorMode: "default" }, "设置默认轨道颜色")}
+                      >
+                        深灰
+                      </button>
+                      <button
+                        className={`wiring-btn ${(selectedMod.trackColorMode ?? "line") === "line" ? "active" : ""}`}
+                        onClick={() => updateModule(selectedMod.id, { trackColorMode: "line" }, "设置跟随线路颜色")}
+                      >
+                        跟随线路
+                      </button>
+                      <button
+                        className={`wiring-btn ${selectedMod.trackColorMode === "manual" ? "active" : ""}`}
+                        onClick={() => updateModule(selectedMod.id, { trackColorMode: "manual" }, "设置手动轨道颜色")}
+                      >
+                        手动
+                      </button>
+                    </div>
+                  </div>
+                  {selectedMod.trackColorMode === "manual" && (
+                    <div className="wiring-prop-row">
+                      <label>颜色</label>
+                      <div className="wiring-prop-color">
+                        <input type="color" value={selectedMod.trackColor || "#202124"} onChange={(e) => updateModule(selectedMod.id, { trackColor: e.target.value }, "设置轨道颜色")} />
+                        <input type="text" value={selectedMod.trackColor || "#202124"} onChange={(e) => updateModule(selectedMod.id, { trackColor: e.target.value }, "设置轨道颜色")} />
+                      </div>
+                    </div>
+                  )}
+                  <p style={{ fontSize: 10, color: "var(--muted)", margin: "4px 0 0" }}>
+                    {selectedMod.trackColorMode === "default" && "使用固定深灰轨道（不跟随线路）"}
+                    {(selectedMod.trackColorMode ?? "line") === "line" && "根据模块关联的线路颜色自动填充；站台、道岔和场段元件均适用，多条线路时按轨道位置分配颜色"}
+                    {selectedMod.trackColorMode === "manual" && "使用手动指定的颜色"}
+                  </p>
+                </div>
+
+                <div className="wiring-prop-group">
+                  <h5>站名颜色</h5>
+                  <div className="wiring-prop-row" style={{ gridTemplateColumns: "1fr" }}>
+                    <div className="wiring-crossing-buttons">
+                      <button
+                        className={`wiring-btn ${selectedMod.labelColorMode === "default" ? "active" : ""}`}
+                        onClick={() => updateModule(selectedMod.id, { labelColorMode: "default" }, "设置默认站名颜色")}
+                      >
+                        深灰
+                      </button>
+                      <button
+                        className={`wiring-btn ${(selectedMod.labelColorMode ?? "line") === "line" ? "active" : ""}`}
+                        onClick={() => updateModule(selectedMod.id, { labelColorMode: "line" }, "设置站名跟随线路颜色")}
+                      >
+                        跟随线路
+                      </button>
+                    </div>
+                  </div>
+                  <p style={{ fontSize: 10, color: "var(--muted)", margin: "4px 0 0" }}>
+                    {selectedMod.labelColorMode === "default" && "使用固定深灰站名（不跟随线路）"}
+                    {(selectedMod.labelColorMode ?? "line") === "line" && "根据模块关联的线路颜色自动着色；多条线路时按站名位置取色"}
+                  </p>
+                </div>
+
+                <div className="wiring-prop-group">
+                  <h5>站点关联</h5>
+                  <div className="wiring-prop-row" style={{ gridTemplateColumns: "1fr" }}>
+                    <select
+                      value=""
+                      disabled={isLayerLocked(selectedMod.layerId)}
+                      onChange={(e) => {
+                        const stationId = e.target.value;
+                        if (!stationId) return;
+                        const nextStationIds = addStationAssociation(selectedMod.sourceStationIds, stationId);
+                        const primaryStation = data.stations.find((station) => station.id === nextStationIds[0]);
+                        updateModule(selectedMod.id, {
+                          sourceStationIds: nextStationIds,
+                          lineIds: lineIdsForStationAssociations(nextStationIds, data.stations),
+                        }, "添加关联站点");
+                        // 第一条记录决定站名，其余记录只提供换乘线路与颜色。
+                        if (primaryStation) {
+                          setLabels((prev) => prev.map((label) =>
+                            label.attachedToId === selectedMod.id
+                              ? { ...label, text: label.language === "en" ? (primaryStation.nameEn || label.text) : (primaryStation.nameZh || label.text), sourceStationId: primaryStation.id }
+                              : label,
+                          ));
+                        }
+                      }}
+                    >
+                      <option value="">添加关联站点…</option>
+                      {data.stations.filter((station) => !selectedMod.sourceStationIds.includes(station.id)).map((st) => (
+                        <option key={st.id} value={st.id}>{st.nameZh} ({st.id})</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="wiring-station-associations">
+                    {selectedMod.sourceStationIds.length === 0 && <span className="wiring-association-empty">尚未关联站点</span>}
+                    {selectedMod.sourceStationIds.map((stationId, index) => {
+                      const station = data.stations.find((candidate) => candidate.id === stationId);
+                      const line = station ? data.lines.find((candidate) => candidate.id === station.lineId) : undefined;
+                      return <div className="wiring-station-association" key={stationId}>
+                        <span className="wiring-association-swatch" style={{ background: line?.lineColor || "#98a2b3" }} />
+                        <span><b>{station?.nameZh || stationId}</b><small>{line?.nameZh || station?.lineId || "源数据已删除"}{index === 0 ? " · 主站名" : " · 换乘"}</small></span>
+                        <button
+                          type="button"
+                          aria-label={`移除 ${station?.nameZh || stationId}`}
+                          disabled={isLayerLocked(selectedMod.layerId)}
+                          onClick={() => {
+                            const nextStationIds = removeStationAssociation(selectedMod.sourceStationIds, stationId);
+                            const primaryStation = data.stations.find((candidate) => candidate.id === nextStationIds[0]);
+                            updateModule(selectedMod.id, {
+                              sourceStationIds: nextStationIds,
+                              lineIds: lineIdsForStationAssociations(nextStationIds, data.stations),
+                            }, "移除关联站点");
+                            if (primaryStation) {
+                              setLabels((prev) => prev.map((label) => label.attachedToId === selectedMod.id
+                                ? { ...label, text: label.language === "en" ? (primaryStation.nameEn || label.text) : primaryStation.nameZh, sourceStationId: primaryStation.id }
+                                : label));
+                            }
+                          }}
+                        >×</button>
+                      </div>;
+                    })}
+                  </div>
+                  <p style={{ fontSize: 10, color: "var(--muted)", margin: "6px 0 0", lineHeight: 1.5 }}>任意站台均可关联多条线路；第一项决定显示站名，其余项作为换乘线路参与轨道、站台和文字着色。</p>
+                  {selectedMod.sourceStationIds.some((stationId) => !data.stations.some((station) => station.id === stationId)) && <p className="wiring-source-deleted">源数据已删除。可以重新绑定、保留为自定义对象或删除模块。</p>}
+                </div>
+
+                <div className="wiring-prop-actions">
+                  <button onClick={() => updateModule(selectedMod.id, { locked: !selectedMod.locked })}>
+                    {selectedMod.locked ? "🔓 解锁模块" : "🔒 锁定模块"}
+                  </button>
+                  <button onClick={() => {
+                    const next = selectedIds.length > 1 ? selectedIds : [selectedMod.id];
+                    const topZ = modules.length;
+                    // 所属站台 zIndex 不随模块自动变化，这里把增量同步过去（站台才能提到连接线之上）
+                    let nextPlatforms = platforms;
+                    for (const modId of next) {
+                      const mod = modules.find((m) => m.id === modId);
+                      if (!mod || mod.zIndex === topZ) continue;
+                      nextPlatforms = shiftOwnedPlatformZIndex(nextPlatforms, modId, topZ - mod.zIndex);
+                    }
+                    if (nextPlatforms !== platforms) setPlatforms(nextPlatforms);
+                    setModules((prev) => prev.map((m) => next.includes(m.id) ? { ...m, zIndex: prev.length } : m));
+                  }}>⬆ 置于顶层</button>
+                  {selectedTemplate?.platforms.length ? (editingPlatformModuleId === selectedMod.id ? <button onClick={() => { setEditingPlatformModuleId(null); setSelectedIds([selectedMod.id]); }} style={{ background: "var(--accent)", color: "#fff" }}>✅ 完成编辑</button> : <button onClick={() => setEditingPlatformModuleId(selectedMod.id)}>✏️ 编辑站台</button>) : null}
+                  <button className="danger" onClick={deleteSelected}>🗑 删除模块</button>
+                </div>
+              </>
+            ) : selectedPlatform ? (
+              <>
+                <div className="wiring-prop-group">
+                  <h5>颜色模式</h5>
+                  <div className="wiring-prop-row" style={{ gridTemplateColumns: "1fr" }}>
+                    <div className="wiring-crossing-buttons">
+                      <button
+                        className={`wiring-btn ${selectedPlatform.colorMode === "default" ? "active" : ""}`}
+                        onClick={() => updatePlatform(selectedPlatform.id, { colorMode: "default" }, "设置默认站台颜色")}
+                      >
+                        深灰
+                      </button>
+                      <button
+                        className={`wiring-btn ${(selectedPlatform.colorMode ?? "line") === "line" ? "active" : ""}`}
+                        onClick={() => updatePlatform(selectedPlatform.id, { colorMode: "line" }, "设置跟随线路颜色")}
+                      >
+                        跟随线路
+                      </button>
+                    </div>
+                  </div>
+                  <p style={{ fontSize: 10, color: "var(--muted)", margin: "4px 0 0" }}>
+                    {selectedPlatform.colorMode === "default" && "使用下方手动指定的填充色"}
+                    {(selectedPlatform.colorMode ?? "line") === "line" && "根据所属模块的线路颜色自动填充；多条线路时自上而下显示渐变色"}
+                  </p>
+                </div>
+
+                <div className="wiring-prop-group">
+                  <h5>站台几何</h5>
+                  <div className="wiring-prop-row"><label>类型</label><select value={selectedPlatform.platformType} onChange={(e) => updatePlatform(selectedPlatform.id, { platformType: e.target.value as PlatformObject["platformType"] })}><option value="side">侧式</option><option value="island">岛式</option><option value="double_island">双岛</option><option value="spanish">西班牙式</option></select></div>
+                  <div className="wiring-prop-row"><label>X</label><input type="number" value={Math.round(selectedPlatform.x)} onChange={(e) => updatePlatform(selectedPlatform.id, { x: Number(e.target.value) })} /></div>
+                  <div className="wiring-prop-row"><label>Y</label><input type="number" value={Math.round(selectedPlatform.y)} onChange={(e) => updatePlatform(selectedPlatform.id, { y: Number(e.target.value) })} /></div>
+                  <div className="wiring-prop-row"><label>长度</label><input type="number" min={10} value={selectedPlatform.width} onChange={(e) => updatePlatform(selectedPlatform.id, { width: Math.max(10, Number(e.target.value)) })} /></div>
+                  <div className="wiring-prop-row"><label>厚度</label><input type="number" min={4} value={selectedPlatform.height} onChange={(e) => updatePlatform(selectedPlatform.id, { height: Math.max(4, Number(e.target.value)) })} /></div>
+                  <div className="wiring-prop-row"><label>旋转</label><input type="number" value={selectedPlatform.rotation} onChange={(e) => updatePlatform(selectedPlatform.id, { rotation: Number(e.target.value) })} /></div>
+                  {selectedPlatform.colorMode === "default" && <div className="wiring-prop-row"><label>填充</label><input type="color" value={selectedPlatform.fill} onChange={(e) => updatePlatform(selectedPlatform.id, { fill: e.target.value })} /></div>}
+                  <div className="wiring-prop-row"><label>图层</label><select value={selectedPlatform.layerId} onChange={(e) => updatePlatform(selectedPlatform.id, { layerId: e.target.value })}>{layers.filter((layer) => selectableLayers.includes(layer.id)).map((layer) => <option key={layer.id} value={layer.id}>{layer.name}</option>)}</select></div>
+                  <div className="wiring-prop-row" style={{ gridTemplateColumns: "1fr" }}>
+                    <div className="wiring-crossing-buttons">
+                      <button
+                        className={`wiring-btn ${(selectedPlatform.zIndexMode ?? "auto") === "auto" ? "active" : ""}`}
+                        onClick={() => {
+                          if ((selectedPlatform.zIndexMode ?? "auto") === "auto") return;
+                          updatePlatform(selectedPlatform.id, { zIndexMode: "auto" }, "站台层级跟随模块");
+                        }}
+                      >跟随模块</button>
+                      <button
+                        className={`wiring-btn ${selectedPlatform.zIndexMode === "manual" ? "active" : ""}`}
+                        onClick={() => {
+                          if (selectedPlatform.zIndexMode === "manual") return;
+                          const ownedIndex = selectedPlatform.moduleId
+                            ? platforms.filter((platform) => platform.moduleId === selectedPlatform.moduleId).findIndex((platform) => platform.id === selectedPlatform.id)
+                            : 0;
+                          updatePlatform(selectedPlatform.id, {
+                            zIndexMode: "manual",
+                            zIndex: effectivePlatformZIndex(selectedPlatform, modules, Math.max(0, ownedIndex)),
+                          }, "站台层级改为手动");
+                        }}
+                      >手动层级</button>
+                    </div>
+                  </div>
+                  <div className="wiring-prop-row"><label>Z-Index</label>{(selectedPlatform.zIndexMode ?? "auto") === "auto" ? (
+                    <input type="number" step={0.001} value={effectivePlatformZIndex(selectedPlatform, modules, Math.max(0, selectedPlatform.moduleId ? platforms.filter((platform) => platform.moduleId === selectedPlatform.moduleId).findIndex((platform) => platform.id === selectedPlatform.id) : 0))} readOnly />
+                  ) : (
+                    <input
+                      key={`${selectedPlatform.id}:${selectedPlatform.zIndex}`}
+                      type="number"
+                      step={0.5}
+                      defaultValue={selectedPlatform.zIndex}
+                      onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}
+                      onBlur={(event) => {
+                        const zIndex = Number(event.target.value);
+                        if (!Number.isFinite(zIndex) || zIndex === selectedPlatform.zIndex) return;
+                        updatePlatform(selectedPlatform.id, { zIndexMode: "manual", zIndex }, "修改站台层级");
+                      }}
+                    />
+                  )}</div>
+                </div>
+                <div className="wiring-prop-actions"><button onClick={() => updatePlatform(selectedPlatform.id, { locked: !selectedPlatform.locked })}>{selectedPlatform.locked ? "解锁" : "锁定"}</button><button className="danger" onClick={() => deletePlatform(selectedPlatform.id)}>删除站台</button></div>
+              </>
+            ) : selectedGraphic ? (
+              <>
+                <div className="wiring-prop-group"><h5>图标位置</h5>
+                  <div className="wiring-prop-row"><label>定位模式</label><select value={selectedGraphic.positionMode} onChange={(e) => { const positionMode = e.target.value as AttachedGraphic["positionMode"]; updateGraphic(selectedGraphic.id, { positionMode, attachedToId: positionMode === "attached" ? selectedGraphic.attachedToId || selectedMod?.id : undefined }); }}><option value="independent">独立</option><option value="attached">附着</option></select></div>
+                  {selectedGraphic.positionMode === "attached" && <div className="wiring-prop-row"><label>附着模块</label><select value={selectedGraphic.attachedToId || ""} onChange={(e) => { const owner = modules.find((module) => module.id === e.target.value); updateGraphic(selectedGraphic.id, { attachedToId: owner?.id, offsetX: owner ? selectedGraphic.x - owner.x : 0, offsetY: owner ? selectedGraphic.y - owner.y : 0 }); }}><option value="">未选择</option>{modules.map((module) => <option key={module.id} value={module.id}>{module.name}</option>)}</select></div>}
+                  <div className="wiring-prop-row"><label>宽度</label><input type="number" min={4} value={selectedGraphic.width} onChange={(e) => updateGraphic(selectedGraphic.id, { width: Math.max(4, Number(e.target.value)) })} /></div>
+                  <div className="wiring-prop-row"><label>高度</label><input type="number" min={4} value={selectedGraphic.height} onChange={(e) => updateGraphic(selectedGraphic.id, { height: Math.max(4, Number(e.target.value)) })} /></div>
+                  <div className="wiring-prop-row"><label>不透明度</label><input type="range" min={0.1} max={1} step={0.05} value={selectedGraphic.opacity} onChange={(e) => updateGraphic(selectedGraphic.id, { opacity: Number(e.target.value) })} /></div>
+                  <div className="wiring-prop-row"><label>旋转</label><input type="number" value={selectedGraphic.rotation} onChange={(e) => updateGraphic(selectedGraphic.id, { rotation: Number(e.target.value) })} /></div>
+                  <div className="wiring-prop-row"><label>镜像</label><MirrorToggle mirrorX={selectedGraphic.mirrorX} mirrorY={selectedGraphic.mirrorY} onChange={(next) => updateGraphic(selectedGraphic.id, next)} /></div>
+                </div>
+                {selectedGraphic.shapeType && !selectedGraphic.shapeType.startsWith("signal-") && (
+                  <div className="wiring-prop-group">
+                    <h5>填充与描边</h5>
+                    <div className="wiring-prop-row"><label>填充</label><input type="color" value={selectedGraphic.fill || "#cce6f5"} onChange={(e) => updateGraphic(selectedGraphic.id, { fill: e.target.value })} /></div>
+                    <div className="wiring-prop-row"><label>描边</label><input type="color" value={selectedGraphic.stroke || "#202124"} onChange={(e) => updateGraphic(selectedGraphic.id, { stroke: e.target.value })} /></div>
+                  </div>
+                )}
+                <div className="wiring-prop-actions"><button onClick={() => updateGraphic(selectedGraphic.id, { locked: !selectedGraphic.locked })}>{selectedGraphic.locked ? "解锁" : "锁定"}</button><button className="danger" onClick={deleteSelected}>{selectedGraphic.shapeType ? "删除图形" : "删除图标"}</button></div>
+              </>
+            ) : selectedLabel ? (
+              <>
+                <div className="wiring-prop-group">
+                  <h5>文字内容</h5>
+                  {selectedLabel.numeralType ? (
+                    <>
+                      <div className="wiring-prop-row">
+                        <label>类型</label>
+                        <select value={selectedLabel.numeralType} onChange={(e) => updateLabel(selectedLabel.id, { numeralType: e.target.value as "track" | "switch" })}>
+                          <option value="track">股道编号</option>
+                          <option value="switch">道岔编号</option>
+                        </select>
+                      </div>
+                      <div className="wiring-prop-row">
+                        <label>编号</label>
+                        <input type="number" min={1} step={1} value={parseInt(selectedLabel.text, 10) || ""} onChange={(e) => updateLabel(selectedLabel.id, { text: String(Math.max(1, Math.round(Number(e.target.value) || 1))) })} />
+                      </div>
+                      <div className="wiring-prop-row" style={{ gridTemplateColumns: "1fr" }}>
+                        <span style={{ fontSize: 11, color: "var(--muted)" }}>显示为「{selectedLabel.numeralType === "track" ? `${selectedLabel.text}道` : `#${selectedLabel.text}`}」</span>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="wiring-prop-row" style={{ gridTemplateColumns: "1fr" }}>
+                      <textarea
+                        value={selectedLabel.text}
+                        onChange={(e) => updateLabel(selectedLabel.id, { text: e.target.value })}
+                        rows={2}
+                        style={{ minHeight: 48, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: 7, fontSize: 12, resize: "vertical", fontFamily: "inherit" }}
+                      />
+                    </div>
+                  )}
+                </div>
+
+                <div className="wiring-prop-group">
+                  <h5>位置与变换</h5>
+                  <div className="wiring-prop-row">
+                    <label>定位模式</label>
+                    <select value={selectedLabel.positionMode || (selectedLabel.attachedToId ? "attached" : "independent")} onChange={(event) => updateLabel(selectedLabel.id, { positionMode: event.target.value as "attached" | "independent" })}>
+                      <option value="independent">独立</option>
+                      <option value="attached">附着</option>
+                    </select>
+                  </div>
+                  {(selectedLabel.positionMode === "attached" || selectedLabel.attachedToId) && (
+                    <div className="wiring-prop-row">
+                      <label>附着模块</label>
+                      <select value={selectedLabel.attachedToId || ""} onChange={(event) => updateLabel(selectedLabel.id, { attachedToId: event.target.value || undefined, positionMode: event.target.value ? "attached" : "independent" })}>
+                        <option value="">未选择</option>
+                        {modules.map((module) => <option key={module.id} value={module.id}>{module.name}</option>)}
+                      </select>
+                    </div>
+                  )}
+                  <div className="wiring-prop-row">
+                    <label>X 坐标</label>
+                    <input type="number" value={Math.round(selectedLabel.x)} onChange={(e) => updateLabel(selectedLabel.id, { x: parseFloat(e.target.value) || 0 })} />
+                  </div>
+                  <div className="wiring-prop-row">
+                    <label>Y 坐标</label>
+                    <input type="number" value={Math.round(selectedLabel.y)} onChange={(e) => updateLabel(selectedLabel.id, { y: parseFloat(e.target.value) || 0 })} />
+                  </div>
+                  <div className="wiring-prop-row">
+                    <label>旋转</label>
+                    <select value={selectedLabel.rotation} onChange={(e) => updateLabel(selectedLabel.id, { rotation: parseInt(e.target.value) })}>
+                      <option value={0}>0°</option>
+                      <option value={90}>90°</option>
+                      <option value={180}>180°</option>
+                      <option value={270}>270°</option>
+                    </select>
+                  </div>
+                  <div className="wiring-prop-row">
+                    <label>层级</label>
+                    <select value={selectedLabel.layerId} onChange={(e) => updateLabel(selectedLabel.id, { layerId: e.target.value })}>
+                      {layers.filter((l) => selectableLayers.includes(l.id)).map((l) => (
+                        <option key={l.id} value={l.id}>{l.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="wiring-layer-edge-actions">
+                    <button type="button" onClick={() => moveLabelToEdge(selectedLabel, true)}>⇈ 全局置顶</button>
+                    <button type="button" onClick={() => moveLabelToEdge(selectedLabel, false)}>⇊ 全局置底</button>
+                  </div>
+                  <div className="wiring-label-overlap-stack">
+                    <b>文字范围内层级（{overlappingLabelItems.length}）</b>
+                    {overlappingLabelItems.length === 0 && <span>当前文字范围内没有其他元件</span>}
+                    {overlappingLabelItems.map((entry) => (
+                      <div key={`${entry.kind}-${entry.item.id}`}>
+                        <span title={renderItemName(entry)}>{renderItemName(entry)}</span>
+                        <button type="button" disabled={isLayerLocked(entry.item.layerId)} onClick={() => moveLabelRelative(selectedLabel, entry, true)}>置于上方</button>
+                        <button type="button" disabled={isLayerLocked(entry.item.layerId)} onClick={() => moveLabelRelative(selectedLabel, entry, false)}>置于下方</button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="wiring-prop-group">
+                  <h5>字体样式</h5>
+                  <div className="wiring-prop-row" style={{ gridTemplateColumns: "1fr" }}>
+                    <div className="wiring-crossing-buttons">
+                      <button
+                        className={`wiring-btn ${selectedLabel.colorMode === "default" ? "active" : ""}`}
+                        onClick={() => updateLabel(selectedLabel.id, { colorMode: "default" }, "设置默认文字颜色")}
+                      >
+                        手动
+                      </button>
+                      <button
+                        className={`wiring-btn ${(selectedLabel.colorMode ?? "line") === "line" ? "active" : ""}`}
+                        onClick={() => updateLabel(selectedLabel.id, { colorMode: "line" }, "设置文字跟随线路颜色")}
+                      >
+                        跟随线路
+                      </button>
+                    </div>
+                  </div>
+                  <p style={{ fontSize: 10, color: "var(--muted)", margin: "4px 0 0" }}>
+                    {selectedLabel.colorMode === "default" && "使用手动指定的颜色"}
+                    {(selectedLabel.colorMode ?? "line") === "line" && "独立文字可绑定线路；附着文字未指定线路时跟随所属模块"}
+                  </p>
+                  {(selectedLabel.colorMode ?? "line") === "line" && (
+                    <div className="wiring-prop-row">
+                      <label>绑定线路</label>
+                      <select value={selectedLabel.sourceLineId || ""} onChange={(event) => updateLabel(selectedLabel.id, { sourceLineId: event.target.value || undefined }, "绑定文字线路") }>
+                        <option value="">{selectedLabel.attachedToId ? "自动跟随附着模块" : "请选择线路"}</option>
+                        {data.lines.map((line) => <option key={line.id} value={line.id}>{line.id} · {line.nameZh}</option>)}
+                      </select>
+                    </div>
+                  )}
+                  <div className="wiring-prop-row">
+                    <label>字号</label>
+                    <input type="number" min={6} max={72} value={selectedLabel.fontSize} onChange={(e) => updateLabel(selectedLabel.id, { fontSize: parseInt(e.target.value) || 14 })} />
+                  </div>
+                  <div className="wiring-prop-row">
+                    <label>字重</label>
+                    <select value={selectedLabel.fontWeight} onChange={(e) => updateLabel(selectedLabel.id, { fontWeight: parseInt(e.target.value) })}>
+                      <option value={400}>常规 400</option>
+                      <option value={600}>半粗 600</option>
+                      <option value={700}>粗体 700</option>
+                      <option value={900}>特粗 900</option>
+                    </select>
+                  </div>
+                  {(selectedLabel.colorMode ?? "default") === "default" && (
+                    <div className="wiring-prop-row">
+                      <label>颜色</label>
+                      <div className="wiring-prop-color">
+                        <input type="color" value={selectedLabel.fill} onChange={(e) => updateLabel(selectedLabel.id, { fill: e.target.value })} />
+                        <input type="text" value={selectedLabel.fill} onChange={(e) => updateLabel(selectedLabel.id, { fill: e.target.value })} />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="wiring-prop-group">
+                  <h5>锚点方向</h5>
+                  <div className="wiring-prop-row" style={{ gridTemplateColumns: "1fr" }}>
+                    <select value={selectedLabel.anchor} onChange={(e) => updateLabel(selectedLabel.id, { anchor: e.target.value as LabelAnchor })}>
+                      <option value="top">上 (top)</option>
+                      <option value="bottom">下 (bottom)</option>
+                      <option value="left">左 (left)</option>
+                      <option value="right">右 (right)</option>
+                      <option value="top_left">左上 (top_left)</option>
+                      <option value="top_right">右上 (top_right)</option>
+                      <option value="bottom_left">左下 (bottom_left)</option>
+                      <option value="bottom_right">右下 (bottom_right)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="wiring-prop-group">
+                  <h5>背景与描边</h5>
+                  <div className="wiring-prop-row">
+                    <label>文字背景</label>
+                    <label className="wiring-check"><input type="checkbox" checked={selectedLabel.backgroundEnabled === true} onChange={(e) => updateLabel(selectedLabel.id, { backgroundEnabled: e.target.checked })} />启用实色背景</label>
+                  </div>
+                  {selectedLabel.backgroundEnabled && <>
+                    <div className="wiring-prop-row"><label>背景颜色</label><div className="wiring-prop-color"><input type="color" value={selectedLabel.backgroundColor || "#ffffff"} onChange={(e) => updateLabel(selectedLabel.id, { backgroundColor: e.target.value })} /><input type="text" value={selectedLabel.backgroundColor || "#ffffff"} onChange={(e) => updateLabel(selectedLabel.id, { backgroundColor: e.target.value })} /></div></div>
+                    <div className="wiring-prop-row"><label>背景留白</label><input type="number" min={0} max={24} value={selectedLabel.backgroundPadding ?? 4} onChange={(e) => updateLabel(selectedLabel.id, { backgroundPadding: Math.max(0, Number(e.target.value)) })} /></div>
+                  </>}
+                  <div className="wiring-prop-row">
+                    <label>文字描边</label>
+                    <label className="wiring-check"><input type="checkbox" checked={selectedLabel.backgroundMask} onChange={(e) => updateLabel(selectedLabel.id, { backgroundMask: e.target.checked })} />启用描边</label>
+                  </div>
+                  {selectedLabel.backgroundMask && (
+                    <>
+                      <div className="wiring-prop-row"><label>描边颜色</label><div className="wiring-prop-color"><input type="color" value={selectedLabel.outlineColor || "#ffffff"} onChange={(e) => updateLabel(selectedLabel.id, { outlineColor: e.target.value })} /><input type="text" value={selectedLabel.outlineColor || "#ffffff"} onChange={(e) => updateLabel(selectedLabel.id, { outlineColor: e.target.value })} /></div></div>
+                      <div className="wiring-prop-row"><label>描边宽度</label><input type="number" min={0.5} max={12} step={0.5} value={selectedLabel.maskStrokeWidth} onChange={(e) => updateLabel(selectedLabel.id, { maskStrokeWidth: parseFloat(e.target.value) || 2 })} /></div>
+                    </>
+                  )}
+                  <p style={{ fontSize: 10, color: "var(--muted)", margin: "6px 0 0" }}>元件库文字保持独立定位，不参与自动避障。</p>
+                </div>
+
+                <div className="wiring-prop-actions">
+                  <button onClick={() => updateLabel(selectedLabel.id, { locked: !selectedLabel.locked })}>
+                    {selectedLabel.locked ? "🔓 解锁标签" : "🔒 锁定标签"}
+                  </button>
+                  <button onClick={() => updateLabel(selectedLabel.id, { visible: !selectedLabel.visible })}>
+                    {selectedLabel.visible ? "🙈 隐藏标签" : "👁 显示标签"}
+                  </button>
+                  <button className="danger" onClick={() => deleteLabel(selectedLabel.id)}>🗑 删除标签</button>
+                </div>
+              </>
+            ) : selectedTransferGroup ? (
+              <>
+                <div className="wiring-prop-group">
+                  <h5>换乘组属性</h5>
+                  <div className="wiring-prop-row">
+                    <label>名称</label>
+                    <input type="text" value={selectedTransferGroup.name} onChange={(e) => updateTransferGroup(selectedTransferGroup.id, { name: e.target.value }, "修改换乘组名称")} />
+                  </div>
+                </div>
+
+                <div className="wiring-prop-group">
+                  <h5>成员模块（{selectedTransferGroup.moduleIds.length}）</h5>
+                  {selectedTransferGroup.moduleIds.length === 0 ? (
+                    <p style={{ fontSize: 11, color: "var(--muted)", margin: "4px 0" }}>暂无成员模块</p>
+                  ) : (
+                    <div className="wiring-crossing-list">
+                      {selectedTransferGroup.moduleIds.map((modId) => {
+                        const mod = modules.find((m) => m.id === modId);
+                        return (
+                          <div key={modId} className="wiring-crossing-row">
+                            <span>{mod?.name || "已删除模块"}</span>
+                            <button className="wiring-btn icon-only danger" onClick={() => removeModuleFromGroup(selectedTransferGroup.id, modId)} title="移除">✕</button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                  <button className="wiring-btn" style={{ width: "100%", marginTop: 6 }} onClick={() => addSelectedModulesToGroup(selectedTransferGroup.id)} disabled={!selectedIds.some((id) => modules.some((m) => m.id === id && !selectedTransferGroup.moduleIds.includes(m.id)))}>
+                    添加选中模块到换乘组
+                  </button>
+                </div>
+
+                <div className="wiring-prop-group">
+                  <h5>关联线路（{selectedTransferGroup.lineIds.length}）</h5>
+                  <div className="wiring-line-badge-list">
+                    {selectedTransferGroup.lineIds.map((lineId) => {
+                      const line = data.lines.find((l) => l.id === lineId);
+                      return (
+                        <span key={lineId} className="wiring-line-badge" style={{ borderColor: line?.lineColor || "#999" }}>
+                          <i style={{ background: line?.lineColor || "#999" }} />
+                          {lineId} {line?.nameZh || ""}
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="wiring-prop-group">
+                  <h5>显示</h5>
+                  <div className="wiring-prop-row">
+                    <label>强调色</label>
+                    <div className="wiring-prop-color">
+                      <input type="color" value={selectedTransferGroup.accentColor || "#087FA4"} onChange={(e) => updateTransferGroup(selectedTransferGroup.id, { accentColor: e.target.value }, "修改换乘组强调色")} />
+                      <input type="text" value={selectedTransferGroup.accentColor || ""} placeholder="默认" onChange={(e) => updateTransferGroup(selectedTransferGroup.id, { accentColor: e.target.value }, "修改换乘组强调色")} />
+                    </div>
+                  </div>
+                  <div className="wiring-prop-row">
+                    <label>图层</label>
+                    <select value={selectedTransferGroup.layerId} onChange={(e) => updateTransferGroup(selectedTransferGroup.id, { layerId: e.target.value }, "修改换乘组图层")}>
+                      {layers.filter((l) => selectableLayers.includes(l.id)).map((l) => (
+                        <option key={l.id} value={l.id}>{l.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="wiring-prop-row">
+                    <label>zIndex</label>
+                    <input type="number" value={selectedTransferGroup.zIndex} onChange={(e) => updateTransferGroup(selectedTransferGroup.id, { zIndex: parseInt(e.target.value) || 0 }, "修改换乘组层级")} />
+                  </div>
+                </div>
+
+                <div className="wiring-prop-actions">
+                  <button onClick={() => updateTransferGroup(selectedTransferGroup.id, { locked: !selectedTransferGroup.locked })}>
+                    {selectedTransferGroup.locked ? "🔓 解锁换乘组" : "🔒 锁定换乘组"}
+                  </button>
+                  <button onClick={() => updateTransferGroup(selectedTransferGroup.id, { visible: !selectedTransferGroup.visible })}>
+                    {selectedTransferGroup.visible ? "🙈 隐藏换乘组" : "👁 显示换乘组"}
+                  </button>
+                  <button className="danger" onClick={() => { deleteTransferGroup(selectedTransferGroup.id); }}>🗑 删除换乘组</button>
+                </div>
+              </>
+            ) : (
+              <>
+              {advancedMode && (
+                <div className="wiring-prop-group wiring-placement-rotation-panel">
+                  <h5>放置方向</h5>
+                  <div className="wiring-placement-rotation" aria-label="下一次放置的旋转方向">
+                    <div className="wiring-rotation-grid">
+                      {[
+                        { rotation: 225, icon: "↖", label: "左上 225°" },
+                        { rotation: 270, icon: "↑", label: "向上 270°" },
+                        { rotation: 315, icon: "↗", label: "右上 315°" },
+                        { rotation: 180, icon: "←", label: "向左 180°" },
+                        { rotation: 0, icon: "•", label: "重置为默认方向", reset: true },
+                        { rotation: 0, icon: "→", label: "向右 0°" },
+                        { rotation: 135, icon: "↙", label: "左下 135°" },
+                        { rotation: 90, icon: "↓", label: "向下 90°" },
+                        { rotation: 45, icon: "↘", label: "右下 45°" },
+                      ].map((option, index) => (
+                        <button key={`${option.label}-${index}`} type="button" className={option.reset ? "reset" : placementRotation === option.rotation ? "active" : ""} onClick={() => setPlacementRotation(option.rotation)} title={option.label} aria-label={option.label}>{option.icon}</button>
+                      ))}
+                    </div>
+                    <span>{placementRotation}°</span>
+                  </div>
+                  <div className="wiring-mirror-toggle wiring-mirror-placement">
+                    <button type="button" className={`wiring-mirror-btn ${placementMirrorX ? "active" : ""}`} onClick={() => setPlacementMirrorX(!placementMirrorX)} title="下一次放置水平镜像（左右翻转）" aria-pressed={placementMirrorX}>⇔ 水平</button>
+                    <button type="button" className={`wiring-mirror-btn ${placementMirrorY ? "active" : ""}`} onClick={() => setPlacementMirrorY(!placementMirrorY)} title="下一次放置垂直镜像（上下翻转）" aria-pressed={placementMirrorY}>↕ 垂直</button>
+                  </div>
+                </div>
+              )}
+              <div className="wiring-prop-group wiring-placement-defaults-panel">
+                <h5>放置属性</h5>
+                <div className="wiring-prop-row">
+                  <label>放置层级</label>
+                  <select value={placementZIndex} onChange={(event) => setPlacementZIndex(Number(event.target.value))}>
+                    {PLACEMENT_Z_LEVELS.map((level) => (
+                      <option key={level.value} value={level.value}>{level.label}（{level.value}）</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="wiring-prop-row">
+                  <label>图层</label>
+                  <select
+                    value={placementLayerId === "auto" || selectableLayers.includes(placementLayerId) ? placementLayerId : "auto"}
+                    onChange={(event) => setPlacementLayerId(event.target.value)}
+                  >
+                    <option value="auto">自动分配{automaticPlacementLayerName ? `（${automaticPlacementLayerName}）` : "（按元件类型）"}</option>
+                    {layers.filter((layer) => selectableLayers.includes(layer.id)).map((layer) => (
+                      <option key={layer.id} value={layer.id}>{layer.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <p className="wiring-placement-defaults-note">只影响之后放置的内容；选择“自动分配”时按元件类型和线路类别进入对应图层。</p>
+              </div>
+              <div className="wiring-prop-empty">
+                <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+                  <rect x="6" y="6" width="36" height="36" rx="8" stroke="currentColor" strokeWidth="2" />
+                  <path d="M16 24h16M24 16v16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                </svg>
+                <b>{placementTargetName ? `正在放置：${placementTargetName}` : "选择画布中的元件"}</b>
+                <span>{placementTargetName ? "点击画布完成放置" : "查看和编辑属性"}</span>
+              </div>
+              </>
+            )}
+          </div>
+        </aside>
+      </div>
+
+      {/* ── 右键菜单 ── */}
+      {contextMenu && (
+        <div
+          className="context-menu-overlay"
+          style={{ position: "fixed", left: contextMenu.x, top: contextMenu.y, zIndex: 10001 }}
+        >
+          <div className="context-menu-panel">
+            <button
+              className="context-menu-item"
+              onClick={() => {
+                createTransferGroupFromSelection();
+                setContextMenu(null);
+              }}
+            >
+              创建换乘组
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ══════════ 底部状态栏 ══════════ */}
+      <footer className="wiring-status-bar">
+        <span>工具: <b>{activeTool === "auto" ? "自动" : activeTool === "select" ? "选择" : activeTool === "pan" ? "平移" : activeTool === "label" ? "文字" : activeTool === "connect" ? "连接" : activeTool === "shape" ? (pendingElement?.kind === "number" ? "编号" : "图形") : "放置"}</b></span>
+        <span>模块: <b>{modules.filter((module) => isOnActivePage(module.pageId)).length}</b></span>
+        <span>连接: <b>{connections.filter((connection) => isOnActivePage(connection.pageId)).length}</b></span>
+        {connections.some((c) => c.crossingType !== "plain") && <span>交叉: <b>{connections.filter((c) => c.crossingType !== "plain").length}</b></span>}
+        {labels.length > 0 && <span>标签: <b>{labels.length}</b></span>}
+        {backgroundImages.length > 0 && <span>背景图: <b>{backgroundImages.length}</b></span>}
+        {transferGroups.length > 0 && <span>换乘组: <b>{transferGroups.length}</b></span>}
+        <span>选中: <b>{selectedIds.length}</b></span>
+        <span>缩放: <b>{Math.round(viewport.scale * 100)}%</b></span>
+        <span>坐标: <b>{mouseWorld.x}, {mouseWorld.y}</b></span>
+        <span>自动保存: <b>{saveStatus === "saving" ? "保存中" : saveStatus === "saved" ? "已保存" : saveStatus === "error" ? "失败" : "待命"}</b></span>
+        <span className="spacer" />
+        <span><i /> {status}</span>
+      </footer>
+
+      {/* 教程覆盖层 */}
+      {showTutorial && <TutorialOverlay onDismiss={dismissTutorial} />}
+    </div>
+  );
+}

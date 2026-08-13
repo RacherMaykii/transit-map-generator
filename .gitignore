@@ -1,0 +1,69 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/.vinext/
+/out/
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files (can opt-in for committing if needed)
+.env*
+
+# vercel
+.vercel
+
+# typescript
+next-env.d.ts
+/dist/
+/static-dist/
+/.wrangler/
+/outputs/
+/work/
+/.npm-cache/
+/dev.stdout.log
+/dev.stderr.log
+/data-server.stdout.log
+/data-server.stderr.log
+/startup.log
+/.data-server.pid
+/.web-server.pid
+/.data-server.log
+/.data-server.err.log
+/.dev-server.log
+/.dev-server.err.log
+/browser-check.*.log
+/browser-test.*.log
+/dev-preview.*.log
+/.verify/profile/
+# public/sample-data 是从 data/ 派生的构建镜像，由 scripts/sync-sample-data.mjs 生成
+/public/sample-data/
+/tsconfig.tsbuildinfo
+/data/history/*
+!/data/history/.gitkeep
+# 用户工程数据（data/projects/<id>）永不提交，仅保留目录结构
+/data/projects/*
+!/data/projects/.gitkeep
+# 部署工具状态（build/sites-vite-plugin.ts 会优雅跳过缺失）
+/.openai/

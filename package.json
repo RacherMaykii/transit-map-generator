@@ -1,0 +1,46 @@
+{
+  "name": "transit-map-generator",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "dev": "node scripts/sync-sample-data.mjs && vinext dev",
+    "build": "node scripts/sync-sample-data.mjs && vinext build",
+    "build:static": "node scripts/sync-sample-data.mjs && vite build --config vite.static.config.ts",
+    "preview:static": "vite preview --config vite.static.config.ts --host 127.0.0.1",
+    "start": "node scripts/sync-sample-data.mjs && vinext dev --hostname 127.0.0.1",
+    "start:production": "vinext start",
+    "data": "node local-data-server.mjs",
+    "test": "npm run build && node --test --test-concurrency=1 tests/rendered-html.test.mjs tests/project-repositories.test.mjs tests/project-editor-document-store.test.mjs tests/project-archive.test.mjs tests/local-data-server-assets.test.mjs tests/wiring-source-sync.test.mjs tests/wiring-avoidance-tracks.test.mjs tests/wiring-station-association.test.mjs tests/wiring-connections.test.mjs tests/wiring-canvas.test.mjs tests/wiring-data-project.test.mjs tests/wiring-color.test.mjs",
+    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next"
+  },
+  "dependencies": {
+    "fflate": "^0.7.4",
+    "next": "16.2.6",
+    "papaparse": "^5.5.4",
+    "react": "19.2.6",
+    "react-dom": "19.2.6",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "1.37.1",
+    "@tailwindcss/postcss": "4.2.1",
+    "@types/node": "22.19.19",
+    "@types/papaparse": "^5.5.2",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.2",
+    "@vitejs/plugin-rsc": "0.5.26",
+    "eslint": "9.39.4",
+    "eslint-config-next": "16.2.6",
+    "react-server-dom-webpack": "19.2.6",
+    "tailwindcss": "4.2.1",
+    "typescript": "5.9.3",
+    "vinext": "0.0.50",
+    "vite": "8.0.13",
+    "wrangler": "4.92.0"
+  },
+  "type": "module"
+}
