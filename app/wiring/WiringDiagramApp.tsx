@@ -113,6 +113,7 @@ import {
 import { useHistory } from "./history";
 import {
   deleteFromIndexedDB,
+  downloadBlob,
   loadFromIndexedDB,
   migrateProjectSchema,
   projectToJson,
@@ -130,370 +131,35 @@ import {
   type ProjectRepository,
 } from "../projects/repositories";
 import { BrowserEditorDocumentStore, type JsonEditorDocument } from "../projects/editorDocumentStore";
+import {
+  CanvasRenderItem,
+  createBackgroundPreview,
+  ExportBounds,
+  moduleLabelTextTransform,
+  moduleMirrorTransform,
+  PLACEMENT_Z_LEVELS,
+  PREF_KEY,
+  rectsIntersect,
+  rotatedRectBounds,
+  svgToString,
+  templateTrackPathD,
+  usePersistentState,
+} from "./ui/primitives";
+import {
+  MirrorToggle,
+  NUMBER_CARDS,
+  ProjectStationIcon,
+  ShapeGraphic,
+  ShapePreview,
+  SHAPE_CARDS,
+  SHAPE_META,
+  SIGNAL_CARDS,
+  SIGNAL_LAMPS,
+  SIGNAL_LAMP,
+  TemplatePreviewSvg,
+} from "./ui/svgElements";
 import "../transit/transit.css";
 import "./wiring.css";
-
-/** 矩形相交检测 */
-function rectsIntersect(a: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }): boolean {
-  return !(a.x + a.w < b.x || b.x + b.w < a.x || a.y + a.h < b.y || b.y + b.h < a.y);
-}
-
-function rotatedRectBounds(x: number, y: number, width: number, height: number, rotation = 0) {
-  if (!rotation) return { x, y, w: width, h: height };
-  const radians = rotation * Math.PI / 180;
-  const cos = Math.cos(radians);
-  const sin = Math.sin(radians);
-  const cx = x + width / 2;
-  const cy = y + height / 2;
-  const corners = [[x, y], [x + width, y], [x + width, y + height], [x, y + height]].map(([px, py]) => ({
-    x: cx + (px - cx) * cos - (py - cy) * sin,
-    y: cy + (px - cx) * sin + (py - cy) * cos,
-  }));
-  const xs = corners.map((point) => point.x);
-  const ys = corners.map((point) => point.y);
-  const minX = Math.min(...xs);
-  const minY = Math.min(...ys);
-  return { x: minX, y: minY, w: Math.max(...xs) - minX, h: Math.max(...ys) - minY };
-}
-
-/** 下载 Blob 辅助 */
-function downloadBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.click();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
-function ProjectStationIcon({
-  repository,
-  projectId,
-  name,
-  embeddedSrc,
-}: {
-  repository: ProjectRepository;
-  projectId: string;
-  name: string;
-  embeddedSrc?: string;
-}) {
-  const [src, setSrc] = useState(embeddedSrc || "");
-  useEffect(() => {
-    if (embeddedSrc) {
-      setSrc(embeddedSrc);
-      return;
-    }
-    let disposed = false;
-    let objectUrl = "";
-    repository.getAsset(projectId, name).then((asset) => {
-      if (!asset || disposed) return;
-      objectUrl = URL.createObjectURL(asset.blob);
-      setSrc(objectUrl);
-    }).catch(() => undefined);
-    return () => {
-      disposed = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [embeddedSrc, name, projectId, repository]);
-  return src
-    ? <img className="station-resource-icon" src={src} alt="" onError={(event) => { event.currentTarget.classList.add("missing"); }} />
-    : <span className="station-icon-missing" title="未配置图标">!</span>;
-}
-
-function createBackgroundPreview(image: HTMLImageElement): string | undefined {
-  const maxDimension = 2048;
-  const longest = Math.max(image.naturalWidth, image.naturalHeight);
-  if (longest <= maxDimension && image.naturalWidth * image.naturalHeight <= 4_000_000) return undefined;
-  const scale = Math.min(1, maxDimension / longest);
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
-  canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
-  canvas.getContext("2d")?.drawImage(image, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL("image/webp", 0.82);
-}
-
-interface ExportBounds { x: number; y: number; width: number; height: number }
-
-type CanvasRenderItem =
-  | { kind: "connection"; item: ModuleConnection; creationIndex: number }
-  | { kind: "background"; item: BackgroundImageObject; creationIndex: number }
-  | { kind: "module"; item: DiagramModule; creationIndex: number }
-  | { kind: "platform"; item: PlatformObject; creationIndex: number }
-  | { kind: "graphic"; item: AttachedGraphic; creationIndex: number }
-  | { kind: "label"; item: LabelObject; creationIndex: number }
-  | { kind: "transfer"; item: TransferGroup; creationIndex: number };
-
-const PLACEMENT_Z_LEVELS = [
-  { label: "高架-高", value: 20 },
-  { label: "高架", value: 10 },
-  { label: "地面", value: 0 },
-  { label: "半地下", value: -5 },
-  { label: "地下", value: -10 },
-  { label: "地下-深", value: -20 },
-  { label: "地下-极深", value: -30 },
-  { label: "标注", value: 100 },
-  { label: "背景", value: -100 },
-] as const;
-
-/** 生成不含编辑辅助元素的独立 SVG。 */
-function svgToString(svg: SVGSVGElement, bounds: ExportBounds, includeBackground: boolean, transparent: boolean): string {
-  const clone = svg.cloneNode(true) as SVGSVGElement;
-  clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
-  clone.setAttribute("width", String(bounds.width));
-  clone.setAttribute("height", String(bounds.height));
-  clone.setAttribute("viewBox", `${bounds.x} ${bounds.y} ${bounds.width} ${bounds.height}`);
-  clone.querySelector(".canvas-bg")?.remove();
-  clone.querySelectorAll(".grid-group, .selection-box, .port, .track-control-handle, .crossing-point, .crossing-label, .connection-preview, .module-ghost, .bg-image-selection, .bg-image-unlock, .label-anchor").forEach((node) => node.remove());
-  clone.querySelectorAll<SVGImageElement>("image[data-export-src]").forEach((node) => {
-    node.setAttribute("href", node.getAttribute("data-export-src") || node.getAttribute("href") || "");
-    node.removeAttribute("data-export-src");
-  });
-  if (!includeBackground) clone.querySelectorAll(".bg-image").forEach((node) => node.remove());
-  const viewportGroup = clone.querySelector("g[transform]");
-  viewportGroup?.removeAttribute("transform");
-  const paper = clone.querySelector(".canvas-paper");
-  if (transparent) paper?.remove();
-  const style = document.createElementNS("http://www.w3.org/2000/svg", "style");
-  style.textContent = `
-    .track,.connection-track{fill:none;stroke:var(--track-stroke,#202124);stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
-    .track.siding,.track.yard,.track.branch,.track.turnback{stroke:var(--track-stroke,#202124);stroke-width:2.5}.track.turnback{stroke-dasharray:5 3}
-    .connection-track.crossing-gap{stroke:var(--track-stroke,#5a6c75);stroke-dasharray:8 4}.connection-track.crossing-bridge{stroke-width:3.5}.connection-track.line-dashed{stroke-dasharray:8 4}
-    .platform{fill:var(--platform-fill,#D7B06A);stroke:var(--platform-stroke,#C49A52);stroke-width:1}.platform-label{font-size:7px;fill:#8a6b2e;text-anchor:middle}
-    .station-label{font-family:"Microsoft YaHei","PingFang SC","Noto Sans CJK SC",sans-serif;font-size:13px;fill:var(--label-fill,#202124);text-anchor:middle;font-weight:700}
-    .station-label-en,.aux-label{font-family:"Microsoft YaHei","PingFang SC","Noto Sans CJK SC",sans-serif;fill:#6b7b85;text-anchor:middle}.station-label-en{font-size:9px}.aux-label{font-size:8px}
-    .independent-label{font-family:"Microsoft YaHei","PingFang SC","Noto Sans CJK SC",sans-serif}.transfer-group{pointer-events:none}
-  `;
-  clone.insertBefore(style, clone.firstChild);
-  const helper = document.createElement("div");
-  helper.appendChild(clone);
-  return `<?xml version="1.0" encoding="UTF-8"?>\n${helper.innerHTML}`;
-}
-
-// ── 模板预览 SVG ──────────────────────────────
-
-function templateTrackPathD(track: TemplateTrack): string {
-  return track.cx2 !== undefined && track.cy2 !== undefined
-    ? `M${track.x1},${track.y1} C${track.cx},${track.cy} ${track.cx2},${track.cy2} ${track.x2},${track.y2}`
-    : `M${track.x1},${track.y1} Q${track.cx},${track.cy} ${track.x2},${track.y2}`;
-}
-
-function TemplatePreviewSvg({ template }: { template: ModuleTemplate }) {
-  const scale = Math.min(54 / template.width, 38 / template.height) * 0.85;
-  const ox = (54 - template.width * scale) / 2;
-  const oy = (38 - template.height * scale) / 2;
-  return (
-    <svg width={54} height={38}>
-      <g transform={`translate(${ox},${oy}) scale(${scale})`}>
-        {template.tracks.map((t, i) =>
-          t.curved ? (
-            <path key={i} d={templateTrackPathD(t)} fill="none" stroke="#202124" strokeWidth={3} strokeLinecap="round" />
-          ) : (
-            <line key={i} x1={t.x1} y1={t.y1} x2={t.x2} y2={t.y2} stroke="#202124" strokeWidth={3} strokeLinecap="round" />
-          ),
-        )}
-        {template.platforms.map((p, i) => (
-          <rect key={i} x={p.x} y={p.y} width={p.width} height={p.height} fill="#D7B06A" stroke="#C49A52" strokeWidth={0.5} rx={1.5} />
-        ))}
-      </g>
-    </svg>
-  );
-}
-
-// ── 元件库矢量图形：基础元素 + 工程图标（信号机） ──────────────
-
-/** 每种形状的元数据：显示名、默认尺寸、默认颜色 */
-const SHAPE_META: Record<GraphicShapeType, { label: string; width: number; height: number; defaultFill?: string; defaultStroke?: string }> = {
-  rect:          { label: "矩形",     width: 80, height: 60, defaultFill: "#cce6f5", defaultStroke: "#202124" },
-  roundRect:     { label: "圆角矩形", width: 80, height: 60, defaultFill: "#d7f0d7", defaultStroke: "#202124" },
-  triangle:      { label: "三角形",   width: 80, height: 70, defaultFill: "#f5e6cc", defaultStroke: "#202124" },
-  circle:        { label: "圆形",     width: 70, height: 70, defaultFill: "#f2ccf5", defaultStroke: "#202124" },
-  diamond:       { label: "菱形",     width: 70, height: 70, defaultFill: "#f5d7cc", defaultStroke: "#202124" },
-  "signal-in":   { label: "进站信号机", width: 28, height: 64 },
-  "signal-out":  { label: "出站信号机", width: 28, height: 64 },
-  "signal-shunt": { label: "调车信号机", width: 24, height: 40 },
-};
-
-/**
- * 局部镜像的 SVG transform 后缀：绕对象中心先做镜像（scale(-1,1) / scale(1,-1)），
- * 再叠加在外层 translate/rotate 之后（SVG 变换从右往左作用）。
- */
-/**
- * 模块内部文字的反镜像 transform：外层模块组已做镜像+旋转，这里把文字旋回可读角度，
- * 并抵消镜像，避免镜像后的文字左右颠倒。未镜像时退化为原来的纯旋转写法。
- */
-function moduleLabelTextTransform(rotation: number, mirrorX: boolean | undefined, mirrorY: boolean | undefined, x: number, y: number): string {
-  const sx = mirrorX ? -1 : 1;
-  const sy = mirrorY ? -1 : 1;
-  if (sx === 1 && sy === 1) return `rotate(${readableLabelRotation(rotation) - rotation} ${x} ${y})`;
-  return `scale(${sx} ${sy} ${x} ${y}) rotate(${-rotation} ${x} ${y}) rotate(${readableLabelRotation(rotation)} ${x} ${y})`;
-}
-
-function moduleMirrorTransform(width: number, height: number, mirrorX?: boolean, mirrorY?: boolean): string {
-  const sx = mirrorX ? -1 : 1;
-  const sy = mirrorY ? -1 : 1;
-  if (sx === 1 && sy === 1) return "";
-  const cx = width / 2;
-  const cy = height / 2;
-  return ` translate(${cx} ${cy}) scale(${sx} ${sy}) translate(${-cx} ${-cy})`;
-}
-
-/** 水平/垂直镜像开关（模块、图形属性面板与放置面板复用）。 */
-function MirrorToggle({ mirrorX, mirrorY, onChange, disabled }: {
-  mirrorX?: boolean;
-  mirrorY?: boolean;
-  onChange: (next: { mirrorX: boolean; mirrorY: boolean }) => void;
-  disabled?: boolean;
-}) {
-  return (
-    <div className="wiring-mirror-toggle">
-      <button
-        type="button"
-        className={`wiring-mirror-btn ${mirrorX ? "active" : ""}`}
-        onClick={() => onChange({ mirrorX: !mirrorX, mirrorY: !!mirrorY })}
-        title="水平镜像（左右翻转）"
-        aria-pressed={!!mirrorX}
-        disabled={disabled}
-      >⇔ 水平</button>
-      <button
-        type="button"
-        className={`wiring-mirror-btn ${mirrorY ? "active" : ""}`}
-        onClick={() => onChange({ mirrorX: !!mirrorX, mirrorY: !mirrorY })}
-        title="垂直镜像（上下翻转）"
-        aria-pressed={!!mirrorY}
-        disabled={disabled}
-      >↕ 垂直</button>
-    </div>
-  );
-}
-
-/** 信号机灯位颜色（固定，与线路配色无关） */
-const SIGNAL_LAMP: Record<string, { fill: string; stroke?: string }> = {
-  red:    { fill: "#E53935" },
-  yellow: { fill: "#FDD835", stroke: "#B9A21A" },
-  green:  { fill: "#43A047" },
-  blue:   { fill: "#1565C0" },
-  white:  { fill: "#FFFFFF", stroke: "#555555" },
-};
-
-/** 信号机灯序（从上到下） */
-const SIGNAL_LAMPS: Partial<Record<GraphicShapeType, string[]>> = {
-  "signal-in": ["red", "yellow", "green"],
-  "signal-out": ["green", "red"],
-  "signal-shunt": ["blue", "white"],
-};
-
-/** 在画布上渲染一个矢量形状 / 信号机（SVG 主体，不含外层变换）。 */
-function ShapeGraphic({ shapeType, width, height, fill, stroke }: { shapeType: GraphicShapeType; width: number; height: number; fill?: string; stroke?: string }) {
-  if (shapeType.startsWith("signal-")) {
-    // 高柱信号机：竖柱 + 深色灯头 + 固定灯位
-    const lamps = SIGNAL_LAMPS[shapeType] || [];
-    const headW = Math.min(width * 0.8, 20);
-    const headH = lamps.length * 8 + 6;
-    const headX = (width - headW) / 2;
-    const headTop = Math.max(0, height - headH - 10);
-    const lampR = Math.max(2, Math.min(3.2, headW * 0.18));
-    return (
-      <g>
-        <line x1={width / 2} y1={height} x2={width / 2} y2={headTop + headH} stroke="#3c4043" strokeWidth={2} />
-        <rect x={headX} y={headTop} width={headW} height={headH} rx={3} fill="#202124" />
-        {lamps.map((color, i) => {
-          const lamp = SIGNAL_LAMP[color];
-          const cy = headTop + headH - (i * 8 + 5);
-          return <circle key={i} cx={width / 2} cy={cy} r={lampR} fill={lamp.fill} stroke={lamp.stroke || "none"} strokeWidth={0.6} />;
-        })}
-      </g>
-    );
-  }
-  const f = fill || "#cce6f5";
-  const s = stroke || "#202124";
-  const rx = shapeType === "roundRect" ? Math.min(14, Math.min(width, height) * 0.2) : 0;
-  switch (shapeType) {
-    case "rect":
-      return <rect width={width} height={height} fill={f} stroke={s} strokeWidth={1.5} rx={rx} />;
-    case "roundRect":
-      return <rect width={width} height={height} fill={f} stroke={s} strokeWidth={1.5} rx={rx} />;
-    case "triangle":
-      return <polygon points={`${width / 2},0 ${width},${height} 0,${height}`} fill={f} stroke={s} strokeWidth={1.5} strokeLinejoin="round" />;
-    case "circle":
-      return <circle cx={width / 2} cy={height / 2} r={Math.min(width, height) / 2} fill={f} stroke={s} strokeWidth={1.5} />;
-    case "diamond":
-      return <polygon points={`${width / 2},0 ${width},${height / 2} ${width / 2},${height} 0,${height / 2}`} fill={f} stroke={s} strokeWidth={1.5} strokeLinejoin="round" />;
-    default:
-      return null;
-  }
-}
-
-/** 元件卡片迷你预览（固定画布，自动缩放形状）。 */
-function ShapePreview({ shapeType }: { shapeType: GraphicShapeType }) {
-  const meta = SHAPE_META[shapeType];
-  const scale = Math.min(50 / meta.width, 34 / meta.height) * 0.9;
-  const ox = (54 - meta.width * scale) / 2;
-  const oy = (38 - meta.height * scale) / 2;
-  return (
-    <svg width={54} height={38}>
-      <g transform={`translate(${ox},${oy}) scale(${scale})`}>
-        <ShapeGraphic shapeType={shapeType} width={meta.width} height={meta.height} fill={meta.defaultFill} stroke={meta.defaultStroke} />
-      </g>
-    </svg>
-  );
-}
-
-/** 基础元素分类卡片（形状） */
-const SHAPE_CARDS: { shapeType: GraphicShapeType; description: string }[] = [
-  { shapeType: "rect", description: "矩形框，用于图框、图例、分区" },
-  { shapeType: "roundRect", description: "圆角矩形，用于模块标识、色块" },
-  { shapeType: "triangle", description: "三角形，用于警示、箭头、标志" },
-  { shapeType: "circle", description: "圆形，用于信号灯、车挡、圆标" },
-  { shapeType: "diamond", description: "菱形，用于编号底标、道岔标识" },
-];
-
-/** 工程图标分类卡片（信号机） */
-const SIGNAL_CARDS: { shapeType: GraphicShapeType; description: string }[] = [
-  { shapeType: "signal-in", description: "进站信号机：红·黄·绿三灯" },
-  { shapeType: "signal-out", description: "出站信号机：绿·红两灯" },
-  { shapeType: "signal-shunt", description: "调车信号机：蓝·白两灯" },
-];
-
-/** 工程图标分类卡片（编号标注） */
-const NUMBER_CARDS: { numeralType: "track" | "switch"; description: string }[] = [
-  { numeralType: "track", description: "站内股道编号，如 1道、2道" },
-  { numeralType: "switch", description: "道岔编号，如 1#、3#、5#" },
-];
-
-// ── 设置持久化 ─────────────────────────────────
-
-/**
- * 编辑器偏好设置的 localStorage 持久化。
- * 首次渲染用保存值初始化；每次 set（含函数式更新）同步写回。
- * 只存小体积偏好（开关/面板折叠），大体积工程数据仍走 IndexedDB。
- * localStorage 不可用或内容损坏时静默回退默认值。
- */
-function usePersistentState<T>(storageKey: string, defaultValue: T): [T, React.Dispatch<React.SetStateAction<T>>] {
-  const [value, setValue] = useState<T>(() => {
-    try {
-      const raw = localStorage.getItem(storageKey);
-      if (raw !== null) return JSON.parse(raw) as T;
-    } catch {
-      // 忽略读取失败
-    }
-    return defaultValue;
-  });
-  const setWithPersist = useCallback((next: React.SetStateAction<T>) => {
-    setValue((prev) => {
-      const resolved = typeof next === "function" ? (next as (prev: T) => T)(prev) : next;
-      try {
-        localStorage.setItem(storageKey, JSON.stringify(resolved));
-      } catch {
-        // 忽略写入失败（隐私模式/配额）
-      }
-      return resolved;
-    });
-  }, [storageKey]);
-  return [value, setWithPersist];
-}
-
-/** 偏好设置的 localStorage 键前缀 */
-const PREF_KEY = (name: string) => `metro-wiring-prefs.${name}`;
 
 // ── 主组件 ────────────────────────────────────
 

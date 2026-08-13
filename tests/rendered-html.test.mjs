@@ -450,7 +450,8 @@ test("wiring editor wires v2 source state through history, persistence, and plac
   assert.match(app, /renameActivePage/);
   assert.match(app, /fitCanvas/);
   assert.match(app, /PLACEMENT_Z_LEVELS/);
-  assert.match(app, /高架-极深|地下-极深/);
+  const placementLevels = await readFile(new URL("app/wiring/ui/primitives.ts", root), "utf8");
+  assert.match(placementLevels, /高架-极深|地下-极深/);
   assert.match(app, /按元件类型/);
   assert.match(app, /resolvePlacementLayer/);
   assert.match(app, /zIndex: placementZIndex/);
