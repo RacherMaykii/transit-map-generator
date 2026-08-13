@@ -56,6 +56,7 @@ import {
 import "./transit.css";
 import { ColorField } from "./settingsControls";
 import { SettingsPanel } from "./SettingsPanel";
+import { downloadBlob } from "../lib/browser";
 
 const MAX_HISTORY = 60;
 
@@ -105,15 +106,6 @@ const ICON_CATEGORIES: { name: string; icons: string[] }[] = [
     icons: ["广州塔", "天塔", "东方明珠", "太空电梯", "虚数之构"],
   },
 ];
-
-function downloadBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.click();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
 
 function RepositoryAssetImage({
   repository,

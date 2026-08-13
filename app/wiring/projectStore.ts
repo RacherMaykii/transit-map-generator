@@ -531,15 +531,9 @@ export async function deleteFromIndexedDB(key: string): Promise<void> {
   });
 }
 
-/** 下载 Blob 辅助 */
-export function downloadBlob(blob: Blob, filename: string): void {
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.click();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
+/** 下载 Blob 辅助（实现在 ../lib/browser，三处编辑器共用） */
+import { downloadBlob } from "../lib/browser";
+export { downloadBlob };
 
 /** 保存工程为包含 project.json、源 CSV 与资源的 ZIP 工程包。 */
 export function exportProjectJson(project: ProjectFile, filename: string = "配线图工程.metroproj"): void {

@@ -3,6 +3,7 @@
 import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cleanFilePart, normalizeTransitData, Station, TransitData, stationsForLine } from "../transit/types";
 import { canvasPngBytes, createStoredZip, ZipEntry } from "../transit/zip";
+import { downloadBlob } from "../lib/browser";
 import SliceGuideOverlay from "../transit/SliceGuideOverlay";
 import {
   contrastTextColor,
@@ -33,15 +34,6 @@ import "../transit/transit.css";
 import "./entrance.css";
 
 const DEFAULT_BACKGROUND = "/assets/space-elevator-station.jpg";
-
-function downloadBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.click();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
 
 function displayLineName(line: { kind: string; number: string; nameZh: string }) {
   return `${line.kind === "tram" ? "电车" : "线路"} ${line.number} · ${line.nameZh}`;
