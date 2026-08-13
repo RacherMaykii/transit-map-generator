@@ -98,4 +98,9 @@ test("project data is isolated between projects on the local data server", async
   assert.equal((await load("default")).lines[0].nameZh, defaultBefore.lines[0].nameZh);
   const gone = await fetch(`${origin}/api/data?project=${first.id}`);
   assert.notEqual(gone.status, 200, "deleted project directory is gone");
+
+  // cleanup: delete the surviving project too, so each test run does not
+  // leave a residue project under the real data/projects/ directory.
+  const removed = await fetch(`${origin}/api/projects/${second.id}`, { method: "DELETE" });
+  assert.equal(removed.status, 200);
 });
