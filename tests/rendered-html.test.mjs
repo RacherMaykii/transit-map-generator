@@ -61,7 +61,7 @@ test("keeps local data and rendering modules in the project", async () => {
   ]);
   const entranceStyleRegistry = await readFile(new URL("app/entrance/entranceStyles.ts", root), "utf8");
   await access(new URL("public/assets/transfer-white.png", root));
-  const [packageJson, lines, stations, transfers, layout, types, renderer, vectorPreview, audit, app, styles, portal, portalStyles, entranceApp, entranceRenderer, entranceStyles, server, launcher] = await Promise.all([
+  const [packageJson, lines, stations, transfers, layout, types, renderer, vectorPreview, audit, app, settingsPanel, styles, portal, portalStyles, entranceApp, entranceRenderer, entranceStyles, server, launcher] = await Promise.all([
     readFile(new URL("package.json", root), "utf8"),
     readFile(new URL("data/lines.csv", root), "utf8"),
     readFile(new URL("data/stations.csv", root), "utf8"),
@@ -72,6 +72,7 @@ test("keeps local data and rendering modules in the project", async () => {
     readFile(new URL("app/transit/RoutePreviewSvg.tsx", root), "utf8"),
     readFile(new URL("app/transit/audit.ts", root), "utf8"),
     readFile(new URL("app/transit/TransitMapApp.tsx", root), "utf8"),
+    readFile(new URL("app/transit/SettingsPanel.tsx", root), "utf8"),
     readFile(new URL("app/transit/transit.css", root), "utf8"),
     readFile(new URL("app/ProjectPortal.tsx", root), "utf8"),
     readFile(new URL("app/portal.css", root), "utf8"),
@@ -122,16 +123,16 @@ test("keeps local data and rendering modules in the project", async () => {
   assert.match(types, /stationRingWidth: 5\.5/);
   assert.match(types, /stationZhFontSize: 18/);
   assert.match(types, /stationZhLetterSpacing: 0/);
-  assert.match(app, /中文站名字符间距/);
-  assert.match(app, /线路英文字符间距/);
-  assert.match(app, /圆环内显示线路代号和站点代号/);
-  assert.match(app, /stationCenterLineFontSize/);
+  assert.match(settingsPanel, /中文站名字符间距/);
+  assert.match(settingsPanel, /线路英文字符间距/);
+  assert.match(settingsPanel, /圆环内显示线路代号和站点代号/);
+  assert.match(settingsPanel, /stationCenterLineFontSize/);
   assert.match(app, /showSliceGuides/);
   assert.match(app, /stations\.length \+ 2/);
-  assert.match(app, /style-template-tabs/);
-  assert.match(app, /经典样式/);
-  assert.match(app, /环线样式/);
-  assert.match(app, /景区样式/);
+  assert.match(settingsPanel, /style-template-tabs/);
+  assert.match(settingsPanel, /经典样式/);
+  assert.match(settingsPanel, /环线样式/);
+  assert.match(settingsPanel, /景区样式/);
   assert.match(app, /selectStyleTemplate/);
   assert.match(app, /assignLineStyle/);
   assert.match(app, /selectPreviewLine/);
@@ -139,15 +140,15 @@ test("keeps local data and rendering modules in the project", async () => {
   assert.match(types, /lineStyleTemplates/);
   assert.match(server, /lineStyleTemplates/);
   assert.match(app, /layoutTemplates: \{ \.\.\.data\.layoutTemplates/);
-  assert.match(app, /style-template-panel-\$\{data\.activeStyleTemplate\}/);
+  assert.match(settingsPanel, /style-template-panel-\$\{data\.activeStyleTemplate\}/);
   assert.match(app, /setScenicAssetRevision\(\(revision\) => revision \+ 1\)/);
-  assert.match(app, /assetsReady=\{scenicAssetsReady\}/);
+  assert.match(settingsPanel, /assetsReady=\{scenicAssetsReady\}/);
   assert.match(scenicVectorPreview, /assetsReady && station\.icon && !iconUrl/);
-  assert.match(app, /aria-controls=\{`style-template-panel-/);
-  assert.match(app, /环线弧形布局/);
-  assert.match(app, /环线运行组件不使用经典样式的左右箭头和终点站名称/);
-  assert.match(app, /loopDirectionBadgeX/);
-  assert.match(app, /loopDirectionRunTextFontSize/);
+  assert.match(settingsPanel, /aria-controls=\{`style-template-panel-/);
+  assert.match(settingsPanel, /环线弧形布局/);
+  assert.match(settingsPanel, /环线运行组件不使用经典样式的左右箭头和终点站名称/);
+  assert.match(settingsPanel, /loopDirectionBadgeX/);
+  assert.match(settingsPanel, /loopDirectionRunTextFontSize/);
   assert.match(app, /内环运行 →/);
   assert.match(app, /← 外环运行/);
   assert.match(app, /platformType/);
@@ -229,8 +230,8 @@ test("keeps local data and rendering modules in the project", async () => {
   assert.match(renderer, /closedStationsUsePassedColor/);
   assert.match(app, /导出 512 px/);
   assert.match(app, /显示设置/);
-  assert.match(app, /settings-preview-panel/);
-  assert.match(app, /选择设置预览站点/);
+  assert.match(settingsPanel, /settings-preview-panel/);
+  assert.match(settingsPanel, /选择设置预览站点/);
   assert.doesNotMatch(app, /CanvasComponentPreview/);
   assert.match(app, /站点列表检查/);
   assert.match(app, /开通统计/);
@@ -241,9 +242,9 @@ test("keeps local data and rendering modules in the project", async () => {
   assert.match(audit, /\["R1", "L7", "L9"\]/);
   assert.match(audit, /组合环线重复标记/);
   assert.match(app, /R1按7\/9号组合环线处理/);
-  assert.match(app, /运行方向图片/);
-  assert.match(app, /线路标识图片/);
-  assert.match(app, /英文自动缩放下限/);
+  assert.match(settingsPanel, /运行方向图片/);
+  assert.match(settingsPanel, /线路标识图片/);
+  assert.match(settingsPanel, /英文自动缩放下限/);
   assert.match(app, /历史聚落与乡村景观/);
   assert.match(app, /用户上传素材/);
   assert.doesNotMatch(app, /name: "其他"/);
@@ -252,13 +253,13 @@ test("keeps local data and rendering modules in the project", async () => {
     .flatMap((match) => [...match[1].matchAll(/"([^"]+)"/g)].map((name) => `${name[1]}.png`)));
   const publicIcons = (await readdir(new URL("public/sample-icons/", root))).filter((name) => name !== "manifest.json" && /\.(?:png|jpe?g|ico)$/i.test(name));
   assert.deepEqual(publicIcons.filter((name) => !categorizedIcons.has(name)), [], "所有内置图标都应进入明确分类");
-  assert.match(app, /未开通站点按已过站配色/);
-  assert.match(app, /独立组件精确位置/);
-  assert.match(app, /currentAccentX/);
-  assert.match(app, /nextStationY/);
-  assert.match(app, /directionArrowX/);
-  assert.match(app, /lineBadgeDescriptionY/);
-  assert.match(app, /onLayoutChange/);
+  assert.match(settingsPanel, /未开通站点按已过站配色/);
+  assert.match(settingsPanel, /独立组件精确位置/);
+  assert.match(settingsPanel, /currentAccentX/);
+  assert.match(settingsPanel, /nextStationY/);
+  assert.match(settingsPanel, /directionArrowX/);
+  assert.match(settingsPanel, /lineBadgeDescriptionY/);
+  assert.match(settingsPanel, /onLayoutChange/);
   assert.match(app, /modal-scroll-body/);
   assert.match(styles, /scrollbar-gutter: stable/);
   assert.match(styles, /overflow: hidden; display: flex; flex-direction: column/);
@@ -342,7 +343,7 @@ test("keeps local data and rendering modules in the project", async () => {
   assert.match(app, /保存后校验不一致/);
   assert.match(app, /saveCsv/);
   assert.match(app, /saveLayout/);
-  assert.match(app, /保存显示设置/);
+  assert.match(settingsPanel, /保存显示设置/);
   assert.match(app, /interactionStartRef/);
   assert.match(app, /handleInteractionPointerDown/);
   assert.match(app, /handleInteractionFocus/);
