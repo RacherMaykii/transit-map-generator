@@ -1,6 +1,17 @@
 # Rail Transit Visual Design Studio / 轨道交通视觉设计工坊
 
+[![在线体验](https://img.shields.io/badge/GitHub%20Pages-在线体验-0a89a8?style=for-the-badge&logo=github)](https://rachermaykii.github.io/transit-map-generator/)
+[![AI 辅助开发](https://img.shields.io/badge/开发方式-AI%20辅助开发-7b61ff?style=for-the-badge)](#ai-辅助开发说明)
+
+> **在线使用：** [https://rachermaykii.github.io/transit-map-generator/](https://rachermaykii.github.io/transit-map-generator/)
+>
+> **AI 开发声明：** 本项目使用 AI 辅助进行需求分析、界面设计、代码实现、调试和文档编写；功能仍通过人工提出需求、检查并持续修正。使用前请注意本项目目前处于 Beta 阶段。
+
 可纯静态部署的轨道交通标识与配线图编辑器，包含线路站序图、出入口站名标识和 SVG 配线图工作台。浏览器模式使用 IndexedDB 保存城市项目；本地文件模式仍可直接维护 CSV。对外只使用城市级工程包：完整包为 `.railcity`，拆分包为 `.railproj` + `.railassets`。
+
+## AI 辅助开发说明
+
+本项目采用 AI 辅助开发。AI 参与了方案讨论、原型与界面迭代、代码生成与重构、故障排查、测试补充及说明文档整理；项目需求、功能取舍、视觉反馈和最终验收由项目维护者负责。由于 AI 生成内容可能存在遗漏或错误，欢迎通过 Issues 反馈问题。
 
 ## 界面一览
 
