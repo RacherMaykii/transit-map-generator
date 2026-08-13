@@ -129,6 +129,7 @@ import {
   type ProjectFile,
 } from "./projectStore";
 import { newestWiringProject, synchronizeWiringProjectSource } from "./sourceSync";
+import { DEFAULT_WIRING_SAMPLE_MARKER, isWiringProjectEmpty, loadDefaultWiringSample } from "./sampleProject";
 import TutorialOverlay, { useTutorialState } from "./TutorialOverlay";
 import PopoverMenu, { type PopoverMenuItem } from "./PopoverMenu";
 import {
@@ -3636,12 +3637,25 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
         compatibleProject,
       );
       // 旧版编辑器使用全局裸 key "autosave"；仅当默认工程没有项目数据时迁移一次到项目作用域键，随后删除裸 key。
-      if (!project && projectId === DEFAULT_PROJECT_ID) {
+      if (projectId === DEFAULT_PROJECT_ID && isWiringProjectEmpty(project)) {
         const legacy = await loadFromIndexedDB("autosave");
         if (legacy) {
           await persistWiringProject(legacy);
           await deleteFromIndexedDB("autosave").catch(() => undefined);
           project = legacy;
+        }
+      }
+      // 每个浏览器只初始化一次固定的“虚空城”示例。这样旧版空壳能升级，用户之后主动清空也不会被再次覆盖。
+      if (projectId === DEFAULT_PROJECT_ID && localStorage.getItem(DEFAULT_WIRING_SAMPLE_MARKER) !== "1") {
+        if (isWiringProjectEmpty(project)) {
+          const sample = await loadDefaultWiringSample(projectId).catch(() => null);
+          if (sample) {
+            project = sample;
+            await persistWiringProject(sample);
+            localStorage.setItem(DEFAULT_WIRING_SAMPLE_MARKER, "1");
+          }
+        } else {
+          localStorage.setItem(DEFAULT_WIRING_SAMPLE_MARKER, "1");
         }
       }
       if (cancelled) return;
