@@ -172,7 +172,7 @@
 .project-card-copy > span { color: #0a85a9; font-size: 10px; font-weight: 800; letter-spacing: .08em; }
 .project-card h3 { margin: 5px 0 4px; font-size: 20px; }
 .project-card p { margin: 0; overflow: hidden; color: #71818a; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.project-card > button { padding: 9px 12px; display: flex; align-items: center; gap: 10px; border-radius: 9px; color: #087fa4; background: transparent; font-size: 12px; font-weight: 800; }
+.project-card > button { padding: 9px 12px; display: flex; align-items: center; gap: 10px; border: 1px solid transparent; border-radius: 9px; color: #087fa4; background: transparent; font-size: 12px; font-weight: 800; }
 .project-card > button:hover { background: #e5f5f8; }
 .project-card > button b { font-size: 17px; }
 .project-empty { padding: 50px 20px; border: 1px dashed #c6d6dc; border-radius: 16px; color: #71818a; text-align: center; }
