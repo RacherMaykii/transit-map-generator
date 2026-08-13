@@ -609,10 +609,12 @@ test("wiring editor supports semantic track model with editable control points",
 });
 
 test("wiring editor supports configurable turnout parameters and double-branch template", async () => {
-  const [types, app, templates, moduleInspector] = await Promise.all([
+  const [types, app, templates, customize, turnout, moduleInspector] = await Promise.all([
     readFile(new URL("app/wiring/types.ts", root), "utf8"),
     readFile(new URL("app/wiring/WiringDiagramApp.tsx", root), "utf8"),
     readFile(new URL("app/wiring/templates.ts", root), "utf8"),
+    readFile(new URL("app/wiring/templates/customize.ts", root), "utf8"),
+    readFile(new URL("app/wiring/templates/turnout.ts", root), "utf8"),
     readFile(new URL("app/wiring/inspectors/ModuleInspector.tsx", root), "utf8"),
   ]);
 
@@ -629,30 +631,34 @@ test("wiring editor supports configurable turnout parameters and double-branch t
   // DiagramModule has customParams field
   assert.match(types, /customParams\?: Record<string, number>/);
 
-  // makeCustomizedTemplate factory function exists
-  assert.match(templates, /export function makeCustomizedTemplate/);
+  // makeCustomizedTemplate factory lives in templates/customize.ts
+  // (re-exported by the templates.ts barrel).
+  assert.match(customize, /export function makeCustomizedTemplate/);
+  assert.match(templates, /export \{ makeCustomizedTemplate \} from "\.\/templates\/customize"/);
 
-  // double_branch template defined
-  assert.match(templates, /id: "double_branch"/);
-  assert.match(templates, /name: "双支线分叉"/);
-  assert.match(templates, /category: "turnout"/);
+  // double_branch template defined (turnout.ts)
+  assert.match(turnout, /id: "double_branch"/);
+  assert.match(turnout, /name: "双支线分叉"/);
+  assert.match(turnout, /category: "turnout"/);
 
-  // symmetric_double_branch template defined
-  assert.match(templates, /id: "symmetric_double_branch"/);
-  assert.match(templates, /name: "对称支线分岔"/);
-  assert.match(templates, /category: "turnout"/);
+  // symmetric_double_branch template defined (turnout.ts)
+  assert.match(turnout, /id: "symmetric_double_branch"/);
+  assert.match(turnout, /name: "对称支线分岔"/);
+  assert.match(turnout, /category: "turnout"/);
 
-  // both registered in MODULE_TEMPLATES
+  // both registered in MODULE_TEMPLATES (barrel imports them)
+  assert.match(turnout, /doubleBranchTurnout/);
+  assert.match(turnout, /symmetricDoubleBranch/);
   assert.match(templates, /doubleBranchTurnout/);
   assert.match(templates, /symmetricDoubleBranch/);
 
   // Turnout templates have params arrays
-  assert.match(templates, /left_turnout[\s\S]*?params:/);
-  assert.match(templates, /right_turnout[\s\S]*?params:/);
-  assert.match(templates, /single_crossover[\s\S]*?params:/);
-  assert.match(templates, /double_crossover[\s\S]*?params:/);
-  assert.match(templates, /scissors_crossover[\s\S]*?params:/);
-  assert.match(templates, /branch_diverge[\s\S]*?params:/);
+  assert.match(turnout, /left_turnout[\s\S]*?params:/);
+  assert.match(turnout, /right_turnout[\s\S]*?params:/);
+  assert.match(turnout, /single_crossover[\s\S]*?params:/);
+  assert.match(turnout, /double_crossover[\s\S]*?params:/);
+  assert.match(turnout, /scissors_crossover[\s\S]*?params:/);
+  assert.match(turnout, /branch_diverge[\s\S]*?params:/);
 
   // The app resolves module-specific templates before it renders ports or
   // derives connection geometry.
