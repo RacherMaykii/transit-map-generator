@@ -2,6 +2,20 @@
 
 可纯静态部署的轨道交通标识与配线图编辑器，包含线路站序图、出入口站名标识和 SVG 配线图工作台。浏览器模式使用 IndexedDB 保存城市项目；本地文件模式仍可直接维护 CSV。对外只使用城市级工程包：完整包为 `.railcity`，拆分包为 `.railproj` + `.railassets`。
 
+## 界面一览
+
+![项目门户](docs/screenshots/portal.png)
+<p align="center"><sub>项目门户：选择设计类型、管理城市项目；顶部为 Beta 版本提示，页脚可查看「关于」与「注意事项」</sub></p>
+
+![线路站序图编辑器](docs/screenshots/route.png)
+<p align="center"><sub>线路站序图编辑器：编辑线路、站点、运行方向与换乘信息，实时预览并导出</sub></p>
+
+![出入口站名标识编辑器](docs/screenshots/entrance.png)
+<p align="center"><sub>出入口站名标识编辑器：使用同一城市项目的线路与站点数据制作入口站名标识</sub></p>
+
+![配线图编辑器](docs/screenshots/wiring.png)
+<p align="center"><sub>配线图编辑器：绘制轨道结构与站点连接关系，支持双线自动连接与端口校验</sub></p>
+
 ## 主要功能
 
 - 线路、站点、换乘 CSV 编辑、预览和校验
