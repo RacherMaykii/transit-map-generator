@@ -220,6 +220,7 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
   const [showAuxLabels, setShowAuxLabels] = usePersistentState(PREF_KEY("showAuxLabels"), true);
   const [snapEnabled, setSnapEnabled] = usePersistentState(PREF_KEY("snapEnabled"), true);
   const [autoConnect, setAutoConnect] = usePersistentState(PREF_KEY("autoConnect"), true);
+  const [autoAvoidance, setAutoAvoidance] = usePersistentState(PREF_KEY("autoAvoidance"), true);
   const [filterLineIds, setFilterLineIds] = useState<string[]>([]);
   const [servicePatterns, setServicePatterns] = useState(DEFAULT_SERVICE_PATTERNS);
   const [activeServicePatternId, setActiveServicePatternId] = useState("");
@@ -612,8 +613,9 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
   // is idempotent, so a settled layout returns unchanged arrays and does not
   // create a render loop or an extra history entry.
   useEffect(() => {
+    if (!autoAvoidance) return;
     applyLabelAvoidance(false);
-  }, [applyLabelAvoidance, modules, labels, graphics, platforms]);
+  }, [applyLabelAvoidance, modules, labels, graphics, platforms, autoAvoidance]);
 
   // Older projects and manually placed station modules may still rely on the
   // template's fallback "站名"/"Station" text. Materialize those two labels
@@ -4314,7 +4316,9 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
             >
               换乘
             </button>
-            <button className="wiring-btn" onClick={() => applyLabelAvoidance(true)} title="自动调整站名和图标位置，避免相互遮挡">🔀 自动避让</button>
+            {!autoAvoidance && (
+              <button className="wiring-btn" onClick={() => applyLabelAvoidance(true)} title="自动避让已关闭：手动整理站名和图标位置，避免相互遮挡">🔀 避让一次</button>
+            )}
           </div>
 
           <div className="wiring-toolbar-group">
@@ -4326,6 +4330,7 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
             <label className="wiring-check"><input type="checkbox" checked={showGrid} onChange={(e) => setShowGrid(e.target.checked)} />网格</label>
             <label className="wiring-check"><input type="checkbox" checked={snapEnabled} onChange={(e) => setSnapEnabled(e.target.checked)} />吸附</label>
             <label className="wiring-check"><input type="checkbox" checked={autoConnect} onChange={(e) => setAutoConnect(e.target.checked)} />自动连接</label>
+            <label className="wiring-check" title="站名/图标与站台重叠时自动推开；关闭后可手动点击“避让一次”"><input type="checkbox" checked={autoAvoidance} onChange={(e) => setAutoAvoidance(e.target.checked)} />自动避让</label>
             <label className="wiring-check" title="连接标准上、下行端口时，同时创建另一条正线连接"><input type="checkbox" checked={doubleTrackConnect} onChange={(e) => setDoubleTrackConnect(e.target.checked)} />双线连接</label>
             <label className="wiring-check"><input type="checkbox" checked={continuousPlace} onChange={(e) => setContinuousPlace(e.target.checked)} title="连续放置模式：选择模板后可多次点击放置" />连续放置</label>
           </div>

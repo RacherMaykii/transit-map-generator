@@ -797,6 +797,22 @@ test("unified transfer button, discardSnapshot, and tutorial cleanup", async () 
   assert.ok(!/6 个步骤/.test(tutorial), "tutorial must say 7 steps, not 6");
 });
 
+test("auto-avoidance is a persistent toggle with a manual one-shot when off", async () => {
+  const app = await readFile(new URL("app/wiring/WiringDiagramApp.tsx", root), "utf8");
+
+  // The automatic avoidance is a persistent checkbox (default on), sibling to 自动连接
+  assert.match(app, /usePersistentState\(PREF_KEY\("autoAvoidance"\), true\)/);
+  assert.match(app, /checked=\{autoAvoidance\}/);
+  assert.match(app, />自动避让</);
+
+  // The auto-run effect is gated on the toggle, so off = dragging keeps overlaps
+  assert.match(app, /if \(!autoAvoidance\) return;/);
+
+  // When off, a manual one-shot button replaces the always-on behavior
+  assert.match(app, /\{!autoAvoidance &&/);
+  assert.match(app, /避让一次/);
+});
+
 test("wiring editor supports hierarchical tree layers with drag-to-reorder", async () => {
   const [types, layerTree, history, projectStore, app, css] = await Promise.all([
     readFile(new URL("app/wiring/types.ts", root), "utf8"),
