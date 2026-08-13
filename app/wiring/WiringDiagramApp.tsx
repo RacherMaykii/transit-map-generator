@@ -166,6 +166,17 @@ import {
 } from "./ui/svgElements";
 import "../transit/transit.css";
 import "./wiring.css";
+import {
+  BackgroundInspector,
+  ConnectionInspector,
+  GraphicInspector,
+  LabelInspector,
+  ModuleInspector,
+  PlacementInspector,
+  PlatformInspector,
+  TransferGroupInspector,
+} from "./inspectors";
+import type { InspectorContext } from "./inspectors/inspectorProps";
 
 // ── 主组件 ────────────────────────────────────
 
@@ -4541,6 +4552,82 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
     );
   }
 
+  // 右侧属性面板 inspector 共用的组件作用域上下文（每次渲染构造一次）
+  const inspectorCtx: InspectorContext = {
+    data,
+    modules,
+    connections,
+    layers,
+    platforms,
+    selectedIds,
+    history,
+    selectedConnection,
+    selectedBgImage,
+    selectedMod,
+    selectedTemplate,
+    selectedPlatform,
+    selectedGraphic,
+    selectedLabel,
+    selectedTransferGroup,
+    bgLocked,
+    selectableLayers,
+    activePage,
+    templateMap,
+    advancedMode,
+    manualCurveEditingId,
+    editingPlatformModuleId,
+    overlappingLabelItems,
+    automaticPlacementLayerName,
+    placementRotation,
+    placementMirrorX,
+    placementMirrorY,
+    placementZIndex,
+    placementLayerId,
+    replaceBackgroundInputRef,
+    setConnections,
+    setHasUnsavedChanges,
+    setStatus,
+    setSelectedIds,
+    setManualCurveEditingId,
+    setModules,
+    setPlatforms,
+    setLabels,
+    setEditingPlatformModuleId,
+    setPlacementRotation,
+    setPlacementMirrorX,
+    setPlacementMirrorY,
+    setPlacementZIndex,
+    setPlacementLayerId,
+    isLayerLocked,
+    getConnectionEndpoints,
+    updateConnectionAndPairedRail,
+    updateConnection,
+    setConnectionLineStyle,
+    cycleCrossingType,
+    removeCrossingPoint,
+    addControlPointMidpoint,
+    removeControlPoint,
+    straightenConnection,
+    regenerateAutoControlPoints,
+    updateBgImage,
+    handleReplaceBackgroundInput,
+    deleteBgImage,
+    updateModule,
+    deleteSelected,
+    updatePlatform,
+    deletePlatform,
+    updateGraphic,
+    updateLabel,
+    deleteLabel,
+    renderItemName,
+    moveLabelRelative,
+    moveLabelToEdge,
+    updateTransferGroup,
+    removeModuleFromGroup,
+    addSelectedModulesToGroup,
+    deleteTransferGroup,
+  };
+
   return (
     <div className="wiring-editor-shell" onContextMenu={handleContextMenu}>
       {/* ══════════ 顶部工具栏 ══════════ */}
@@ -5085,1149 +5172,26 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
             <p>{selectedMod ? `${selectedTemplate?.name || ""} · ${selectedMod.id.slice(-6)}` : selectedPlatform ? `${selectedPlatform.platformType} · ${selectedPlatform.id.slice(-6)}` : selectedGraphic ? (selectedGraphic.shapeType ? `${SHAPE_META[selectedGraphic.shapeType]?.label || "图形"} · ${selectedGraphic.id.slice(-6)}` : `${assets.find((asset) => asset.id === selectedGraphic.assetId)?.name || "资源缺失"} · ${selectedGraphic.id.slice(-6)}`) : selectedLabel ? `${selectedLabel.text.slice(0, 12)}${selectedLabel.text.length > 12 ? "…" : ""} · ${selectedLabel.id.slice(-6)}` : selectedConnection ? `${selectedConnection.crossingType === "plain" ? "平面交叉" : selectedConnection.crossingType === "gap" ? "断开" : "桥梁跨越"} · ${selectedConnection.id.slice(-6)}` : selectedBgImage ? `${selectedBgImage.naturalWidth}×${selectedBgImage.naturalHeight}` : selectedTransferGroup ? `${selectedTransferGroup.moduleIds.length} 个模块` : placementTargetName ? `下一次放置：${placementTargetName}` : "设置下一次放置的默认属性"}</p>
           </div>
           <div className="wiring-right-content">
-            {selectedConnection && !selectedMod && !selectedLabel ? (
-              <>
-                <div className="wiring-prop-group">
-                  <h5>连接属性</h5>
-                  <div className="wiring-prop-row">
-                    <label>连接 ID</label>
-                    <input type="text" value={selectedConnection.id.slice(-8)} readOnly style={{ fontFamily: "Consolas, monospace", color: "var(--muted)" }} />
+            {selectedConnection && !selectedMod && !selectedLabel ? <ConnectionInspector ctx={inspectorCtx} />
+              : selectedBgImage && !selectedMod ? <BackgroundInspector ctx={inspectorCtx} />
+              : selectedMod && selectedTemplate ? <ModuleInspector ctx={inspectorCtx} />
+              : selectedPlatform ? <PlatformInspector ctx={inspectorCtx} />
+              : selectedGraphic ? <GraphicInspector ctx={inspectorCtx} />
+              : selectedLabel ? <LabelInspector ctx={inspectorCtx} />
+              : selectedTransferGroup ? <TransferGroupInspector ctx={inspectorCtx} />
+              : (
+                <>
+                  <PlacementInspector ctx={inspectorCtx} />
+                  <div className="wiring-prop-empty">
+                    <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+                      <rect x="6" y="6" width="36" height="36" rx="8" stroke="currentColor" strokeWidth="2" />
+                      <path d="M16 24h16M24 16v16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                    </svg>
+                    <b>{placementTargetName ? `正在放置：${placementTargetName}` : "选择画布中的元件"}</b>
+                    <span>{placementTargetName ? "点击画布完成放置" : "查看和编辑属性"}</span>
                   </div>
-                  <div className="wiring-prop-row">
-                    <label>起点模块</label>
-                    <input type="text" value={modules.find((m) => m.id === selectedConnection.fromModuleId)?.name || "?"} readOnly style={{ color: "var(--muted)" }} />
-                  </div>
-                  <div className="wiring-prop-row">
-                    <label>终点模块</label>
-                    <input type="text" value={modules.find((m) => m.id === selectedConnection.toModuleId)?.name || "?"} readOnly style={{ color: "var(--muted)" }} />
-                  </div>
-                  <div className="wiring-prop-row" style={{ gridTemplateColumns: "1fr" }}>
-                    <div className="wiring-crossing-buttons">
-                      <button
-                        className={`wiring-btn ${(selectedConnection.zIndexMode ?? "auto") === "auto" ? "active" : ""}`}
-                        onClick={() => {
-                          if ((selectedConnection.zIndexMode ?? "auto") === "auto") return;
-                          history.captureSnapshot("连接层级改为自动");
-                          setConnections((prev) => updateConnectionAndPairedRail(prev, selectedConnection.id, (connection) => ({ ...connection, zIndexMode: "auto" })));
-                          setHasUnsavedChanges(true);
-                        }}
-                      >
-                        自动层级
-                      </button>
-                      <button
-                        className={`wiring-btn ${selectedConnection.zIndexMode === "manual" ? "active" : ""}`}
-                        onClick={() => {
-                          if (selectedConnection.zIndexMode === "manual") return;
-                          const currentIndex = effectiveConnectionZIndex(selectedConnection, modules);
-                          history.captureSnapshot("连接层级改为手动");
-                          setConnections((prev) => updateConnectionAndPairedRail(prev, selectedConnection.id, (connection) => ({ ...connection, zIndexMode: "manual", zIndex: currentIndex })));
-                          setHasUnsavedChanges(true);
-                        }}
-                      >
-                        手动层级
-                      </button>
-                    </div>
-                  </div>
-                  <div className="wiring-prop-row">
-                    <label>Z-Index</label>
-                    {(selectedConnection.zIndexMode ?? "auto") === "auto" ? (
-                      <input type="number" step={0.5} value={effectiveConnectionZIndex(selectedConnection, modules)} readOnly />
-                    ) : (
-                      <input
-                        key={`${selectedConnection.id}:${selectedConnection.zIndex}`}
-                        type="number"
-                        step={0.5}
-                        defaultValue={selectedConnection.zIndex}
-                        onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}
-                        onBlur={(event) => {
-                          const zIndex = Number(event.target.value);
-                          if (!Number.isFinite(zIndex) || zIndex === selectedConnection.zIndex) return;
-                          history.captureSnapshot("修改连接层级");
-                          setConnections((prev) => updateConnectionAndPairedRail(prev, selectedConnection.id, (connection) => ({ ...connection, zIndexMode: "manual", zIndex })));
-                          setHasUnsavedChanges(true);
-                        }}
-                      />
-                    )}
-                  </div>
-                  <p style={{ fontSize: 10, color: "var(--muted)", margin: "4px 0 0" }}>
-                    {(selectedConnection.zIndexMode ?? "auto") === "auto"
-                      ? "动态取两端模块 Z-Index 的中间值；端点层级变化时自动更新"
-                      : "使用手动 Z-Index；双线区间的配对轨道会同步更新"}
-                  </p>
-                </div>
-
-                <div className="wiring-prop-group">
-                  <h5>交叉类型</h5>
-                  <div className="wiring-prop-row" style={{ gridTemplateColumns: "1fr" }}>
-                    <div className="wiring-crossing-buttons">
-                      <button
-                        className={`wiring-btn ${selectedConnection.crossingType === "plain" ? "active" : ""}`}
-                        onClick={() => updateConnection(selectedConnection.id, { crossingType: "plain" }, "设置平面交叉")}
-                      >
-                        平面交叉
-                      </button>
-                      <button
-                        className={`wiring-btn ${selectedConnection.crossingType === "gap" ? "active" : ""}`}
-                        onClick={() => updateConnection(selectedConnection.id, { crossingType: "gap" }, "设置断开")}
-                      >
-                        断开
-                      </button>
-                      <button
-                        className={`wiring-btn ${selectedConnection.crossingType === "bridge" ? "active" : ""}`}
-                        onClick={() => updateConnection(selectedConnection.id, { crossingType: "bridge" }, "设置桥梁")}
-                      >
-                        桥梁
-                      </button>
-                    </div>
-                  </div>
-                  <p style={{ fontSize: 11, color: "var(--muted)", margin: "4px 0 0" }}>
-                    {selectedConnection.crossingType === "plain" && "两条轨道在同一平面交叉，列车通过道岔切换。"}
-                    {selectedConnection.crossingType === "gap" && "轨道在此处断开，两条线路立体分离，无道岔连接。"}
-                    {selectedConnection.crossingType === "bridge" && "一条轨道以桥梁形式跨越另一条轨道，无平面交叉。"}
-                  </p>
-                </div>
-
-                <div className="wiring-prop-group">
-                  <h5>线型</h5>
-                  <div className="wiring-prop-row" style={{ gridTemplateColumns: "1fr" }}>
-                    <div className="wiring-crossing-buttons">
-                      <button
-                        className={`wiring-btn ${(selectedConnection.lineStyle ?? "solid") === "solid" ? "active" : ""}`}
-                        onClick={() => setConnectionLineStyle(selectedConnection.id, "solid")}
-                      >
-                        实线
-                      </button>
-                      <button
-                        className={`wiring-btn ${selectedConnection.lineStyle === "dashed" ? "active" : ""}`}
-                        onClick={() => setConnectionLineStyle(selectedConnection.id, "dashed")}
-                      >
-                        虚线
-                      </button>
-                    </div>
-                  </div>
-                  <p style={{ fontSize: 11, color: "var(--muted)", margin: "4px 0 0" }}>
-                    {selectedConnection.lineStyle === "dashed"
-                      ? "虚线表示预留段、未开通段或地下隧道段等非在用轨道"
-                      : "实线表示在用轨道；虚线可用于预留段、未开通段或地下隧道段"}
-                  </p>
-                </div>
-
-                <div className="wiring-prop-group">
-                  <h5>交叉点（{selectedConnection.crossingPoints.length}）</h5>
-                  {selectedConnection.crossingPoints.length === 0 ? (
-                    <p style={{ fontSize: 11, color: "var(--muted)", margin: "4px 0" }}>暂无交叉点</p>
-                  ) : (
-                    <div className="wiring-crossing-list">
-                      {selectedConnection.crossingPoints.map((cp, i) => (
-                        <div key={i} className="wiring-crossing-row">
-                          <span>#{i + 1} ({Math.round(cp.x)}, {Math.round(cp.y)})</span>
-                          <button className="wiring-btn danger" onClick={() => removeCrossingPoint(selectedConnection.id, i)}>删除</button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  <p style={{ fontSize: 10, color: "var(--muted)", margin: "6px 0 0" }}>
-                    双击连接切换交叉类型 · 点击轨道线上的圆点删除交叉点
-                  </p>
-                </div>
-
-                <div className="wiring-prop-group">
-                  <h5>贝塞尔曲线</h5>
-                  {(() => {
-                    const manualOn = selectedConnection.autoCurve === false || manualCurveEditingId === selectedConnection.id;
-                    const autoOn = !manualOn && selectedConnection.autoCurve !== false;
-                    const straightOn = selectedConnection.autoCurve === false && selectedConnection.controlPoints.length === 0;
-                    return (
-                      <div className="wiring-segmented" style={{ margin: "4px 0" }}>
-                        <button
-                          className={straightOn ? "active" : ""}
-                          onClick={() => {
-                            if (straightOn) return;
-                            history.captureSnapshot("切换为直线连接");
-                            const conn = connections.find((c) => c.id === selectedConnection.id);
-                            if (!conn) return;
-                            const ends = getConnectionEndpoints(conn);
-                            setConnections((prev) => updateConnectionAndPairedRail(prev, selectedConnection.id, (c) => ({
-                              ...c,
-                              autoCurve: false,
-                              controlPoints: [],
-                            })));
-                            setHasUnsavedChanges(true);
-                            setStatus("已切换为直线连接");
-                          }}
-                          title="直线连接，不生成控制点"
-                        >
-                          直线
-                        </button>
-                        <button
-                          className={manualOn ? "active" : ""}
-                          onClick={() => {
-                            if (manualOn) return;
-                            const conn = connections.find((c) => selectedConnection && c.id === selectedConnection.id);
-                            if (!conn) return;
-                            history.captureSnapshot("切换为手动曲线");
-                            // 从直线切换过来 → 生成隐式锚点让用户有起点
-                            const ends = getConnectionEndpoints(conn);
-                            const cps = ends
-                              ? createAutoControlPoints(ends.from, ends.to, ends.fromDir, ends.toDir, {
-                                  middle: `${conn.fromModuleId}:${conn.fromPortId}:${conn.toModuleId}:${conn.toPortId}:middle`,
-                                })
-                              : [];
-                            setManualCurveEditingId(conn.id);
-                            setConnections((prev) => updateConnectionAndPairedRail(prev, conn.id, (c) => ({
-                              ...c,
-                              autoCurve: false,
-                              controlPoints: cps,
-                            })));
-                            setHasUnsavedChanges(true);
-                            setStatus("已切换为手动曲线模式，可自由调整轨道节点");
-                          }}
-                          title="手动调整轨道节点和曲率"
-                        >
-                          手动曲线
-                        </button>
-                        <button
-                          className={autoOn ? "active" : ""}
-                          onClick={() => {
-                            if (autoOn) return;
-                            setManualCurveEditingId(null);
-                            history.captureSnapshot("切换为自动曲线");
-                            setConnections((prev) => updateConnectionAndPairedRail(prev, selectedConnection.id, (c) => ({
-                              ...c,
-                              autoCurve: true,
-                            })));
-                            setHasUnsavedChanges(true);
-                            setTimeout(() => regenerateAutoControlPoints(selectedConnection.id), 0);
-                          }}
-                          title="根据端口位置自动生成对称贝塞尔曲线"
-                        >
-                          自动曲线
-                        </button>
-                      </div>
-                    );
-                  })()}
-                  <p style={{ fontSize: 10, color: "var(--muted)", margin: "2px 0" }}>
-                    直线：无控制点, 直线连接 · 手动：自由调整 · 自动：端口移动时自动更新
-                  </p>
-                </div>
-
-                <div className="wiring-prop-group">
-                  <h5>连接轨道颜色</h5>
-                  <div className="wiring-prop-row" style={{ gridTemplateColumns: "1fr" }}>
-                    <div className="wiring-crossing-buttons">
-                      <button
-                        className={`wiring-btn ${(selectedConnection.colorMode ?? "auto") === "auto" ? "active" : ""}`}
-                        onClick={() => updateConnection(selectedConnection.id, { colorMode: "auto" }, "设置自动轨道颜色")}
-                      >
-                        自动跟随
-                      </button>
-                      <button
-                        className={`wiring-btn ${selectedConnection.colorMode === "manual" ? "active" : ""}`}
-                        onClick={() => updateConnection(selectedConnection.id, { colorMode: "manual" }, "设置手动轨道颜色")}
-                      >
-                        手动
-                      </button>
-                    </div>
-                  </div>
-                  {(selectedConnection.colorMode ?? "auto") === "manual" && (
-                    <div className="wiring-prop-row">
-                      <label>颜色</label>
-                      <div className="wiring-prop-color">
-                        <input type="color" value={selectedConnection.color || "#202124"} onChange={(e) => updateConnection(selectedConnection.id, { color: e.target.value }, "设置连接颜色")} />
-                        <input type="text" value={selectedConnection.color || "#202124"} onChange={(e) => updateConnection(selectedConnection.id, { color: e.target.value }, "设置连接颜色")} />
-                      </div>
-                    </div>
-                  )}
-                  <p style={{ fontSize: 10, color: "var(--muted)", margin: "4px 0 0" }}>
-                    {(selectedConnection.colorMode ?? "auto") === "auto"
-                      ? "根据两端模块的线路颜色自动填充；两端颜色不同时显示渐变色"
-                      : "使用手动指定的颜色"}
-                  </p>
-                </div>
-
-                <div className="wiring-prop-group">
-                  {(() => {
-                    const visibleCPs = selectedConnection.controlPoints.filter((cp) => !cp.implicit);
-                    const implicitCount = selectedConnection.controlPoints.length - visibleCPs.length;
-                    return (
-                      <>
-                        <h5>轨道节点（{visibleCPs.length}{implicitCount > 0 ? ` + ${implicitCount} 隐式` : ""}）</h5>
-                        <div className="wiring-prop-row" style={{ gridTemplateColumns: "1fr" }}>
-                          <div className="wiring-crossing-buttons">
-                            <button className="wiring-btn" onClick={() => addControlPointMidpoint(selectedConnection.id)}>
-                              添加节点
-                            </button>
-                            <button
-                              className="wiring-btn danger"
-                              disabled={selectedConnection.controlPoints.length === 0}
-                              onClick={() => straightenConnection(selectedConnection.id)}
-                            >
-                              拉直轨道
-                            </button>
-                          </div>
-                        </div>
-                        {visibleCPs.length === 0 && implicitCount === 0 ? (
-                          <p style={{ fontSize: 11, color: "var(--muted)", margin: "4px 0" }}>
-                            暂无节点（直线连接）
-                          </p>
-                        ) : (
-                          <div className="wiring-crossing-list">
-                            {visibleCPs.map((cp, i) => (
-                              <div key={cp.id} className="wiring-crossing-row">
-                                <span>
-                                  #{i + 1} ({Math.round(cp.x)}, {Math.round(cp.y)}){cp.curved ? " · 曲" : ""}
-                                </span>
-                                <button className="wiring-btn danger" onClick={() => removeControlPoint(selectedConnection.id, cp.id)}>
-                                  删除
-                                </button>
-                              </div>
-                            ))}
-                            {implicitCount > 0 && (
-                              <p style={{ fontSize: 10, color: "var(--muted)", margin: "2px 0" }}>
-                                · {implicitCount} 个隐式锚点（靠近端口，自动平滑）
-                              </p>
-                            )}
-                          </div>
-                        )}
-                        <p style={{ fontSize: 10, color: "var(--muted)", margin: "6px 0 0" }}>
-                          Alt+点击轨道添加节点 · 拖拽节点移动 · 双击节点切换曲率 · 拖拽手柄调整弧度
-                        </p>
-                      </>
-                    );
-                  })()}
-                </div>
-
-                <div className="wiring-prop-actions">
-                  <button onClick={() => cycleCrossingType(selectedConnection.id)}>切换交叉类型</button>
-                  <button className="danger" onClick={() => {
-                    history.captureSnapshot("删除连接");
-                    const pairedId = selectedConnection.pairedConnectionId;
-                    setConnections((prev) => prev.filter((c) => c.id !== selectedConnection.id && c.id !== pairedId));
-                    setSelectedIds([]);
-                    setHasUnsavedChanges(true);
-                    setStatus("已删除连接");
-                  }}>🗑 删除连接</button>
-                </div>
-              </>
-            ) : selectedBgImage && !selectedMod ? (
-              <>
-                <div className="wiring-prop-group">
-                  <h5>背景图属性{bgLocked ? <span style={{ fontSize: 10, color: "var(--muted)" }}>（已锁定，全部参数不可修改）</span> : null}</h5>
-                  <div className="wiring-prop-row">
-                    <label>名称</label>
-                    <input type="text" value={selectedBgImage.name} disabled={bgLocked} onChange={(e) => updateBgImage(selectedBgImage.id, { name: e.target.value })} />
-                  </div>
-                  <div className="wiring-prop-row">
-                    <label>X 坐标</label>
-                    <input type="number" value={Math.round(selectedBgImage.x)} disabled={bgLocked} onChange={(e) => updateBgImage(selectedBgImage.id, { x: parseFloat(e.target.value) || 0 })} />
-                  </div>
-                  <div className="wiring-prop-row">
-                    <label>Y 坐标</label>
-                    <input type="number" value={Math.round(selectedBgImage.y)} disabled={bgLocked} onChange={(e) => updateBgImage(selectedBgImage.id, { y: parseFloat(e.target.value) || 0 })} />
-                  </div>
-                  <div className="wiring-prop-row">
-                    <label>缩放</label>
-                    <input type="number" step="0.1" min="0.05" value={selectedBgImage.scale.toFixed(2)} disabled={bgLocked} onChange={(e) => updateBgImage(selectedBgImage.id, { scale: parseFloat(e.target.value) || 0.1 })} />
-                  </div>
-                  <div className="wiring-prop-row"><label>旋转</label><input type="number" value={selectedBgImage.rotation || 0} disabled={bgLocked} onChange={(e) => updateBgImage(selectedBgImage.id, { rotation: Number(e.target.value) })} /></div>
-                  <div className="wiring-prop-row">
-                    <label>不透明度</label>
-                    <input type="range" min="0.05" max="1" step="0.05" value={selectedBgImage.opacity} disabled={bgLocked} onChange={(e) => updateBgImage(selectedBgImage.id, { opacity: parseFloat(e.target.value) })} />
-                  </div>
-                  <div className="wiring-prop-row">
-                    <label>图层</label>
-                    <select value={selectedBgImage.layerId} disabled={bgLocked} onChange={(e) => updateBgImage(selectedBgImage.id, { layerId: e.target.value })}>
-                      {layers.filter((l) => selectableLayers.includes(l.id)).map((l) => (
-                        <option key={l.id} value={l.id}>{l.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-                <div className="wiring-prop-actions">
-                  <button disabled={bgLocked} onClick={() => updateBgImage(selectedBgImage.id, fitBackgroundToCanvas(selectedBgImage, activePage), "背景图适应画布")}>适应画布</button>
-                  <button disabled={bgLocked} onClick={() => updateBgImage(selectedBgImage.id, centerBackgroundOnCanvas(selectedBgImage, activePage), "背景图居中")}>居中</button>
-                  <button disabled={bgLocked} onClick={() => updateBgImage(selectedBgImage.id, restoreBackgroundSize(selectedBgImage), "恢复背景原始尺寸")}>原始尺寸</button>
-                  <button disabled={bgLocked} onClick={() => replaceBackgroundInputRef.current?.click()}>替换</button>
-                  <input ref={replaceBackgroundInputRef} type="file" accept="image/*" onChange={handleReplaceBackgroundInput} style={{ display: "none" }} />
-                  <button onClick={() => updateBgImage(selectedBgImage.id, { locked: !selectedBgImage.locked })}>
-                    {selectedBgImage.locked ? "🔓 解锁背景图" : "🔒 锁定背景图"}
-                  </button>
-                  <button disabled={bgLocked} onClick={() => updateBgImage(selectedBgImage.id, { visible: !selectedBgImage.visible })}>
-                    {selectedBgImage.visible ? "🙈 隐藏背景图" : "👁 显示背景图"}
-                  </button>
-                  <button className="danger" onClick={() => deleteBgImage(selectedBgImage.id)}>🗑 删除背景图</button>
-                </div>
-              </>
-            ) : selectedMod && selectedTemplate ? (
-              <>
-                {isLayerLocked(selectedMod.layerId) && (
-                  <p style={{ fontSize: 11, color: "#b45309", background: "#fef3c7", border: "1px solid #f59e0b", borderRadius: 6, padding: "6px 8px", margin: "0 0 10px", lineHeight: 1.45 }}>
-                    该模块所在图层已锁定，此面板中的修改（含站点关联）不会生效。请在左侧图层面板解锁后再编辑。
-                  </p>
-                )}
-                <div className="wiring-prop-group">
-                  <h5>基本信息</h5>
-                  <div className="wiring-prop-row">
-                    <label>名称</label>
-                    <input type="text" value={selectedMod.name} onChange={(e) => updateModule(selectedMod.id, { name: e.target.value })} />
-                  </div>
-                  <div className="wiring-prop-row">
-                    <label>自定义标签</label>
-                    <input type="text" value={selectedMod.customLabel || ""} placeholder="覆盖站名" onChange={(e) => updateModule(selectedMod.id, { customLabel: e.target.value })} />
-                  </div>
-                  <div className="wiring-prop-row">
-                    <label>模板</label>
-                    <select value={selectedMod.templateId} onChange={(e) => {
-                      const newTplId = e.target.value;
-                      const newTemplate = templateMap.get(newTplId);
-                      const patch: Partial<DiagramModule> = { templateId: newTplId };
-                      if (newTemplate?.params?.length) {
-                        patch.customParams = Object.fromEntries(newTemplate.params.map(p => [p.key, p.default]));
-                      } else {
-                        patch.customParams = undefined;
-                      }
-                      if (!newTemplate || !supportsAvoidanceTracks(newTemplate.id)) patch.avoidanceTracks = undefined;
-                      updateModule(selectedMod.id, patch);
-                    }}>
-                      {MODULE_TEMPLATES.map((t) => (
-                        <option key={t.id} value={t.id}>{t.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                {supportsAvoidanceTracks(selectedTemplate.id) && (
-                  <div className="wiring-prop-group">
-                    <h5>站台与股道</h5>
-                    <label className="wiring-check" title="避让线在当前站点元件内部从正线分出并接回，不会增加对外连接点">
-                      <input
-                        type="checkbox"
-                        checked={selectedMod.avoidanceTracks === true}
-                        onChange={(event) => updateModule(
-                          selectedMod.id,
-                          { avoidanceTracks: event.target.checked },
-                          event.target.checked ? "启用避让线" : "关闭避让线",
-                        )}
-                      />
-                      显示避让线
-                    </label>
-                    <p style={{ fontSize: 10, color: "var(--muted)", margin: "6px 0 0" }}>
-                      岛式位于正线外侧，侧式位于两条正线之间；同台换乘同时显示外侧与中央避让线。
-                    </p>
-                  </div>
-                )}
-
-                <div className="wiring-prop-group">
-                  <h5>位置与变换</h5>
-                  <div className="wiring-prop-row">
-                    <label>X 坐标</label>
-                    <input type="number" value={selectedMod.x} onChange={(e) => updateModule(selectedMod.id, { x: parseInt(e.target.value) || 0 })} />
-                  </div>
-                  <div className="wiring-prop-row">
-                    <label>Y 坐标</label>
-                    <input type="number" value={selectedMod.y} onChange={(e) => updateModule(selectedMod.id, { y: parseInt(e.target.value) || 0 })} />
-                  </div>
-                  <div className="wiring-prop-row wiring-module-direction">
-                    <label>方向</label>
-                    <div className="wiring-direction-control" aria-label="模块旋转方向">
-                      <div className="wiring-rotation-grid">
-                        {(advancedMode ? [
-                          { rotation: 225, icon: "↖", label: "左上 225°", position: "top-left" },
-                          { rotation: 270, icon: "↑", label: "向上 270°", position: "top" },
-                          { rotation: 315, icon: "↗", label: "右上 315°", position: "top-right" },
-                          { rotation: 180, icon: "←", label: "向左 180°", position: "left" },
-                          { rotation: 0, icon: "·", label: "恢复默认 0°", position: "center", reset: true },
-                          { rotation: 0, icon: "→", label: "向右 0°", position: "right" },
-                          { rotation: 135, icon: "↙", label: "左下 135°", position: "bottom-left" },
-                          { rotation: 90, icon: "↓", label: "向下 90°", position: "bottom" },
-                          { rotation: 45, icon: "↘", label: "右下 45°", position: "bottom-right" },
-                        ] : [
-                          { rotation: 270, icon: "↑", label: "向上 270°", position: "top" },
-                          { rotation: 180, icon: "←", label: "向左 180°", position: "left" },
-                          { rotation: 0, icon: "→", label: "向右 0°", position: "right" },
-                          { rotation: 90, icon: "↓", label: "向下 90°", position: "bottom" },
-                        ]).map((option) => (
-                          <button
-                            key={option.position}
-                            type="button"
-                            className={`${option.position} ${!option.reset && selectedMod.rotation === option.rotation ? "active" : ""}`}
-                            onClick={() => updateModule(selectedMod.id, { rotation: option.rotation }, "旋转模块")}
-                            title={option.label}
-                            aria-label={option.label}
-                          >
-                            {option.icon}
-                          </button>
-                        ))}
-                        {!advancedMode && <span className="wiring-direction-center" aria-hidden="true">·</span>}
-                      </div>
-                      <span>{selectedMod.rotation}°</span>
-                    </div>
-                  </div>
-                  <div className="wiring-prop-row">
-                    <label>镜像</label>
-                    <MirrorToggle mirrorX={selectedMod.mirrorX} mirrorY={selectedMod.mirrorY} onChange={(next) => updateModule(selectedMod.id, next, "镜像模块")} />
-                  </div>
-                  <div className="wiring-prop-row">
-                    <label>层级</label>
-                    <select value={selectedMod.layerId} onChange={(e) => updateModule(selectedMod.id, { layerId: e.target.value })}>
-                      {layers.filter((l) => selectableLayers.includes(l.id)).map((l) => (
-                        <option key={l.id} value={l.id}>{l.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                  {advancedMode && (
-                    <div className="wiring-prop-row">
-                      <label>Z-Index</label>
-                      <input type="number" value={selectedMod.zIndex} onChange={(e) => updateModule(selectedMod.id, { zIndex: parseInt(e.target.value) || 0 })} />
-                    </div>
-                  )}
-                  {selectedTemplate.labels.some((label) => (label.fontSize || 13) <= 9) && (
-                    <label className="wiring-check" title="只影响本组件的左开、右开、折返等辅助小字">
-                      <input type="checkbox" checked={selectedMod.showAuxLabels !== false} onChange={(e) => updateModule(selectedMod.id, { showAuxLabels: e.target.checked })} />显示辅助标识
-                    </label>
-                  )}
-                </div>
-
-                {selectedTemplate.params && selectedTemplate.params.length > 0 && (
-                  <div className="wiring-prop-group">
-                    <h5>道岔参数</h5>
-                    {selectedTemplate.params.map((param) => (
-                      <div key={param.key} className="wiring-prop-row wiring-param-slider">
-                        <label>{param.label}</label>
-                        <input
-                          type="range"
-                          min={param.min}
-                          max={param.max}
-                          step={param.step || 1}
-                          value={selectedMod.customParams?.[param.key] ?? param.default}
-                          onChange={(e) => {
-                            const val = parseInt(e.target.value);
-                            updateModule(selectedMod.id, {
-                              customParams: { ...(selectedMod.customParams || {}), [param.key]: val },
-                            });
-                          }}
-                        />
-                        <span className="wiring-param-value">
-                          {selectedMod.customParams?.[param.key] ?? param.default}{param.unit || ""}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                <div className="wiring-prop-group">
-                  <h5>线路关联</h5>
-                  <div className="wiring-line-picker">
-                    {data.lines.map((line) => {
-                      const checked = selectedMod.lineIds.includes(line.id);
-                      return (
-                        <label key={line.id} className="wiring-line-option" title={`${line.id} · ${line.nameZh}`}>
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={() => updateModule(
-                              selectedMod.id,
-                              { lineIds: checked ? selectedMod.lineIds.filter((id) => id !== line.id) : [...selectedMod.lineIds, line.id] },
-                              checked ? "取消关联线路" : "关联线路",
-                            )}
-                          />
-                          <span className="wiring-line-swatch" style={{ background: line.lineColor || "#202124" }} />
-                          <span className="wiring-line-name">{line.id} · {line.nameZh}</span>
-                        </label>
-                      );
-                    })}
-                    {!data.lines.length && <p style={{ fontSize: 11, color: "var(--muted)", margin: "4px 0" }}>暂无线路数据</p>}
-                  </div>
-                </div>
-
-                <div className="wiring-prop-group">
-                  <h5>元件轨道颜色</h5>
-                  <div className="wiring-prop-row" style={{ gridTemplateColumns: "1fr" }}>
-                    <div className="wiring-crossing-buttons">
-                      <button
-                        className={`wiring-btn ${selectedMod.trackColorMode === "default" ? "active" : ""}`}
-                        onClick={() => updateModule(selectedMod.id, { trackColorMode: "default" }, "设置默认轨道颜色")}
-                      >
-                        深灰
-                      </button>
-                      <button
-                        className={`wiring-btn ${(selectedMod.trackColorMode ?? "line") === "line" ? "active" : ""}`}
-                        onClick={() => updateModule(selectedMod.id, { trackColorMode: "line" }, "设置跟随线路颜色")}
-                      >
-                        跟随线路
-                      </button>
-                      <button
-                        className={`wiring-btn ${selectedMod.trackColorMode === "manual" ? "active" : ""}`}
-                        onClick={() => updateModule(selectedMod.id, { trackColorMode: "manual" }, "设置手动轨道颜色")}
-                      >
-                        手动
-                      </button>
-                    </div>
-                  </div>
-                  {selectedMod.trackColorMode === "manual" && (
-                    <div className="wiring-prop-row">
-                      <label>颜色</label>
-                      <div className="wiring-prop-color">
-                        <input type="color" value={selectedMod.trackColor || "#202124"} onChange={(e) => updateModule(selectedMod.id, { trackColor: e.target.value }, "设置轨道颜色")} />
-                        <input type="text" value={selectedMod.trackColor || "#202124"} onChange={(e) => updateModule(selectedMod.id, { trackColor: e.target.value }, "设置轨道颜色")} />
-                      </div>
-                    </div>
-                  )}
-                  <p style={{ fontSize: 10, color: "var(--muted)", margin: "4px 0 0" }}>
-                    {selectedMod.trackColorMode === "default" && "使用固定深灰轨道（不跟随线路）"}
-                    {(selectedMod.trackColorMode ?? "line") === "line" && "根据模块关联的线路颜色自动填充；站台、道岔和场段元件均适用，多条线路时按轨道位置分配颜色"}
-                    {selectedMod.trackColorMode === "manual" && "使用手动指定的颜色"}
-                  </p>
-                </div>
-
-                <div className="wiring-prop-group">
-                  <h5>站名颜色</h5>
-                  <div className="wiring-prop-row" style={{ gridTemplateColumns: "1fr" }}>
-                    <div className="wiring-crossing-buttons">
-                      <button
-                        className={`wiring-btn ${selectedMod.labelColorMode === "default" ? "active" : ""}`}
-                        onClick={() => updateModule(selectedMod.id, { labelColorMode: "default" }, "设置默认站名颜色")}
-                      >
-                        深灰
-                      </button>
-                      <button
-                        className={`wiring-btn ${(selectedMod.labelColorMode ?? "line") === "line" ? "active" : ""}`}
-                        onClick={() => updateModule(selectedMod.id, { labelColorMode: "line" }, "设置站名跟随线路颜色")}
-                      >
-                        跟随线路
-                      </button>
-                    </div>
-                  </div>
-                  <p style={{ fontSize: 10, color: "var(--muted)", margin: "4px 0 0" }}>
-                    {selectedMod.labelColorMode === "default" && "使用固定深灰站名（不跟随线路）"}
-                    {(selectedMod.labelColorMode ?? "line") === "line" && "根据模块关联的线路颜色自动着色；多条线路时按站名位置取色"}
-                  </p>
-                </div>
-
-                <div className="wiring-prop-group">
-                  <h5>站点关联</h5>
-                  <div className="wiring-prop-row" style={{ gridTemplateColumns: "1fr" }}>
-                    <select
-                      value=""
-                      disabled={isLayerLocked(selectedMod.layerId)}
-                      onChange={(e) => {
-                        const stationId = e.target.value;
-                        if (!stationId) return;
-                        const nextStationIds = addStationAssociation(selectedMod.sourceStationIds, stationId);
-                        const primaryStation = data.stations.find((station) => station.id === nextStationIds[0]);
-                        updateModule(selectedMod.id, {
-                          sourceStationIds: nextStationIds,
-                          lineIds: lineIdsForStationAssociations(nextStationIds, data.stations),
-                        }, "添加关联站点");
-                        // 第一条记录决定站名，其余记录只提供换乘线路与颜色。
-                        if (primaryStation) {
-                          setLabels((prev) => prev.map((label) =>
-                            label.attachedToId === selectedMod.id
-                              ? { ...label, text: label.language === "en" ? (primaryStation.nameEn || label.text) : (primaryStation.nameZh || label.text), sourceStationId: primaryStation.id }
-                              : label,
-                          ));
-                        }
-                      }}
-                    >
-                      <option value="">添加关联站点…</option>
-                      {data.stations.filter((station) => !selectedMod.sourceStationIds.includes(station.id)).map((st) => (
-                        <option key={st.id} value={st.id}>{st.nameZh} ({st.id})</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="wiring-station-associations">
-                    {selectedMod.sourceStationIds.length === 0 && <span className="wiring-association-empty">尚未关联站点</span>}
-                    {selectedMod.sourceStationIds.map((stationId, index) => {
-                      const station = data.stations.find((candidate) => candidate.id === stationId);
-                      const line = station ? data.lines.find((candidate) => candidate.id === station.lineId) : undefined;
-                      return <div className="wiring-station-association" key={stationId}>
-                        <span className="wiring-association-swatch" style={{ background: line?.lineColor || "#98a2b3" }} />
-                        <span><b>{station?.nameZh || stationId}</b><small>{line?.nameZh || station?.lineId || "源数据已删除"}{index === 0 ? " · 主站名" : " · 换乘"}</small></span>
-                        <button
-                          type="button"
-                          aria-label={`移除 ${station?.nameZh || stationId}`}
-                          disabled={isLayerLocked(selectedMod.layerId)}
-                          onClick={() => {
-                            const nextStationIds = removeStationAssociation(selectedMod.sourceStationIds, stationId);
-                            const primaryStation = data.stations.find((candidate) => candidate.id === nextStationIds[0]);
-                            updateModule(selectedMod.id, {
-                              sourceStationIds: nextStationIds,
-                              lineIds: lineIdsForStationAssociations(nextStationIds, data.stations),
-                            }, "移除关联站点");
-                            if (primaryStation) {
-                              setLabels((prev) => prev.map((label) => label.attachedToId === selectedMod.id
-                                ? { ...label, text: label.language === "en" ? (primaryStation.nameEn || label.text) : primaryStation.nameZh, sourceStationId: primaryStation.id }
-                                : label));
-                            }
-                          }}
-                        >×</button>
-                      </div>;
-                    })}
-                  </div>
-                  <p style={{ fontSize: 10, color: "var(--muted)", margin: "6px 0 0", lineHeight: 1.5 }}>任意站台均可关联多条线路；第一项决定显示站名，其余项作为换乘线路参与轨道、站台和文字着色。</p>
-                  {selectedMod.sourceStationIds.some((stationId) => !data.stations.some((station) => station.id === stationId)) && <p className="wiring-source-deleted">源数据已删除。可以重新绑定、保留为自定义对象或删除模块。</p>}
-                </div>
-
-                <div className="wiring-prop-actions">
-                  <button onClick={() => updateModule(selectedMod.id, { locked: !selectedMod.locked })}>
-                    {selectedMod.locked ? "🔓 解锁模块" : "🔒 锁定模块"}
-                  </button>
-                  <button onClick={() => {
-                    const next = selectedIds.length > 1 ? selectedIds : [selectedMod.id];
-                    const topZ = modules.length;
-                    // 所属站台 zIndex 不随模块自动变化，这里把增量同步过去（站台才能提到连接线之上）
-                    let nextPlatforms = platforms;
-                    for (const modId of next) {
-                      const mod = modules.find((m) => m.id === modId);
-                      if (!mod || mod.zIndex === topZ) continue;
-                      nextPlatforms = shiftOwnedPlatformZIndex(nextPlatforms, modId, topZ - mod.zIndex);
-                    }
-                    if (nextPlatforms !== platforms) setPlatforms(nextPlatforms);
-                    setModules((prev) => prev.map((m) => next.includes(m.id) ? { ...m, zIndex: prev.length } : m));
-                  }}>⬆ 置于顶层</button>
-                  {selectedTemplate?.platforms.length ? (editingPlatformModuleId === selectedMod.id ? <button onClick={() => { setEditingPlatformModuleId(null); setSelectedIds([selectedMod.id]); }} style={{ background: "var(--accent)", color: "#fff" }}>✅ 完成编辑</button> : <button onClick={() => setEditingPlatformModuleId(selectedMod.id)}>✏️ 编辑站台</button>) : null}
-                  <button className="danger" onClick={deleteSelected}>🗑 删除模块</button>
-                </div>
-              </>
-            ) : selectedPlatform ? (
-              <>
-                <div className="wiring-prop-group">
-                  <h5>颜色模式</h5>
-                  <div className="wiring-prop-row" style={{ gridTemplateColumns: "1fr" }}>
-                    <div className="wiring-crossing-buttons">
-                      <button
-                        className={`wiring-btn ${selectedPlatform.colorMode === "default" ? "active" : ""}`}
-                        onClick={() => updatePlatform(selectedPlatform.id, { colorMode: "default" }, "设置默认站台颜色")}
-                      >
-                        深灰
-                      </button>
-                      <button
-                        className={`wiring-btn ${(selectedPlatform.colorMode ?? "line") === "line" ? "active" : ""}`}
-                        onClick={() => updatePlatform(selectedPlatform.id, { colorMode: "line" }, "设置跟随线路颜色")}
-                      >
-                        跟随线路
-                      </button>
-                    </div>
-                  </div>
-                  <p style={{ fontSize: 10, color: "var(--muted)", margin: "4px 0 0" }}>
-                    {selectedPlatform.colorMode === "default" && "使用下方手动指定的填充色"}
-                    {(selectedPlatform.colorMode ?? "line") === "line" && "根据所属模块的线路颜色自动填充；多条线路时自上而下显示渐变色"}
-                  </p>
-                </div>
-
-                <div className="wiring-prop-group">
-                  <h5>站台几何</h5>
-                  <div className="wiring-prop-row"><label>类型</label><select value={selectedPlatform.platformType} onChange={(e) => updatePlatform(selectedPlatform.id, { platformType: e.target.value as PlatformObject["platformType"] })}><option value="side">侧式</option><option value="island">岛式</option><option value="double_island">双岛</option><option value="spanish">西班牙式</option></select></div>
-                  <div className="wiring-prop-row"><label>X</label><input type="number" value={Math.round(selectedPlatform.x)} onChange={(e) => updatePlatform(selectedPlatform.id, { x: Number(e.target.value) })} /></div>
-                  <div className="wiring-prop-row"><label>Y</label><input type="number" value={Math.round(selectedPlatform.y)} onChange={(e) => updatePlatform(selectedPlatform.id, { y: Number(e.target.value) })} /></div>
-                  <div className="wiring-prop-row"><label>长度</label><input type="number" min={10} value={selectedPlatform.width} onChange={(e) => updatePlatform(selectedPlatform.id, { width: Math.max(10, Number(e.target.value)) })} /></div>
-                  <div className="wiring-prop-row"><label>厚度</label><input type="number" min={4} value={selectedPlatform.height} onChange={(e) => updatePlatform(selectedPlatform.id, { height: Math.max(4, Number(e.target.value)) })} /></div>
-                  <div className="wiring-prop-row"><label>旋转</label><input type="number" value={selectedPlatform.rotation} onChange={(e) => updatePlatform(selectedPlatform.id, { rotation: Number(e.target.value) })} /></div>
-                  {selectedPlatform.colorMode === "default" && <div className="wiring-prop-row"><label>填充</label><input type="color" value={selectedPlatform.fill} onChange={(e) => updatePlatform(selectedPlatform.id, { fill: e.target.value })} /></div>}
-                  <div className="wiring-prop-row"><label>图层</label><select value={selectedPlatform.layerId} onChange={(e) => updatePlatform(selectedPlatform.id, { layerId: e.target.value })}>{layers.filter((layer) => selectableLayers.includes(layer.id)).map((layer) => <option key={layer.id} value={layer.id}>{layer.name}</option>)}</select></div>
-                  <div className="wiring-prop-row" style={{ gridTemplateColumns: "1fr" }}>
-                    <div className="wiring-crossing-buttons">
-                      <button
-                        className={`wiring-btn ${(selectedPlatform.zIndexMode ?? "auto") === "auto" ? "active" : ""}`}
-                        onClick={() => {
-                          if ((selectedPlatform.zIndexMode ?? "auto") === "auto") return;
-                          updatePlatform(selectedPlatform.id, { zIndexMode: "auto" }, "站台层级跟随模块");
-                        }}
-                      >跟随模块</button>
-                      <button
-                        className={`wiring-btn ${selectedPlatform.zIndexMode === "manual" ? "active" : ""}`}
-                        onClick={() => {
-                          if (selectedPlatform.zIndexMode === "manual") return;
-                          const ownedIndex = selectedPlatform.moduleId
-                            ? platforms.filter((platform) => platform.moduleId === selectedPlatform.moduleId).findIndex((platform) => platform.id === selectedPlatform.id)
-                            : 0;
-                          updatePlatform(selectedPlatform.id, {
-                            zIndexMode: "manual",
-                            zIndex: effectivePlatformZIndex(selectedPlatform, modules, Math.max(0, ownedIndex)),
-                          }, "站台层级改为手动");
-                        }}
-                      >手动层级</button>
-                    </div>
-                  </div>
-                  <div className="wiring-prop-row"><label>Z-Index</label>{(selectedPlatform.zIndexMode ?? "auto") === "auto" ? (
-                    <input type="number" step={0.001} value={effectivePlatformZIndex(selectedPlatform, modules, Math.max(0, selectedPlatform.moduleId ? platforms.filter((platform) => platform.moduleId === selectedPlatform.moduleId).findIndex((platform) => platform.id === selectedPlatform.id) : 0))} readOnly />
-                  ) : (
-                    <input
-                      key={`${selectedPlatform.id}:${selectedPlatform.zIndex}`}
-                      type="number"
-                      step={0.5}
-                      defaultValue={selectedPlatform.zIndex}
-                      onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}
-                      onBlur={(event) => {
-                        const zIndex = Number(event.target.value);
-                        if (!Number.isFinite(zIndex) || zIndex === selectedPlatform.zIndex) return;
-                        updatePlatform(selectedPlatform.id, { zIndexMode: "manual", zIndex }, "修改站台层级");
-                      }}
-                    />
-                  )}</div>
-                </div>
-                <div className="wiring-prop-actions"><button onClick={() => updatePlatform(selectedPlatform.id, { locked: !selectedPlatform.locked })}>{selectedPlatform.locked ? "解锁" : "锁定"}</button><button className="danger" onClick={() => deletePlatform(selectedPlatform.id)}>删除站台</button></div>
-              </>
-            ) : selectedGraphic ? (
-              <>
-                <div className="wiring-prop-group"><h5>图标位置</h5>
-                  <div className="wiring-prop-row"><label>定位模式</label><select value={selectedGraphic.positionMode} onChange={(e) => { const positionMode = e.target.value as AttachedGraphic["positionMode"]; updateGraphic(selectedGraphic.id, { positionMode, attachedToId: positionMode === "attached" ? selectedGraphic.attachedToId || selectedMod?.id : undefined }); }}><option value="independent">独立</option><option value="attached">附着</option></select></div>
-                  {selectedGraphic.positionMode === "attached" && <div className="wiring-prop-row"><label>附着模块</label><select value={selectedGraphic.attachedToId || ""} onChange={(e) => { const owner = modules.find((module) => module.id === e.target.value); updateGraphic(selectedGraphic.id, { attachedToId: owner?.id, offsetX: owner ? selectedGraphic.x - owner.x : 0, offsetY: owner ? selectedGraphic.y - owner.y : 0 }); }}><option value="">未选择</option>{modules.map((module) => <option key={module.id} value={module.id}>{module.name}</option>)}</select></div>}
-                  <div className="wiring-prop-row"><label>宽度</label><input type="number" min={4} value={selectedGraphic.width} onChange={(e) => updateGraphic(selectedGraphic.id, { width: Math.max(4, Number(e.target.value)) })} /></div>
-                  <div className="wiring-prop-row"><label>高度</label><input type="number" min={4} value={selectedGraphic.height} onChange={(e) => updateGraphic(selectedGraphic.id, { height: Math.max(4, Number(e.target.value)) })} /></div>
-                  <div className="wiring-prop-row"><label>不透明度</label><input type="range" min={0.1} max={1} step={0.05} value={selectedGraphic.opacity} onChange={(e) => updateGraphic(selectedGraphic.id, { opacity: Number(e.target.value) })} /></div>
-                  <div className="wiring-prop-row"><label>旋转</label><input type="number" value={selectedGraphic.rotation} onChange={(e) => updateGraphic(selectedGraphic.id, { rotation: Number(e.target.value) })} /></div>
-                  <div className="wiring-prop-row"><label>镜像</label><MirrorToggle mirrorX={selectedGraphic.mirrorX} mirrorY={selectedGraphic.mirrorY} onChange={(next) => updateGraphic(selectedGraphic.id, next)} /></div>
-                </div>
-                {selectedGraphic.shapeType && !selectedGraphic.shapeType.startsWith("signal-") && (
-                  <div className="wiring-prop-group">
-                    <h5>填充与描边</h5>
-                    <div className="wiring-prop-row"><label>填充</label><input type="color" value={selectedGraphic.fill || "#cce6f5"} onChange={(e) => updateGraphic(selectedGraphic.id, { fill: e.target.value })} /></div>
-                    <div className="wiring-prop-row"><label>描边</label><input type="color" value={selectedGraphic.stroke || "#202124"} onChange={(e) => updateGraphic(selectedGraphic.id, { stroke: e.target.value })} /></div>
-                  </div>
-                )}
-                <div className="wiring-prop-actions"><button onClick={() => updateGraphic(selectedGraphic.id, { locked: !selectedGraphic.locked })}>{selectedGraphic.locked ? "解锁" : "锁定"}</button><button className="danger" onClick={deleteSelected}>{selectedGraphic.shapeType ? "删除图形" : "删除图标"}</button></div>
-              </>
-            ) : selectedLabel ? (
-              <>
-                <div className="wiring-prop-group">
-                  <h5>文字内容</h5>
-                  {selectedLabel.numeralType ? (
-                    <>
-                      <div className="wiring-prop-row">
-                        <label>类型</label>
-                        <select value={selectedLabel.numeralType} onChange={(e) => updateLabel(selectedLabel.id, { numeralType: e.target.value as "track" | "switch" })}>
-                          <option value="track">股道编号</option>
-                          <option value="switch">道岔编号</option>
-                        </select>
-                      </div>
-                      <div className="wiring-prop-row">
-                        <label>编号</label>
-                        <input type="number" min={1} step={1} value={parseInt(selectedLabel.text, 10) || ""} onChange={(e) => updateLabel(selectedLabel.id, { text: String(Math.max(1, Math.round(Number(e.target.value) || 1))) })} />
-                      </div>
-                      <div className="wiring-prop-row" style={{ gridTemplateColumns: "1fr" }}>
-                        <span style={{ fontSize: 11, color: "var(--muted)" }}>显示为「{selectedLabel.numeralType === "track" ? `${selectedLabel.text}道` : `#${selectedLabel.text}`}」</span>
-                      </div>
-                    </>
-                  ) : (
-                    <div className="wiring-prop-row" style={{ gridTemplateColumns: "1fr" }}>
-                      <textarea
-                        value={selectedLabel.text}
-                        onChange={(e) => updateLabel(selectedLabel.id, { text: e.target.value })}
-                        rows={2}
-                        style={{ minHeight: 48, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: 7, fontSize: 12, resize: "vertical", fontFamily: "inherit" }}
-                      />
-                    </div>
-                  )}
-                </div>
-
-                <div className="wiring-prop-group">
-                  <h5>位置与变换</h5>
-                  <div className="wiring-prop-row">
-                    <label>定位模式</label>
-                    <select value={selectedLabel.positionMode || (selectedLabel.attachedToId ? "attached" : "independent")} onChange={(event) => updateLabel(selectedLabel.id, { positionMode: event.target.value as "attached" | "independent" })}>
-                      <option value="independent">独立</option>
-                      <option value="attached">附着</option>
-                    </select>
-                  </div>
-                  {(selectedLabel.positionMode === "attached" || selectedLabel.attachedToId) && (
-                    <div className="wiring-prop-row">
-                      <label>附着模块</label>
-                      <select value={selectedLabel.attachedToId || ""} onChange={(event) => updateLabel(selectedLabel.id, { attachedToId: event.target.value || undefined, positionMode: event.target.value ? "attached" : "independent" })}>
-                        <option value="">未选择</option>
-                        {modules.map((module) => <option key={module.id} value={module.id}>{module.name}</option>)}
-                      </select>
-                    </div>
-                  )}
-                  <div className="wiring-prop-row">
-                    <label>X 坐标</label>
-                    <input type="number" value={Math.round(selectedLabel.x)} onChange={(e) => updateLabel(selectedLabel.id, { x: parseFloat(e.target.value) || 0 })} />
-                  </div>
-                  <div className="wiring-prop-row">
-                    <label>Y 坐标</label>
-                    <input type="number" value={Math.round(selectedLabel.y)} onChange={(e) => updateLabel(selectedLabel.id, { y: parseFloat(e.target.value) || 0 })} />
-                  </div>
-                  <div className="wiring-prop-row">
-                    <label>旋转</label>
-                    <select value={selectedLabel.rotation} onChange={(e) => updateLabel(selectedLabel.id, { rotation: parseInt(e.target.value) })}>
-                      <option value={0}>0°</option>
-                      <option value={90}>90°</option>
-                      <option value={180}>180°</option>
-                      <option value={270}>270°</option>
-                    </select>
-                  </div>
-                  <div className="wiring-prop-row">
-                    <label>层级</label>
-                    <select value={selectedLabel.layerId} onChange={(e) => updateLabel(selectedLabel.id, { layerId: e.target.value })}>
-                      {layers.filter((l) => selectableLayers.includes(l.id)).map((l) => (
-                        <option key={l.id} value={l.id}>{l.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="wiring-layer-edge-actions">
-                    <button type="button" onClick={() => moveLabelToEdge(selectedLabel, true)}>⇈ 全局置顶</button>
-                    <button type="button" onClick={() => moveLabelToEdge(selectedLabel, false)}>⇊ 全局置底</button>
-                  </div>
-                  <div className="wiring-label-overlap-stack">
-                    <b>文字范围内层级（{overlappingLabelItems.length}）</b>
-                    {overlappingLabelItems.length === 0 && <span>当前文字范围内没有其他元件</span>}
-                    {overlappingLabelItems.map((entry) => (
-                      <div key={`${entry.kind}-${entry.item.id}`}>
-                        <span title={renderItemName(entry)}>{renderItemName(entry)}</span>
-                        <button type="button" disabled={isLayerLocked(entry.item.layerId)} onClick={() => moveLabelRelative(selectedLabel, entry, true)}>置于上方</button>
-                        <button type="button" disabled={isLayerLocked(entry.item.layerId)} onClick={() => moveLabelRelative(selectedLabel, entry, false)}>置于下方</button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="wiring-prop-group">
-                  <h5>字体样式</h5>
-                  <div className="wiring-prop-row" style={{ gridTemplateColumns: "1fr" }}>
-                    <div className="wiring-crossing-buttons">
-                      <button
-                        className={`wiring-btn ${selectedLabel.colorMode === "default" ? "active" : ""}`}
-                        onClick={() => updateLabel(selectedLabel.id, { colorMode: "default" }, "设置默认文字颜色")}
-                      >
-                        手动
-                      </button>
-                      <button
-                        className={`wiring-btn ${(selectedLabel.colorMode ?? "line") === "line" ? "active" : ""}`}
-                        onClick={() => updateLabel(selectedLabel.id, { colorMode: "line" }, "设置文字跟随线路颜色")}
-                      >
-                        跟随线路
-                      </button>
-                    </div>
-                  </div>
-                  <p style={{ fontSize: 10, color: "var(--muted)", margin: "4px 0 0" }}>
-                    {selectedLabel.colorMode === "default" && "使用手动指定的颜色"}
-                    {(selectedLabel.colorMode ?? "line") === "line" && "独立文字可绑定线路；附着文字未指定线路时跟随所属模块"}
-                  </p>
-                  {(selectedLabel.colorMode ?? "line") === "line" && (
-                    <div className="wiring-prop-row">
-                      <label>绑定线路</label>
-                      <select value={selectedLabel.sourceLineId || ""} onChange={(event) => updateLabel(selectedLabel.id, { sourceLineId: event.target.value || undefined }, "绑定文字线路") }>
-                        <option value="">{selectedLabel.attachedToId ? "自动跟随附着模块" : "请选择线路"}</option>
-                        {data.lines.map((line) => <option key={line.id} value={line.id}>{line.id} · {line.nameZh}</option>)}
-                      </select>
-                    </div>
-                  )}
-                  <div className="wiring-prop-row">
-                    <label>字号</label>
-                    <input type="number" min={6} max={72} value={selectedLabel.fontSize} onChange={(e) => updateLabel(selectedLabel.id, { fontSize: parseInt(e.target.value) || 14 })} />
-                  </div>
-                  <div className="wiring-prop-row">
-                    <label>字重</label>
-                    <select value={selectedLabel.fontWeight} onChange={(e) => updateLabel(selectedLabel.id, { fontWeight: parseInt(e.target.value) })}>
-                      <option value={400}>常规 400</option>
-                      <option value={600}>半粗 600</option>
-                      <option value={700}>粗体 700</option>
-                      <option value={900}>特粗 900</option>
-                    </select>
-                  </div>
-                  {(selectedLabel.colorMode ?? "default") === "default" && (
-                    <div className="wiring-prop-row">
-                      <label>颜色</label>
-                      <div className="wiring-prop-color">
-                        <input type="color" value={selectedLabel.fill} onChange={(e) => updateLabel(selectedLabel.id, { fill: e.target.value })} />
-                        <input type="text" value={selectedLabel.fill} onChange={(e) => updateLabel(selectedLabel.id, { fill: e.target.value })} />
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                <div className="wiring-prop-group">
-                  <h5>锚点方向</h5>
-                  <div className="wiring-prop-row" style={{ gridTemplateColumns: "1fr" }}>
-                    <select value={selectedLabel.anchor} onChange={(e) => updateLabel(selectedLabel.id, { anchor: e.target.value as LabelAnchor })}>
-                      <option value="top">上 (top)</option>
-                      <option value="bottom">下 (bottom)</option>
-                      <option value="left">左 (left)</option>
-                      <option value="right">右 (right)</option>
-                      <option value="top_left">左上 (top_left)</option>
-                      <option value="top_right">右上 (top_right)</option>
-                      <option value="bottom_left">左下 (bottom_left)</option>
-                      <option value="bottom_right">右下 (bottom_right)</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="wiring-prop-group">
-                  <h5>背景与描边</h5>
-                  <div className="wiring-prop-row">
-                    <label>文字背景</label>
-                    <label className="wiring-check"><input type="checkbox" checked={selectedLabel.backgroundEnabled === true} onChange={(e) => updateLabel(selectedLabel.id, { backgroundEnabled: e.target.checked })} />启用实色背景</label>
-                  </div>
-                  {selectedLabel.backgroundEnabled && <>
-                    <div className="wiring-prop-row"><label>背景颜色</label><div className="wiring-prop-color"><input type="color" value={selectedLabel.backgroundColor || "#ffffff"} onChange={(e) => updateLabel(selectedLabel.id, { backgroundColor: e.target.value })} /><input type="text" value={selectedLabel.backgroundColor || "#ffffff"} onChange={(e) => updateLabel(selectedLabel.id, { backgroundColor: e.target.value })} /></div></div>
-                    <div className="wiring-prop-row"><label>背景留白</label><input type="number" min={0} max={24} value={selectedLabel.backgroundPadding ?? 4} onChange={(e) => updateLabel(selectedLabel.id, { backgroundPadding: Math.max(0, Number(e.target.value)) })} /></div>
-                  </>}
-                  <div className="wiring-prop-row">
-                    <label>文字描边</label>
-                    <label className="wiring-check"><input type="checkbox" checked={selectedLabel.backgroundMask} onChange={(e) => updateLabel(selectedLabel.id, { backgroundMask: e.target.checked })} />启用描边</label>
-                  </div>
-                  {selectedLabel.backgroundMask && (
-                    <>
-                      <div className="wiring-prop-row"><label>描边颜色</label><div className="wiring-prop-color"><input type="color" value={selectedLabel.outlineColor || "#ffffff"} onChange={(e) => updateLabel(selectedLabel.id, { outlineColor: e.target.value })} /><input type="text" value={selectedLabel.outlineColor || "#ffffff"} onChange={(e) => updateLabel(selectedLabel.id, { outlineColor: e.target.value })} /></div></div>
-                      <div className="wiring-prop-row"><label>描边宽度</label><input type="number" min={0.5} max={12} step={0.5} value={selectedLabel.maskStrokeWidth} onChange={(e) => updateLabel(selectedLabel.id, { maskStrokeWidth: parseFloat(e.target.value) || 2 })} /></div>
-                    </>
-                  )}
-                  <p style={{ fontSize: 10, color: "var(--muted)", margin: "6px 0 0" }}>元件库文字保持独立定位，不参与自动避障。</p>
-                </div>
-
-                <div className="wiring-prop-actions">
-                  <button onClick={() => updateLabel(selectedLabel.id, { locked: !selectedLabel.locked })}>
-                    {selectedLabel.locked ? "🔓 解锁标签" : "🔒 锁定标签"}
-                  </button>
-                  <button onClick={() => updateLabel(selectedLabel.id, { visible: !selectedLabel.visible })}>
-                    {selectedLabel.visible ? "🙈 隐藏标签" : "👁 显示标签"}
-                  </button>
-                  <button className="danger" onClick={() => deleteLabel(selectedLabel.id)}>🗑 删除标签</button>
-                </div>
-              </>
-            ) : selectedTransferGroup ? (
-              <>
-                <div className="wiring-prop-group">
-                  <h5>换乘组属性</h5>
-                  <div className="wiring-prop-row">
-                    <label>名称</label>
-                    <input type="text" value={selectedTransferGroup.name} onChange={(e) => updateTransferGroup(selectedTransferGroup.id, { name: e.target.value }, "修改换乘组名称")} />
-                  </div>
-                </div>
-
-                <div className="wiring-prop-group">
-                  <h5>成员模块（{selectedTransferGroup.moduleIds.length}）</h5>
-                  {selectedTransferGroup.moduleIds.length === 0 ? (
-                    <p style={{ fontSize: 11, color: "var(--muted)", margin: "4px 0" }}>暂无成员模块</p>
-                  ) : (
-                    <div className="wiring-crossing-list">
-                      {selectedTransferGroup.moduleIds.map((modId) => {
-                        const mod = modules.find((m) => m.id === modId);
-                        return (
-                          <div key={modId} className="wiring-crossing-row">
-                            <span>{mod?.name || "已删除模块"}</span>
-                            <button className="wiring-btn icon-only danger" onClick={() => removeModuleFromGroup(selectedTransferGroup.id, modId)} title="移除">✕</button>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                  <button className="wiring-btn" style={{ width: "100%", marginTop: 6 }} onClick={() => addSelectedModulesToGroup(selectedTransferGroup.id)} disabled={!selectedIds.some((id) => modules.some((m) => m.id === id && !selectedTransferGroup.moduleIds.includes(m.id)))}>
-                    添加选中模块到换乘组
-                  </button>
-                </div>
-
-                <div className="wiring-prop-group">
-                  <h5>关联线路（{selectedTransferGroup.lineIds.length}）</h5>
-                  <div className="wiring-line-badge-list">
-                    {selectedTransferGroup.lineIds.map((lineId) => {
-                      const line = data.lines.find((l) => l.id === lineId);
-                      return (
-                        <span key={lineId} className="wiring-line-badge" style={{ borderColor: line?.lineColor || "#999" }}>
-                          <i style={{ background: line?.lineColor || "#999" }} />
-                          {lineId} {line?.nameZh || ""}
-                        </span>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                <div className="wiring-prop-group">
-                  <h5>显示</h5>
-                  <div className="wiring-prop-row">
-                    <label>强调色</label>
-                    <div className="wiring-prop-color">
-                      <input type="color" value={selectedTransferGroup.accentColor || "#087FA4"} onChange={(e) => updateTransferGroup(selectedTransferGroup.id, { accentColor: e.target.value }, "修改换乘组强调色")} />
-                      <input type="text" value={selectedTransferGroup.accentColor || ""} placeholder="默认" onChange={(e) => updateTransferGroup(selectedTransferGroup.id, { accentColor: e.target.value }, "修改换乘组强调色")} />
-                    </div>
-                  </div>
-                  <div className="wiring-prop-row">
-                    <label>图层</label>
-                    <select value={selectedTransferGroup.layerId} onChange={(e) => updateTransferGroup(selectedTransferGroup.id, { layerId: e.target.value }, "修改换乘组图层")}>
-                      {layers.filter((l) => selectableLayers.includes(l.id)).map((l) => (
-                        <option key={l.id} value={l.id}>{l.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="wiring-prop-row">
-                    <label>zIndex</label>
-                    <input type="number" value={selectedTransferGroup.zIndex} onChange={(e) => updateTransferGroup(selectedTransferGroup.id, { zIndex: parseInt(e.target.value) || 0 }, "修改换乘组层级")} />
-                  </div>
-                </div>
-
-                <div className="wiring-prop-actions">
-                  <button onClick={() => updateTransferGroup(selectedTransferGroup.id, { locked: !selectedTransferGroup.locked })}>
-                    {selectedTransferGroup.locked ? "🔓 解锁换乘组" : "🔒 锁定换乘组"}
-                  </button>
-                  <button onClick={() => updateTransferGroup(selectedTransferGroup.id, { visible: !selectedTransferGroup.visible })}>
-                    {selectedTransferGroup.visible ? "🙈 隐藏换乘组" : "👁 显示换乘组"}
-                  </button>
-                  <button className="danger" onClick={() => { deleteTransferGroup(selectedTransferGroup.id); }}>🗑 删除换乘组</button>
-                </div>
-              </>
-            ) : (
-              <>
-              {advancedMode && (
-                <div className="wiring-prop-group wiring-placement-rotation-panel">
-                  <h5>放置方向</h5>
-                  <div className="wiring-placement-rotation" aria-label="下一次放置的旋转方向">
-                    <div className="wiring-rotation-grid">
-                      {[
-                        { rotation: 225, icon: "↖", label: "左上 225°" },
-                        { rotation: 270, icon: "↑", label: "向上 270°" },
-                        { rotation: 315, icon: "↗", label: "右上 315°" },
-                        { rotation: 180, icon: "←", label: "向左 180°" },
-                        { rotation: 0, icon: "•", label: "重置为默认方向", reset: true },
-                        { rotation: 0, icon: "→", label: "向右 0°" },
-                        { rotation: 135, icon: "↙", label: "左下 135°" },
-                        { rotation: 90, icon: "↓", label: "向下 90°" },
-                        { rotation: 45, icon: "↘", label: "右下 45°" },
-                      ].map((option, index) => (
-                        <button key={`${option.label}-${index}`} type="button" className={option.reset ? "reset" : placementRotation === option.rotation ? "active" : ""} onClick={() => setPlacementRotation(option.rotation)} title={option.label} aria-label={option.label}>{option.icon}</button>
-                      ))}
-                    </div>
-                    <span>{placementRotation}°</span>
-                  </div>
-                  <div className="wiring-mirror-toggle wiring-mirror-placement">
-                    <button type="button" className={`wiring-mirror-btn ${placementMirrorX ? "active" : ""}`} onClick={() => setPlacementMirrorX(!placementMirrorX)} title="下一次放置水平镜像（左右翻转）" aria-pressed={placementMirrorX}>⇔ 水平</button>
-                    <button type="button" className={`wiring-mirror-btn ${placementMirrorY ? "active" : ""}`} onClick={() => setPlacementMirrorY(!placementMirrorY)} title="下一次放置垂直镜像（上下翻转）" aria-pressed={placementMirrorY}>↕ 垂直</button>
-                  </div>
-                </div>
+                </>
               )}
-              <div className="wiring-prop-group wiring-placement-defaults-panel">
-                <h5>放置属性</h5>
-                <div className="wiring-prop-row">
-                  <label>放置层级</label>
-                  <select value={placementZIndex} onChange={(event) => setPlacementZIndex(Number(event.target.value))}>
-                    {PLACEMENT_Z_LEVELS.map((level) => (
-                      <option key={level.value} value={level.value}>{level.label}（{level.value}）</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="wiring-prop-row">
-                  <label>图层</label>
-                  <select
-                    value={placementLayerId === "auto" || selectableLayers.includes(placementLayerId) ? placementLayerId : "auto"}
-                    onChange={(event) => setPlacementLayerId(event.target.value)}
-                  >
-                    <option value="auto">自动分配{automaticPlacementLayerName ? `（${automaticPlacementLayerName}）` : "（按元件类型）"}</option>
-                    {layers.filter((layer) => selectableLayers.includes(layer.id)).map((layer) => (
-                      <option key={layer.id} value={layer.id}>{layer.name}</option>
-                    ))}
-                  </select>
-                </div>
-                <p className="wiring-placement-defaults-note">只影响之后放置的内容；选择“自动分配”时按元件类型和线路类别进入对应图层。</p>
-              </div>
-              <div className="wiring-prop-empty">
-                <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
-                  <rect x="6" y="6" width="36" height="36" rx="8" stroke="currentColor" strokeWidth="2" />
-                  <path d="M16 24h16M24 16v16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                </svg>
-                <b>{placementTargetName ? `正在放置：${placementTargetName}` : "选择画布中的元件"}</b>
-                <span>{placementTargetName ? "点击画布完成放置" : "查看和编辑属性"}</span>
-              </div>
-              </>
-            )}
           </div>
         </aside>
       </div>

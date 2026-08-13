@@ -374,11 +374,12 @@ test("keeps local data and rendering modules in the project", async () => {
 });
 
 test("wiring editor supports independent label objects with undo, layers, and serialization", async () => {
-  const [types, history, projectStore, app] = await Promise.all([
+  const [types, history, projectStore, app, labelInspector] = await Promise.all([
     readFile(new URL("app/wiring/types.ts", root), "utf8"),
     readFile(new URL("app/wiring/history.ts", root), "utf8"),
     readFile(new URL("app/wiring/projectStore.ts", root), "utf8"),
     readFile(new URL("app/wiring/WiringDiagramApp.tsx", root), "utf8"),
+    readFile(new URL("app/wiring/inspectors/LabelInspector.tsx", root), "utf8"),
   ]);
 
   // LabelObject has all required fields
@@ -425,10 +426,10 @@ test("wiring editor supports independent label objects with undo, layers, and se
   assert.match(app, /paintOrder/);
   assert.match(app, /backgroundMask/);
   assert.match(app, /wiring-text-tool-card/);
-  assert.match(app, /文字范围内层级/);
+  assert.match(labelInspector, /文字范围内层级/);
   assert.match(app, /sourceLineId/);
   assert.match(app, /label-background/);
-  assert.match(app, /元件库文字保持独立定位，不参与自动避障/);
+  assert.match(labelInspector, /元件库文字保持独立定位，不参与自动避障/);
   // Label tool button in toolbar
   assert.match(app, /activeTool === "label"/);
   // Label serialized in save and auto-save
@@ -440,6 +441,7 @@ test("wiring editor supports independent label objects with undo, layers, and se
 
 test("wiring editor wires v2 source state through history, persistence, and placement UI", async () => {
   const app = await readFile(new URL("app/wiring/WiringDiagramApp.tsx", root), "utf8");
+  const placementInspector = await readFile(new URL("app/wiring/inspectors/PlacementInspector.tsx", root), "utf8");
   assert.match(app, /useHistory\(\{ modules: modulesRef/);
   assert.match(app, /platforms, graphics, assets, sourceLines/);
   assert.match(app, /generateSourceChanges/);
@@ -452,7 +454,7 @@ test("wiring editor wires v2 source state through history, persistence, and plac
   assert.match(app, /PLACEMENT_Z_LEVELS/);
   const placementLevels = await readFile(new URL("app/wiring/ui/primitives.ts", root), "utf8");
   assert.match(placementLevels, /高架-极深|地下-极深/);
-  assert.match(app, /按元件类型/);
+  assert.match(placementInspector, /按元件类型/);
   assert.match(app, /resolvePlacementLayer/);
   assert.match(app, /zIndex: placementZIndex/);
   assert.match(app, /layerId: resolvePlacementLayer/);
@@ -526,13 +528,14 @@ test("wiring editor supports track crossing management (plain/gap/bridge)", asyn
 });
 
 test("wiring editor supports semantic track model with editable control points", async () => {
-  const [types, history, projectStore, app, connectionLogic, css] = await Promise.all([
+  const [types, history, projectStore, app, connectionLogic, css, connectionInspector] = await Promise.all([
     readFile(new URL("app/wiring/types.ts", root), "utf8"),
     readFile(new URL("app/wiring/history.ts", root), "utf8"),
     readFile(new URL("app/wiring/projectStore.ts", root), "utf8"),
     readFile(new URL("app/wiring/WiringDiagramApp.tsx", root), "utf8"),
     readFile(new URL("app/wiring/connectionLogic.ts", root), "utf8"),
     readFile(new URL("app/wiring/wiring.css", root), "utf8"),
+    readFile(new URL("app/wiring/inspectors/ConnectionInspector.tsx", root), "utf8"),
   ]);
 
   // TrackControlPoint type defined with node + curve handle fields
@@ -595,7 +598,7 @@ test("wiring editor supports semantic track model with editable control points",
 
   // Property panel exposes node management UI
   assert.match(app, /轨道节点/);
-  assert.match(app, /添加节点/);
+  assert.match(connectionInspector, /添加节点/);
   assert.match(app, /拉直轨道/);
 
   // CSS styles the new control point handles
@@ -605,10 +608,11 @@ test("wiring editor supports semantic track model with editable control points",
 });
 
 test("wiring editor supports configurable turnout parameters and double-branch template", async () => {
-  const [types, app, templates] = await Promise.all([
+  const [types, app, templates, moduleInspector] = await Promise.all([
     readFile(new URL("app/wiring/types.ts", root), "utf8"),
     readFile(new URL("app/wiring/WiringDiagramApp.tsx", root), "utf8"),
     readFile(new URL("app/wiring/templates.ts", root), "utf8"),
+    readFile(new URL("app/wiring/inspectors/ModuleInspector.tsx", root), "utf8"),
   ]);
 
   // TemplateParam interface defined
@@ -659,8 +663,8 @@ test("wiring editor supports configurable turnout parameters and double-branch t
 
   // App renders property panel param sliders
   assert.match(app, /道岔参数/);
-  assert.match(app, /wiring-param-slider/);
-  assert.match(app, /customParams: \{ \.\.\.\(selectedMod\.customParams/);
+  assert.match(moduleInspector, /wiring-param-slider/);
+  assert.match(moduleInspector, /customParams: \{ \.\.\.\(selectedMod\.customParams/);
 
   // CSS styles param sliders
   const css = await readFile(new URL("app/wiring/wiring.css", root), "utf8");
@@ -669,12 +673,13 @@ test("wiring editor supports configurable turnout parameters and double-branch t
 });
 
 test("wiring editor supports transfer groups with undo, layers, and serialization", async () => {
-  const [types, history, projectStore, app, css] = await Promise.all([
+  const [types, history, projectStore, app, css, transferGroupInspector] = await Promise.all([
     readFile(new URL("app/wiring/types.ts", root), "utf8"),
     readFile(new URL("app/wiring/history.ts", root), "utf8"),
     readFile(new URL("app/wiring/projectStore.ts", root), "utf8"),
     readFile(new URL("app/wiring/WiringDiagramApp.tsx", root), "utf8"),
     readFile(new URL("app/wiring/wiring.css", root), "utf8"),
+    readFile(new URL("app/wiring/inspectors/TransferGroupInspector.tsx", root), "utf8"),
   ]);
 
   // TransferGroup type defined with all required fields (simplified)
@@ -722,7 +727,7 @@ test("wiring editor supports transfer groups with undo, layers, and serializatio
   assert.match(app, /selectedTransferGroup/);
   assert.match(app, /换乘组属性/);
   assert.match(app, /成员模块/);
-  assert.match(app, /关联线路/);
+  assert.match(transferGroupInspector, /关联线路/);
 
   // Transfer group creation via context menu
   assert.match(app, /createTransferGroupFromSelection\(\)/);
