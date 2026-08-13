@@ -13,8 +13,9 @@ import {
   stationsForLine,
 } from "../../types";
 import { visualDirectionFor } from "../../route-orientation.mjs";
+import { siteUrl } from "../../../site";
 
-const TRANSFER_ICON_PATH = "/assets/transfer-white.png";
+const TRANSFER_ICON_PATH = siteUrl("assets/transfer-white.png");
 
 function estimatedTextWidth(text: string, size: number, letterSpacing = 0) {
   const characters = [...text];

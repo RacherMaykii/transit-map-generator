@@ -10,8 +10,9 @@ import {
   stationsForLine,
 } from "../../types";
 import { visualDirectionFor } from "../../route-orientation.mjs";
+import { siteUrl } from "../../../site";
 
-const TRANSFER_ICON_PATH = "/assets/transfer-white.png";
+const TRANSFER_ICON_PATH = siteUrl("assets/transfer-white.png");
 const transferIconImage = typeof Image === "undefined" ? null : new Image();
 if (transferIconImage) transferIconImage.src = TRANSFER_ICON_PATH;
 

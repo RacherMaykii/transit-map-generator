@@ -178,6 +178,7 @@ import {
 } from "./inspectors";
 import type { InspectorContext } from "./inspectors/inspectorProps";
 import { renderItemBounds as pureRenderItemBounds, renderItemName as pureRenderItemName, moveLabelRelative as pureMoveLabelRelative, moveLabelToEdge as pureMoveLabelToEdge, renderCanvasItem as pureRenderCanvasItem, type RenderItemContext } from "./ui/renderItem";
+import { siteUrl } from "../site";
 
 // ── 主组件 ────────────────────────────────────
 
@@ -3947,7 +3948,7 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
     return (
       <main className="loading-shell">
         <div className="loading-card">
-          <span className="brand-mark"><img src="/assets/rail-transit-icon.png" alt="" /></span>
+          <span className="brand-mark"><img src={siteUrl("assets/rail-transit-icon.png")} alt="" /></span>
           <h1>配线图编辑器</h1>
           <p>{error || status}</p>
           {error && <button onClick={() => window.location.reload()}>重新连接</button>}
@@ -4259,7 +4260,7 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
         {/* ── Row 1: 核心操作 ── */}
         <div className="wiring-toolbar-row">
           <div className="wiring-toolbar-group">
-            <span className="brand-mark"><img src="/assets/rail-transit-icon.png" alt="" /></span>
+            <span className="brand-mark"><img src={siteUrl("assets/rail-transit-icon.png")} alt="" /></span>
             <div className="wiring-toolbar-title">
               <h1>配线图编辑器</h1>
               <p>Simplified Metro Track Layout</p>

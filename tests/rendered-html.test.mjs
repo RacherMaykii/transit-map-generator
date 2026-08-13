@@ -124,6 +124,50 @@ test("static analytics beacon injects Cloudflare Web Analytics only when token i
   assert.match(entry, /AnalyticsBeacon/);
 });
 
+test("supports deploying under a sub-path (site.ts + relative asset refs)", async () => {
+  const [site, viteStatic, portal, entranceApp, renderer, vectorPreview, loopRenderer, loopPreview, scenicRenderer, scenicPreview, transitApp, wiringApp, repositories] = await Promise.all([
+    readFile(new URL("app/site.ts", root), "utf8"),
+    readFile(new URL("vite.static.config.ts", root), "utf8"),
+    readFile(new URL("app/ProjectPortal.tsx", root), "utf8"),
+    readFile(new URL("app/entrance/EntranceSignApp.tsx", root), "utf8"),
+    readFile(new URL("app/transit/render.ts", root), "utf8"),
+    readFile(new URL("app/transit/RoutePreviewSvg.tsx", root), "utf8"),
+    readFile(new URL("app/transit/styles/loop/loop-render.ts", root), "utf8"),
+    readFile(new URL("app/transit/styles/loop/LoopRoutePreviewSvg.tsx", root), "utf8"),
+    readFile(new URL("app/transit/styles/scenic/scenic-render.ts", root), "utf8"),
+    readFile(new URL("app/transit/styles/scenic/ScenicRoutePreviewSvg.tsx", root), "utf8"),
+    readFile(new URL("app/transit/TransitMapApp.tsx", root), "utf8"),
+    readFile(new URL("app/wiring/WiringDiagramApp.tsx", root), "utf8"),
+    readFile(new URL("app/projects/repositories.ts", root), "utf8"),
+  ]);
+  // site.ts：浏览器用 document.baseURI 计算部署子路径，SSR 无 document 时退回根路径
+  assert.match(site, /siteBase/);
+  assert.match(site, /siteUrl/);
+  assert.match(site, /document\.baseURI/);
+  assert.match(site, /typeof document !== "undefined"/);
+  assert.match(site, /return "\/";/);
+  // vite 静态构建用相对 base，让 HTML/CSS 引用适配任意子路径
+  assert.match(viteStatic, /base: "\.\/"/);
+  // 代码里的资源与样例数据路径全部改为 siteUrl(...)，不再硬编码绝对 /assets 前缀
+  for (const source of [portal, entranceApp, renderer, vectorPreview, loopRenderer, loopPreview, scenicRenderer, scenicPreview, transitApp, wiringApp]) {
+    assert.doesNotMatch(source, /["'`]\/assets\//, "资源路径必须经过 siteUrl() 以适配子路径部署");
+  }
+  assert.match(portal, /siteUrl\("assets\/rail-transit-icon\.png"\)/);
+  assert.match(entranceApp, /siteUrl\("assets\/rail-transit-icon\.png"\)/);
+  assert.match(entranceApp, /DEFAULT_BACKGROUND = siteUrl\("assets\/space-elevator-station\.jpg"\)/);
+  assert.match(renderer, /TRAM_ICON_PATH = siteUrl\("assets\/tram\.png"\)/);
+  assert.match(vectorPreview, /siteUrl\("assets\/tram\.png"\)/);
+  assert.match(loopRenderer, /TRANSFER_ICON_PATH = siteUrl\("assets\/transfer-white\.png"\)/);
+  assert.match(loopPreview, /siteUrl\("assets\/transfer-white\.png"\)/);
+  assert.match(scenicRenderer, /TRAM_ICON_PATH = siteUrl\("assets\/tram\.png"\)/);
+  assert.match(scenicPreview, /siteUrl\("assets\/tram\.png"\)/);
+  assert.match(transitApp, /siteUrl\("assets\/rail-transit-icon\.png"\)/);
+  assert.match(wiringApp, /siteUrl\("assets\/rail-transit-icon\.png"\)/);
+  // 样例数据（data/ 的静态镜像）同样适配子路径
+  assert.doesNotMatch(repositories, /publicRoot = "\/sample-data"/);
+  assert.match(repositories, /siteUrl\("sample-data"\)/);
+});
+
 test("keeps local data and rendering modules in the project", async () => {
   const [loopVectorPreview, loopRenderer, scenicVectorPreview, pulseVectorPreview, pulseRenderer] = await Promise.all([
     readFile(new URL("app/transit/styles/loop/LoopRoutePreviewSvg.tsx", root), "utf8"),
@@ -292,7 +336,7 @@ test("keeps local data and rendering modules in the project", async () => {
   assert.match(vectorPreview, /const firstEnglishY = 108/);
   assert.match(vectorPreview, /closedStationsUsePassedColor/);
   assert.match(vectorPreview, /tramTransferVerticalOffset/);
-  assert.match(vectorPreview, /\/assets\/tram\.png/);
+  assert.match(vectorPreview, /siteUrl\("assets\/tram\.png"\)/);
   assert.doesNotMatch(vectorPreview, /▣ Tram/);
   assert.match(renderer, /drawMergedMetroTransfers/);
   assert.match(renderer, /TRAM_ICON_PATH/);
@@ -374,7 +418,7 @@ test("keeps local data and rendering modules in the project", async () => {
   assert.match(entranceRenderer, /options\.styleId === "pulse"/);
   assert.match(entranceStyles, /entrance-style-template-icon\.pulse/);
   assert.match(entranceApp, /entrance-style-picker-modal/);
-  assert.match(entranceApp, /\/assets\/transfer-t5\.png/);
+  assert.match(entranceApp, /siteUrl\("assets\/transfer-t5\.png"\)/);
   assert.match(entranceApp, /entrance-settings-tabs/);
   assert.match(entranceApp, /站名与出口/);
   assert.doesNotMatch(entranceApp, /entrance-editor-card/);

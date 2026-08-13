@@ -57,6 +57,7 @@ import "./transit.css";
 import { ColorField } from "./settingsControls";
 import { SettingsPanel } from "./SettingsPanel";
 import { downloadBlob } from "../lib/browser";
+import { siteUrl } from "../site";
 
 const MAX_HISTORY = 60;
 
@@ -989,7 +990,7 @@ export default function TransitMapApp({ projectId = DEFAULT_PROJECT_ID, reposito
     return (
       <main className="loading-shell">
         <div className="loading-card">
-          <span className="brand-mark"><img src="/assets/rail-transit-icon.png" alt="" /></span>
+          <span className="brand-mark"><img src={siteUrl("assets/rail-transit-icon.png")} alt="" /></span>
           <h1>线路站序图编辑器</h1>
           <p>{error || status}</p>
           {error && <button onClick={() => window.location.reload()}>重新连接</button>}
@@ -1006,7 +1007,7 @@ export default function TransitMapApp({ projectId = DEFAULT_PROJECT_ID, reposito
     <main className="app-shell">
       <header className="app-header">
         <div className="brand-block">
-          <span className="brand-mark"><img src="/assets/rail-transit-icon.png" alt="" /></span>
+          <span className="brand-mark"><img src={siteUrl("assets/rail-transit-icon.png")} alt="" /></span>
           <div>
               <h1>线路站序图编辑器</h1>
               <p>本地线路站序图生成器 · 128 px 地图画</p>

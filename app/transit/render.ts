@@ -12,6 +12,7 @@ import {
 } from "./types";
 import { fitEnglishTextLayout } from "./english-layout.mjs";
 import { displayStationsForPlatform, visualDirectionFor } from "./route-orientation.mjs";
+import { siteUrl } from "../site";
 import { renderLoopRouteCanvas, renderLoopStationTile as renderIsolatedLoopStationTile, renderLoopTextCard } from "./styles/loop/loop-render";
 import {
   renderScenicDirectionTile,
@@ -48,7 +49,7 @@ export interface StationEdge {
 type SegmentState = "passed" | "upcoming";
 type SpacedCanvasContext = CanvasRenderingContext2D & { letterSpacing: string };
 
-const TRAM_ICON_PATH = "/assets/tram.png";
+const TRAM_ICON_PATH = siteUrl("assets/tram.png");
 const tramIconImage = typeof Image === "undefined" ? null : new Image();
 if (tramIconImage) tramIconImage.src = TRAM_ICON_PATH;
 

@@ -11,6 +11,7 @@ import {
 } from "./projects/repositories";
 import "./portal.css";
 import { ABOUT_LINKS, APP_VERSION, BETA_DETAILS, BETA_NOTICE, DISCLAIMER_SECTIONS, FREE_NOTE, NOTES } from "./portalContent";
+import { siteUrl } from "./site";
 
 const TransitMapApp = lazy(() => import("./transit/TransitMapApp"));
 const EntranceSignApp = lazy(() => import("./entrance/EntranceSignApp"));
@@ -287,7 +288,7 @@ export default function ProjectPortal() {
       <div className="portal-gradient" aria-hidden="true" />
 
       <header className="portal-heading">
-        <div className="portal-logo"><img src="/assets/rail-transit-icon.png" alt="轨道交通图标" /></div>
+        <div className="portal-logo"><img src={siteUrl("assets/rail-transit-icon.png")} alt="轨道交通图标" /></div>
         <div>
           <p>VOID CITY · LOCAL DESIGN WORKSPACE</p>
           <h1>轨道交通视觉设计工坊</h1>

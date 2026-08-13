@@ -16,6 +16,7 @@ import {
 } from "../../types";
 import { scenicIconUrl } from "./scenic-render";
 import { displayStationsForPlatform, visualDirectionFor } from "../../route-orientation.mjs";
+import { siteUrl } from "../../../site";
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } {
   let normalized = hex.trim().replace(/^#/, "");
@@ -169,7 +170,7 @@ function Transfers({ data, station, state, baseY }: { data: TransitData; station
         return (
           <g key={transfer.id}>
             <rect x={x - 27} y={badgeY} width="54" height="18" rx="4" fill={color} />
-            <image href="/assets/tram.png" x={x - 22} y={badgeY + 2} width="14" height="14" preserveAspectRatio="xMidYMid meet" />
+            <image href={siteUrl("assets/tram.png")} x={x - 22} y={badgeY + 2} width="14" height="14" preserveAspectRatio="xMidYMid meet" />
             <text x={x + 8} y={badgeY + 12.5} textAnchor="middle" fill="#FFFFFF" fontFamily={data.layout.fontEn} fontSize={data.layout.tramTransferFontSize} fontWeight="700" letterSpacing={data.layout.tramTransferLetterSpacing}>Tram {target.number.replace(/^T/i, "")}</text>
           </g>
         );

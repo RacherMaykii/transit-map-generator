@@ -11,8 +11,9 @@ import {
   stationsForLine,
 } from "../../types";
 import { displayStationsForPlatform, visualDirectionFor } from "../../route-orientation.mjs";
+import { siteUrl } from "../../../site";
 
-const TRAM_ICON_PATH = "/assets/tram.png";
+const TRAM_ICON_PATH = siteUrl("assets/tram.png");
 const tramIconImage = typeof Image === "undefined" ? null : new Image();
 if (tramIconImage) tramIconImage.src = TRAM_ICON_PATH;
 

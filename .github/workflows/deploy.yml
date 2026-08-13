@@ -1,0 +1,41 @@
+# 构建静态站点并部署到 GitHub Pages。
+# 仓库页面 Settings → Pages → Source 选择 “GitHub Actions”。
+# 可选统计：仓库 Settings → Secrets → Actions 添加 CLOUDFLARE_ANALYTICS_TOKEN
+# （未配置时构建产物不含统计脚本，页面行为不受影响）。
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Build static site
+        run: npm run build:static
+        env:
+          VITE_CLOUDFLARE_ANALYTICS_TOKEN: ${{ secrets.CLOUDFLARE_ANALYTICS_TOKEN }}
+      - name: Upload Pages artifact
+        uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: static-dist
+      - name: Deploy to GitHub Pages
+        uses: actions/deploy-pages@v4

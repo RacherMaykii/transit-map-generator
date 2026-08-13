@@ -32,8 +32,9 @@ import {
 import { BrowserEditorDocumentStore } from "../projects/editorDocumentStore";
 import "../transit/transit.css";
 import "./entrance.css";
+import { siteUrl } from "../site";
 
-const DEFAULT_BACKGROUND = "/assets/space-elevator-station.jpg";
+const DEFAULT_BACKGROUND = siteUrl("assets/space-elevator-station.jpg");
 
 function displayLineName(line: { kind: string; number: string; nameZh: string }) {
   return `${line.kind === "tram" ? "电车" : "线路"} ${line.number} · ${line.nameZh}`;
@@ -488,7 +489,7 @@ export default function EntranceSignApp({ projectId = DEFAULT_PROJECT_ID, reposi
     return (
       <main className="loading-shell">
         <div className="loading-card">
-          <span className="brand-mark"><img src="/assets/rail-transit-icon.png" alt="" /></span>
+          <span className="brand-mark"><img src={siteUrl("assets/rail-transit-icon.png")} alt="" /></span>
           <h1>出入口站名标识编辑器</h1>
           <p>{error || status}</p>
           {error && <button onClick={() => window.location.reload()}>重新连接</button>}
@@ -526,7 +527,7 @@ export default function EntranceSignApp({ projectId = DEFAULT_PROJECT_ID, reposi
     <main className="app-shell entrance-app-shell">
       <header className="app-header">
         <div className="brand-block">
-          <span className="brand-mark"><img src="/assets/rail-transit-icon.png" alt="" /></span>
+          <span className="brand-mark"><img src={siteUrl("assets/rail-transit-icon.png")} alt="" /></span>
           <div>
             <h1>出入口站名标识编辑器</h1>
             <p>640 × 128 px 完整图 · 5 张地图画切片</p>
@@ -691,7 +692,7 @@ export default function EntranceSignApp({ projectId = DEFAULT_PROJECT_ID, reposi
               <button type="button" className="entrance-style-switch-button" onClick={() => setShowStylePicker(true)} aria-haspopup="dialog" aria-expanded={showStylePicker}>
                 <span className={`entrance-style-template-icon entrance-style-switch-current-icon ${activeStyleId}`} aria-hidden="true"><i /></span>
                 <span className="entrance-style-switch-copy"><b>{ENTRANCE_STYLE_TEMPLATES.find((template) => template.id === activeStyleId)?.label || "经典样式"}</b><small>切换样式</small></span>
-                <span className="entrance-style-switch-glyph" aria-hidden="true"><img src="/assets/transfer-t5.png" alt="" /></span>
+                <span className="entrance-style-switch-glyph" aria-hidden="true"><img src={siteUrl("assets/transfer-t5.png")} alt="" /></span>
               </button>
             </div>
             <div className="entrance-settings-tabs" role="tablist" aria-label="出入口标识设置分类">

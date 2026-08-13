@@ -17,6 +17,7 @@ import {
   type StorageMode,
 } from "./types";
 import { openProjectDatabase } from "./database";
+import { siteUrl } from "../site";
 
 export type { ProjectAsset, ProjectCapabilities, ProjectRepository, ProjectSummary, StorageMode } from "./types";
 export { DEFAULT_PROJECT_ID } from "./types";
@@ -68,7 +69,7 @@ async function getSampleAsset(fetcher: typeof fetch, dataRoot: string, name: str
 }
 
 /** Reads the deployable sample CSV files and supplies the normal editor defaults. */
-export async function loadSampleTransitData(fetcher: typeof fetch = fetch, publicRoot = "/sample-data"): Promise<TransitData> {
+export async function loadSampleTransitData(fetcher: typeof fetch = fetch, publicRoot = siteUrl("sample-data")): Promise<TransitData> {
   const [lines, stations, transfers] = await Promise.all(["lines.csv", "stations.csv", "transfers.csv"].map(async (name) => {
     const response = await fetcher(sampleDataUrl(publicRoot, name), { cache: "no-store" });
     if (!response.ok) throw new Error(`Unable to load sample data: ${name}`);
@@ -89,7 +90,7 @@ export class StaticProjectRepository implements ProjectRepository {
   readonly mode: StorageMode = "static";
   readonly capabilities = STATIC_CAPABILITIES;
   private readonly fetcher: typeof fetch;
-  constructor(fetcher: typeof fetch = fetch, private readonly publicRoot = "/sample-data") {
+  constructor(fetcher: typeof fetch = fetch, private readonly publicRoot = siteUrl("sample-data")) {
     // 绑定 this，避免以 this.fetcher(...) 调用原生 fetch 时 this 非 Window 触发 Illegal invocation
     this.fetcher = fetcher.bind(globalThis);
   }
@@ -173,7 +174,7 @@ export class BrowserProjectRepository implements ProjectRepository {
   readonly mode: StorageMode = "browser";
   readonly capabilities = BROWSER_CAPABILITIES;
   private readonly fetcher: typeof fetch;
-  constructor(fetcher: typeof fetch = fetch, private readonly publicRoot = "/sample-data") {
+  constructor(fetcher: typeof fetch = fetch, private readonly publicRoot = siteUrl("sample-data")) {
     // 绑定 this，避免以 this.fetcher(...) 调用原生 fetch 时 this 非 Window 触发 Illegal invocation
     this.fetcher = fetcher.bind(globalThis);
   }
