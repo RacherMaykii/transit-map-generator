@@ -528,8 +528,9 @@ test("wiring editor supports track crossing management (plain/gap/bridge)", asyn
 });
 
 test("wiring editor supports semantic track model with editable control points", async () => {
-  const [types, history, projectStore, app, connectionLogic, css, connectionInspector] = await Promise.all([
+  const [types, geometry, history, projectStore, app, connectionLogic, css, connectionInspector] = await Promise.all([
     readFile(new URL("app/wiring/types.ts", root), "utf8"),
+    readFile(new URL("app/wiring/geometry.ts", root), "utf8"),
     readFile(new URL("app/wiring/history.ts", root), "utf8"),
     readFile(new URL("app/wiring/projectStore.ts", root), "utf8"),
     readFile(new URL("app/wiring/WiringDiagramApp.tsx", root), "utf8"),
@@ -550,11 +551,11 @@ test("wiring editor supports semantic track model with editable control points",
   assert.match(types, /controlPoints: TrackControlPoint\[\]/);
   assert.match(types, /pairedConnectionId\?: string/);
 
-  // Track rebuild + path helpers exist
-  assert.match(types, /export function rebuildTracksFromControlPoints/);
-  assert.match(types, /export function buildControlPointPathD/);
+  // Track rebuild + path helpers live in geometry.ts (barrel re-exported from types.ts)
+  assert.match(geometry, /export function rebuildTracksFromControlPoints/);
+  assert.match(geometry, /export function buildControlPointPathD/);
   // Path builder emits SVG cubic bezier command for curved segments
-  assert.match(types, /C\$\{/);
+  assert.match(geometry, /C\$\{/);
 
   // One complete data clone protects nested control points in every snapshot path.
   assert.match(history, /cloneHistorySnapshot/);
@@ -586,7 +587,7 @@ test("wiring editor supports semantic track model with editable control points",
   assert.match(connectionLogic, /worldPortPosition\(from\.module, from\.template, from\.portId\)/);
   assert.match(connectionLogic, /worldPortPosition\(to\.module, to\.template, to\.portId\)/);
   assert.match(connectionLogic, /controlPoints: geometry\.controlPoints, tracks: geometry\.tracks/);
-  assert.match(types, /export function buildDirectionOnlyControlPointPathD/);
+  assert.match(geometry, /export function buildDirectionOnlyControlPointPathD/);
   // Paired double-track rails are rendered through the pair-coordinated helper.
   assert.match(app, /geometryForConnection\(conn, connections, modules, resolvedTemplateMap\)/);
 
@@ -790,8 +791,9 @@ test("unified transfer button, discardSnapshot, and tutorial cleanup", async () 
 });
 
 test("wiring editor supports hierarchical tree layers with drag-to-reorder", async () => {
-  const [types, history, projectStore, app, css] = await Promise.all([
+  const [types, layerTree, history, projectStore, app, css] = await Promise.all([
     readFile(new URL("app/wiring/types.ts", root), "utf8"),
+    readFile(new URL("app/wiring/layerTree.ts", root), "utf8"),
     readFile(new URL("app/wiring/history.ts", root), "utf8"),
     readFile(new URL("app/wiring/projectStore.ts", root), "utf8"),
     readFile(new URL("app/wiring/WiringDiagramApp.tsx", root), "utf8"),
@@ -814,14 +816,15 @@ test("wiring editor supports hierarchical tree layers with drag-to-reorder", asy
   assert.match(types, /id: "layer-background"[^\n]*parentId: null/);
   assert.match(types, /id: "layer-bg"[^\n]*parentId: "layer-background"/);
 
-  // Tree helper functions exist
-  assert.match(types, /export function getAncestorIds/);
-  assert.match(types, /export function isLayerTreeVisible/);
-  assert.match(types, /export function isLayerTreeLocked/);
-  assert.match(types, /export function getChildLayers/);
-  assert.match(types, /export function getRootLayers/);
-  assert.match(types, /export function hasChildren/);
-  assert.match(types, /export function flattenLayerTree/);
+  // Tree helper functions live in layerTree.ts (barrel re-exported from types.ts)
+  assert.match(types, /export \{[^}]*flattenLayerTree[^}]*\} from "\.\/layerTree"/);
+  assert.match(layerTree, /export function getAncestorIds/);
+  assert.match(layerTree, /export function isLayerTreeVisible/);
+  assert.match(layerTree, /export function isLayerTreeLocked/);
+  assert.match(layerTree, /export function getChildLayers/);
+  assert.match(layerTree, /export function getRootLayers/);
+  assert.match(layerTree, /export function hasChildren/);
+  assert.match(layerTree, /export function flattenLayerTree/);
 
   // History snapshots layers (flat copy per node)
   assert.match(history, /layers: refs\.layers\.current/);
