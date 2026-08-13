@@ -57,6 +57,7 @@ next-env.d.ts
 /browser-test.*.log
 /dev-preview.*.log
 /.verify/profile/
+/.verify/screenshots/
 # public/sample-data 是从 data/ 派生的构建镜像，由 scripts/sync-sample-data.mjs 生成
 /public/sample-data/
 /tsconfig.tsbuildinfo
