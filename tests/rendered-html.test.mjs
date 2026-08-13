@@ -423,12 +423,12 @@ test("wiring editor supports independent label objects with undo, layers, and se
   assert.match(app, /handleLabelMouseDown/);
   assert.match(app, /handleLabelDoubleClick/);
   assert.match(app, /LABEL_ANCHOR_MAP/);
-  assert.match(app, /paintOrder/);
+  assert.match(await readFile(new URL("app/wiring/ui/renderItem.tsx", root), "utf8"), /paintOrder/);
   assert.match(app, /backgroundMask/);
   assert.match(app, /wiring-text-tool-card/);
   assert.match(labelInspector, /文字范围内层级/);
   assert.match(app, /sourceLineId/);
-  assert.match(app, /label-background/);
+  assert.match(await readFile(new URL("app/wiring/ui/renderItem.tsx", root), "utf8"), /label-background/);
   assert.match(labelInspector, /元件库文字保持独立定位，不参与自动避障/);
   // Label tool button in toolbar
   assert.match(app, /activeTool === "label"/);
@@ -510,10 +510,10 @@ test("wiring editor supports track crossing management (plain/gap/bridge)", asyn
   assert.match(app, /function removeCrossingPoint/);
 
   // App renders crossing types
-  assert.match(app, /crossing-gap/);
-  assert.match(app, /crossing-bridge/);
-  assert.match(app, /crossing-point/);
-  assert.match(app, /crossing-label/);
+  assert.match(await readFile(new URL("app/wiring/ui/renderItem.tsx", root), "utf8"), /crossing-gap/);
+  assert.match(await readFile(new URL("app/wiring/ui/renderItem.tsx", root), "utf8"), /crossing-bridge/);
+  assert.match(await readFile(new URL("app/wiring/ui/renderItem.tsx", root), "utf8"), /crossing-point/);
+  assert.match(await readFile(new URL("app/wiring/ui/renderItem.tsx", root), "utf8"), /crossing-label/);
 
   // App has crossing type selector in property panel
   assert.match(app, /平面交叉/);
@@ -592,9 +592,9 @@ test("wiring editor supports semantic track model with editable control points",
 
   // App renders path through control points and draggable handles
   assert.match(app, /buildControlPointPathD/);
-  assert.match(app, /track-node/);
-  assert.match(app, /track-handle-dot/);
-  assert.match(app, /track-handle-line/);
+  assert.match(await readFile(new URL("app/wiring/ui/renderItem.tsx", root), "utf8"), /track-node/);
+  assert.match(await readFile(new URL("app/wiring/ui/renderItem.tsx", root), "utf8"), /track-handle-dot/);
+  assert.match(await readFile(new URL("app/wiring/ui/renderItem.tsx", root), "utf8"), /track-handle-line/);
 
   // Property panel exposes node management UI
   assert.match(app, /轨道节点/);
@@ -719,7 +719,7 @@ test("wiring editor supports transfer groups with undo, layers, and serializatio
   assert.match(app, /已整体移动换乘组/);
 
   // App renders transfer groups as dashed bounding boxes
-  assert.match(app, /transfer-group/);
+  assert.match(await readFile(new URL("app/wiring/ui/renderItem.tsx", root), "utf8"), /transfer-group/);
   assert.match(app, /strokeDasharray/);
   assert.match(app, /getTransferGroupBounds/);
 
