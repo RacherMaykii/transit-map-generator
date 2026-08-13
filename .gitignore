@@ -58,8 +58,8 @@ next-env.d.ts
 /dev-preview.*.log
 /.verify/profile/
 /.verify/screenshots/
-# public/sample-data 是从 data/ 派生的构建镜像，由 scripts/sync-sample-data.mjs 生成
-/public/sample-data/
+# public/sample-data 是静态站点的只读种子数据，需随仓库发布。
+# 本地可编辑工程仍只保存在 data/，构建前由 scripts/sync-sample-data.mjs 更新该镜像。
 /tsconfig.tsbuildinfo
 /data/history/*
 !/data/history/.gitkeep
