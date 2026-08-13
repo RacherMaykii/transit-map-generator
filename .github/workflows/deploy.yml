@@ -32,9 +32,10 @@ jobs:
         run: npm run build:static
         env:
           VITE_CLOUDFLARE_ANALYTICS_TOKEN: ${{ secrets.CLOUDFLARE_ANALYTICS_TOKEN }}
-      - name: Upload Pages artifact
+      - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
         with:
           path: static-dist
       - name: Deploy to GitHub Pages
