@@ -57,3 +57,45 @@ test("new projects fall back to the shared public icon directory", async () => {
   assert.equal(project.headers.get("content-type"), "image/png");
   assert.deepEqual(Buffer.from(await project.arrayBuffer()), Buffer.from(await shared.arrayBuffer()));
 });
+
+test("project data is isolated between projects on the local data server", async () => {
+  const create = async (name) => (await fetch(`${origin}/api/projects`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  })).json();
+  const first = await create("隔离测试甲");
+  const second = await create("隔离测试乙");
+  assert.ok(first.id && second.id, "projects should be created with ids");
+  assert.notEqual(first.id, second.id, "each project gets a unique id");
+  assert.ok(first.id.startsWith("project-"), "server ids use the project- prefix");
+
+  const payloadFor = (nameZh) => ({
+    schemaVersion: 1,
+    lines: [{ id: "L1", kind: "metro", number: "1", nameZh, nameEn: nameZh, code: "1", lineColor: "#111111", stationColor: "#222222", currentColor: "#333333", passedColor: "#444444", textColor: "#ffffff", description: "" }],
+    stations: [],
+    transfers: [],
+    layout: {},
+    activeStyleTemplate: "classic",
+    layoutTemplates: {},
+  });
+  const save = (id, data) => fetch(`${origin}/api/save?project=${id}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
+  const load = async (id) => (await fetch(`${origin}/api/data?project=${id}`)).json();
+
+  await Promise.all([save(first.id, payloadFor("甲线")), save(second.id, payloadFor("乙线"))]);
+  assert.equal((await load(first.id)).lines[0].nameZh, "甲线");
+  assert.equal((await load(second.id)).lines[0].nameZh, "乙线");
+
+  // the default project is not touched by per-project saves
+  const defaultBefore = await load("default");
+  assert.ok(defaultBefore.lines.length > 0);
+  assert.notEqual(defaultBefore.lines[0].nameZh, "甲线");
+
+  // deleting one project leaves the other and the default intact
+  const deleted = await fetch(`${origin}/api/projects/${first.id}`, { method: "DELETE" });
+  assert.equal(deleted.status, 200);
+  assert.equal((await load(second.id)).lines[0].nameZh, "乙线");
+  assert.equal((await load("default")).lines[0].nameZh, defaultBefore.lines[0].nameZh);
+  const gone = await fetch(`${origin}/api/data?project=${first.id}`);
+  assert.notEqual(gone.status, 200, "deleted project directory is gone");
+});

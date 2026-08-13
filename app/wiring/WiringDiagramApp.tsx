@@ -112,6 +112,7 @@ import {
 } from "./color";
 import { useHistory } from "./history";
 import {
+  deleteFromIndexedDB,
   loadFromIndexedDB,
   migrateProjectSchema,
   projectToJson,
@@ -4132,10 +4133,12 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
         storedDocument ? migrateProjectSchema(storedDocument as unknown as ProjectFile) : null,
         compatibleProject,
       );
+      // 旧版编辑器使用全局裸 key "autosave"；仅当默认工程没有项目数据时迁移一次到项目作用域键，随后删除裸 key。
       if (!project && projectId === DEFAULT_PROJECT_ID) {
         const legacy = await loadFromIndexedDB("autosave");
         if (legacy) {
           await persistWiringProject(legacy);
+          await deleteFromIndexedDB("autosave").catch(() => undefined);
           project = legacy;
         }
       }

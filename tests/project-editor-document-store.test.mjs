@@ -16,6 +16,14 @@ test("editor document keys preserve the project/editor compound identity", () =>
   assert.throws(() => documents.editorDocumentKey("", "transit"), /projectId/);
 });
 
+test("editor document keys are stable and project-scoped for the same editor kind", () => {
+  const alpha = documents.editorDocumentKey("project:alpha", "wiring");
+  const beta = documents.editorDocumentKey("project:beta", "wiring");
+  assert.equal(alpha, '["project:alpha","wiring"]');
+  assert.equal(alpha, documents.editorDocumentKey("project:alpha", "wiring"), "same project/kind yields the same key");
+  assert.notEqual(alpha, beta, "different projects never share a wiring key");
+});
+
 test("editor documents are JSON-cloned and reject non-JSON values", () => {
   const source = { nested: { ids: ["S1"] }, enabled: true };
   const clone = documents.cloneEditorDocument(source);

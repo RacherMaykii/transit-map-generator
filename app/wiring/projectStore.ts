@@ -48,8 +48,6 @@ const MAX_UNCOMPRESSED_BYTES = 200 * 1024 * 1024;
 const DB_NAME = "metro-wiring-editor";
 /** IndexedDB 存储名 */
 const STORE_NAME = "projects";
-/** 自动保存 key */
-const AUTOSAVE_KEY = "autosave";
 
 const LEGACY_SYSTEM_LAYER_MIGRATIONS: Record<string, { previousParents: Array<string | null>; nextParent: string; previousName: string; nextName: string }> = {
   "layer-bg": { previousParents: [null], nextParent: "layer-background", previousName: "背景图", nextName: "底图" },
@@ -479,8 +477,11 @@ function openDB(): Promise<IDBDatabase> {
   });
 }
 
-/** 保存工程到 IndexedDB */
-export async function saveToIndexedDB(project: ProjectFile, key: string = AUTOSAVE_KEY): Promise<void> {
+/**
+ * 保存工程到 IndexedDB。key 必须按项目作用域传入（如 `wiring:<projectId>:autosave`），
+ * 不得使用全局裸 key，否则不同工程会互相覆盖。
+ */
+export async function saveToIndexedDB(project: ProjectFile, key: string): Promise<void> {
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readwrite");
@@ -496,8 +497,8 @@ export async function saveToIndexedDB(project: ProjectFile, key: string = AUTOSA
   });
 }
 
-/** 从 IndexedDB 加载工程 */
-export async function loadFromIndexedDB(key: string = AUTOSAVE_KEY): Promise<ProjectFile | null> {
+/** 从 IndexedDB 加载工程（key 为项目作用域键，见 saveToIndexedDB） */
+export async function loadFromIndexedDB(key: string): Promise<ProjectFile | null> {
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readonly");
@@ -513,8 +514,8 @@ export async function loadFromIndexedDB(key: string = AUTOSAVE_KEY): Promise<Pro
   });
 }
 
-/** 删除 IndexedDB 中的工程 */
-export async function deleteFromIndexedDB(key: string = AUTOSAVE_KEY): Promise<void> {
+/** 删除 IndexedDB 中的工程（key 为项目作用域键，见 saveToIndexedDB） */
+export async function deleteFromIndexedDB(key: string): Promise<void> {
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readwrite");
