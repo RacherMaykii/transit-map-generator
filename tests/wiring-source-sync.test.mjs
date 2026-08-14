@@ -4,6 +4,7 @@ import { createServer } from "vite";
 
 const server = await createServer({ configFile: false, appType: "custom", server: { middlewareMode: true } });
 const sync = await server.ssrLoadModule("/app/wiring/sourceSync.ts");
+const projectStore = await server.ssrLoadModule("/app/wiring/projectStore.ts");
 after(() => server.close());
 
 function station(overrides = {}) {
@@ -46,4 +47,24 @@ test("newest saved copy wins when compatibility and common-document stores diffe
   const newProject = { ...project(), projectInfo: { ...project().projectInfo, updatedAt: "2026-02-01T00:00:00.000Z" } };
   assert.equal(sync.newestWiringProject(oldProject, newProject), newProject);
   assert.equal(sync.newestWiringProject(null, oldProject), oldProject);
+});
+
+test("reopening preserves reverse cross-platform line and colour order", () => {
+  const current = transit([
+    station({ id: "L1-S01", lineId: "L1", throughLineIds: ["L2"] }),
+    station({ id: "L2-S01", lineId: "L2", throughLineIds: ["L1"] }),
+  ]);
+  current.lines.push({ ...current.lines[0], id: "L2", number: "2", nameZh: "二号线", code: "L2", lineColor: "#0000FF" });
+  const saved = project();
+  saved.modules[0] = {
+    ...saved.modules[0],
+    templateId: "cross_platform",
+    sourceStationIds: ["L2-S01", "L1-S01"],
+    lineIds: ["L2", "L1"],
+  };
+
+  const restoredFromDisk = projectStore.jsonToProject(projectStore.projectToJson(saved));
+  const reopened = sync.synchronizeWiringProjectSource(restoredFromDisk, current);
+  assert.deepEqual(reopened.modules[0].sourceStationIds, ["L2-S01", "L1-S01"]);
+  assert.deepEqual(reopened.modules[0].lineIds, ["L2", "L1"]);
 });

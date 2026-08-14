@@ -23,6 +23,28 @@ test("a platform can associate multiple station records and expose every line", 
   assert.equal(associations.addStationAssociation(ids, "T5-01"), ids);
 });
 
+test("association order can be changed explicitly and survives line reconciliation", () => {
+  const selectedInReverse = associations.addStationAssociation(["T5-01"], "L7-01");
+  assert.deepEqual(selectedInReverse, ["T5-01", "L7-01"]);
+  assert.deepEqual(associations.lineIdsForStationAssociations(selectedInReverse, stations), ["T5", "L8", "L7"]);
+
+  const moved = associations.moveStationAssociation(selectedInReverse, "L7-01", -1);
+  assert.deepEqual(moved, ["L7-01", "T5-01"]);
+  assert.equal(associations.moveStationAssociation(moved, "L7-01", -1), moved);
+
+  // CSV/source order may differ after reopening; the saved module order wins.
+  assert.deepEqual(
+    associations.reconcileLineIdsForStationAssociations(["T5", "L8", "L7"], selectedInReverse, [...stations].reverse()),
+    ["T5", "L8", "L7"],
+  );
+  // New lines are appended without disturbing the already saved relative order.
+  const changedStations = stations.map((station) => station.id === "L7-01" ? { ...station, throughLineIds: ["L9"] } : station);
+  assert.deepEqual(
+    associations.reconcileLineIdsForStationAssociations(["T5", "L8", "L7"], selectedInReverse, changedStations),
+    ["T5", "L8", "L7", "L9"],
+  );
+});
+
 test("non-materialized template platforms display transfer line names", () => {
   const template = templates.MODULE_TEMPLATES.find((candidate) => candidate.id === "side_platform");
   const owner = { id: "m", lineIds: ["L7", "T5"] };

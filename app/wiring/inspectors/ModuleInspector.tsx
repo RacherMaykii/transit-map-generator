@@ -1,7 +1,7 @@
 "use client";
 
 import { shiftOwnedPlatformZIndex } from "../canvasLogic";
-import { addStationAssociation, lineIdsForStationAssociations, removeStationAssociation } from "../stationAssociation";
+import { addStationAssociation, lineIdsForStationAssociations, moveStationAssociation, removeStationAssociation } from "../stationAssociation";
 import { MODULE_TEMPLATES, supportsAvoidanceTracks } from "../templates";
 import { type DiagramModule } from "../types";
 import { MirrorToggle } from "../ui/svgElements";
@@ -314,10 +314,28 @@ export function ModuleInspector({ ctx }: InspectorProps) {
           {selectedMod.sourceStationIds.map((stationId, index) => {
             const station = data.stations.find((candidate) => candidate.id === stationId);
             const line = station ? data.lines.find((candidate) => candidate.id === station.lineId) : undefined;
+            const moveAssociation = (offset: -1 | 1) => {
+              const nextStationIds = moveStationAssociation(selectedMod.sourceStationIds, stationId, offset);
+              if (nextStationIds === selectedMod.sourceStationIds) return;
+              const primaryStation = data.stations.find((candidate) => candidate.id === nextStationIds[0]);
+              updateModule(selectedMod.id, {
+                sourceStationIds: nextStationIds,
+                lineIds: lineIdsForStationAssociations(nextStationIds, data.stations),
+              }, "调整站台配色顺序");
+              if (primaryStation) {
+                setLabels((prev) => prev.map((label) => label.attachedToId === selectedMod.id
+                  ? { ...label, text: label.language === "en" ? (primaryStation.nameEn || label.text) : primaryStation.nameZh, sourceStationId: primaryStation.id }
+                  : label));
+              }
+            };
             return <div className="wiring-station-association" key={stationId}>
               <span className="wiring-association-swatch" style={{ background: line?.lineColor || "#98a2b3" }} />
-              <span><b>{station?.nameZh || stationId}</b><small>{line?.nameZh || station?.lineId || "源数据已删除"}{index === 0 ? " · 主站名" : " · 换乘"}</small></span>
-              <button
+              <span><b>{index + 1}. {station?.nameZh || stationId}</b><small>{line?.nameZh || station?.lineId || "源数据已删除"}{index === 0 ? " · 主站名/第一配色" : ` · 第 ${index + 1} 配色`}</small></span>
+              <span className="wiring-association-order-actions">
+                <button type="button" aria-label={`上移 ${station?.nameZh || stationId}`} title="上移配色顺序" disabled={index === 0 || isLayerLocked(selectedMod.layerId)} onClick={() => moveAssociation(-1)}>↑</button>
+                <button type="button" aria-label={`下移 ${station?.nameZh || stationId}`} title="下移配色顺序" disabled={index === selectedMod.sourceStationIds.length - 1 || isLayerLocked(selectedMod.layerId)} onClick={() => moveAssociation(1)}>↓</button>
+              </span>
+              <button className="wiring-association-remove"
                 type="button"
                 aria-label={`移除 ${station?.nameZh || stationId}`}
                 disabled={isLayerLocked(selectedMod.layerId)}
@@ -338,7 +356,7 @@ export function ModuleInspector({ ctx }: InspectorProps) {
             </div>;
           })}
         </div>
-        <p style={{ fontSize: 10, color: "var(--muted)", margin: "6px 0 0", lineHeight: 1.5 }}>任意站台均可关联多条线路；第一项决定显示站名，其余项作为换乘线路参与轨道、站台和文字着色。</p>
+        <p style={{ fontSize: 10, color: "var(--muted)", margin: "6px 0 0", lineHeight: 1.5 }}>任意站台均可关联多条线路；列表顺序会随工程保存，并决定线路与站台的配色顺序。第一项同时决定显示站名。</p>
         {selectedMod.sourceStationIds.some((stationId) => !data.stations.some((station) => station.id === stationId)) && <p className="wiring-source-deleted">源数据已删除。可以重新绑定、保留为自定义对象或删除模块。</p>}
       </div>
 

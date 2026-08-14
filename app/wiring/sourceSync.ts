@@ -2,6 +2,7 @@ import { generateSourceChanges, pendingPlacementChanges } from "../transit/sourc
 import type { TransitData } from "../transit/types";
 import type { ProjectFile } from "./projectStore";
 import { buildSourceIdentityRecords } from "./sourceIdentity";
+import { reconcileLineIdsForStationAssociations } from "./stationAssociation";
 
 function projectTimestamp(project: ProjectFile | null): number {
   const value = project?.projectInfo?.updatedAt ? Date.parse(project.projectInfo.updatedAt) : 0;
@@ -35,7 +36,11 @@ export function synchronizeWiringProjectSource(project: ProjectFile, currentData
     return {
       ...module,
       customLabel: linked[0].nameZh,
-      lineIds: Array.from(new Set(linked.flatMap((station) => [station.lineId, ...station.throughLineIds]))),
+      lineIds: reconcileLineIdsForStationAssociations(
+        module.lineIds,
+        module.sourceStationIds,
+        currentData.stations,
+      ),
     };
   });
   const moduleById = new Map(modules.map((module) => [module.id, module]));

@@ -72,7 +72,7 @@ import {
 } from "../transit/csv-io";
 import { alignModuleToTrackPorts, CANVAS_PRESETS, centerBackgroundOnCanvas, compareRenderOrder, createCanvasPage, createLayerRank, effectiveConnectionZIndex, effectiveLayerOpacity, effectivePlatformZIndex, expandCanvasToFitBounds, fitBackgroundToCanvas, leafLayerIds, mirrorModuleOwnedObjects, readableLabelRotation, relayoutModuleOwnedObjects, restoreBackgroundSize, rotateModuleOwnedObjects, shiftOwnedPlatformZIndex, toggleOwnedModuleSelection, translateCanvasSelection, translateModuleGroup } from "./canvasLogic";
 import { computeGraphicBbox, computeLabelBbox, computeLabelLocalBox, computePlatformBbox, resolveLabelIconOverlaps } from "./labelAvoidance";
-import { addStationAssociation, lineIdsForStationAssociations, removeStationAssociation } from "./stationAssociation";
+import { reconcileLineIdsForStationAssociations } from "./stationAssociation";
 import { duplicateTransferStationLabelIds } from "./transferLabels";
 import { defaultConnectionLayerId, defaultGraphicLayerId, defaultLabelLayerId, defaultModuleLayerId, defaultPlatformLayerId } from "./layerAssignment";
 import { expandServicePatternFilter } from "./servicePatterns";
@@ -488,7 +488,11 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
     const nextStations = new Map(nextData.stations.map((station) => [station.id, station]));
     setModules((prev) => prev.map((module) => {
       const station = module.sourceStationIds.map((id) => nextStations.get(id)).find(Boolean);
-      return station ? { ...module, customLabel: station.nameZh, lineIds: Array.from(new Set([station.lineId, ...station.throughLineIds])) } : module;
+      return station ? {
+        ...module,
+        customLabel: station.nameZh,
+        lineIds: reconcileLineIdsForStationAssociations(module.lineIds, module.sourceStationIds, nextData.stations),
+      } : module;
     }));
     setLabels((prev) => prev.map((label) => {
       const ownerStationId = label.sourceStationId || modules.find((module) => module.id === label.attachedToId)?.sourceStationIds[0];
