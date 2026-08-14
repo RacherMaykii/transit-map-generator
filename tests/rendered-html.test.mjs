@@ -37,6 +37,30 @@ test("wraps English labels only between complete words", async () => {
   assert.ok(measure(singleLongWord, fitted.size) <= 35);
 });
 
+test("station and line selectors display business labels instead of internal ids", async () => {
+  const [types, moduleInspector, labelInspector, transferInspector, wiringApp, entrance, settings] = await Promise.all([
+    readFile(new URL("app/transit/types.ts", root), "utf8"),
+    readFile(new URL("app/wiring/inspectors/ModuleInspector.tsx", root), "utf8"),
+    readFile(new URL("app/wiring/inspectors/LabelInspector.tsx", root), "utf8"),
+    readFile(new URL("app/wiring/inspectors/TransferGroupInspector.tsx", root), "utf8"),
+    readFile(new URL("app/wiring/WiringDiagramApp.tsx", root), "utf8"),
+    readFile(new URL("app/entrance/EntranceSignApp.tsx", root), "utf8"),
+    readFile(new URL("app/transit/SettingsPanel.tsx", root), "utf8"),
+  ]);
+  assert.match(types, /function lineOptionLabel/);
+  assert.match(types, /function stationOptionLabel/);
+  assert.match(types, /stationName.*lineName.*stationCode/s);
+  assert.match(moduleInspector, /stationOptionLabel\(station, stationLine\)/);
+  assert.match(moduleInspector, /lineOptionLabel\(line\)/);
+  assert.doesNotMatch(moduleInspector, /\{st\.nameZh\} \(\{st\.id\}\)/);
+  assert.doesNotMatch(moduleInspector, /line\.id.*line\.nameZh/);
+  assert.match(labelInspector, /lineOptionLabel\(line\)/);
+  assert.match(transferInspector, /lineOptionLabel\(line\)/);
+  assert.match(wiringApp, /label: lineOptionLabel\(line\)/);
+  assert.match(entrance, /stationOptionLabel\(candidate, line\)/);
+  assert.match(settings, /stationOptionLabel\(station, line\)/);
+});
+
 test("renders the project portal", async () => {
   const response = await render();
   assert.equal(response.status, 200);
@@ -310,6 +334,12 @@ test("keeps local data and rendering modules in the project", async () => {
   assert.match(app, /selectStyleTemplate/);
   assert.match(app, /assignLineStyle/);
   assert.match(app, /selectPreviewLine/);
+  assert.match(app, /if \(!line\) \{[\s\S]*setActiveTable\("lines"\)[\s\S]*请先新建线路，再添加站点/);
+  assert.match(app, /commit\(\{ \.\.\.data, lines: \[\.\.\.data\.lines, next\][\s\S]*selectPreviewLine\(id\);/);
+  assert.doesNotMatch(app, /onClick=\{addStation\}\s+disabled=\{!line\}/);
+  assert.match(app, /当前项目还没有线路/);
+  assert.match(app, /还没有线路数据/);
+  assert.match(app, /新建第一条线路/);
   assert.match(app, /lineStyleTemplates/);
   assert.match(types, /lineStyleTemplates/);
   assert.match(server, /lineStyleTemplates/);
@@ -437,6 +467,8 @@ test("keeps local data and rendering modules in the project", async () => {
   assert.match(app, /modal-scroll-body/);
   assert.match(styles, /scrollbar-gutter: stable/);
   assert.match(styles, /overflow: hidden; display: flex; flex-direction: column/);
+  assert.match(styles, /\.confirm-modal \.modal-scroll-body\s*\{[^}]*padding:/s);
+  assert.match(styles, /\.confirm-modal \.modal-actions\s*\{[^}]*justify-content:\s*flex-end/s);
   assert.match(portal, /createProjectRepository/);
   assert.match(portal, /BrowserEditorDocumentStore/);
   assert.match(portal, /projectId=\{opened\.project\.id\}/);
@@ -445,6 +477,11 @@ test("keeps local data and rendering modules in the project", async () => {
   assert.match(portal, /<TransitMapApp/);
   assert.match(portal, /<EntranceSignApp/);
   assert.match(portal, /<WiringDiagramApp/);
+  assert.match(portal, /onRequestAddStation=\{\(targetLineId\) =>/);
+  assert.match(portal, /intent: "add-station"/);
+  assert.match(portal, /initialLineId=\{opened\.targetLineId\}/);
+  assert.match(portal, /project\.id === DEFAULT_PROJECT_ID && <span className="is-sample">示例数据<\/span>/);
+  assert.match(portal, /className="portal-projects-description"/);
   assert.match(portal, /完整工程包/);
   assert.match(portal, /\.railcity/);
   assert.match(portal, /\.railproj/);
@@ -455,6 +492,7 @@ test("keeps local data and rendering modules in the project", async () => {
   assert.match(portal, /补充到当前项目/);
   assert.match(portalStyles, /space-elevator-station\.jpg/);
   assert.match(portalStyles, /linear-gradient\(0deg/);
+  assert.match(portalStyles, /\.portal-projects-description\s*\{[^}]*grid-column:\s*1\s*\/\s*-1/s);
   assert.match(entranceApp, /出入口站名标识编辑器/);
   assert.match(entranceApp, /640 × 128 px/);
   assert.match(entranceApp, /导出图片包/);
@@ -469,6 +507,9 @@ test("keeps local data and rendering modules in the project", async () => {
   assert.match(entranceApp, /entrance-preview-layout/);
   assert.match(entranceApp, /entrance-floating-settings-scroll/);
   assert.match(entranceApp, /entrance-style-switch-button/);
+  assert.match(entranceApp, /当前项目还没有线路和站点/);
+  assert.match(entranceApp, /前往添加站点/);
+  assert.match(entranceApp, /线路站序图生成/);
   assert.match(entranceStyleRegistry, /id: "pulse", label: "夜航样式"/);
   assert.match(entranceStyleRegistry, /defaultPulseParams/);
   assert.match(entranceApp, /activeStyleId === "pulse"/);
@@ -503,6 +544,7 @@ test("keeps local data and rendering modules in the project", async () => {
   assert.match(entranceStyles, /entrance-preview-stage/);
   assert.match(entranceStyles, /position: sticky/);
   assert.match(entranceStyles, /height: 550px/);
+  assert.match(entranceStyles, /\.entrance-empty-state/);
   assert.match(entranceStyles, /entrance-style-picker-backdrop/);
   assert.match(styles, /slice-guide-overlay/);
   assert.match(app, /已隐藏/);
@@ -515,6 +557,7 @@ test("keeps local data and rendering modules in the project", async () => {
   assert.match(app, /beforeunload/);
   assert.match(app, /已保存版本/);
   assert.match(app, /保存后校验不一致/);
+  assert.match(app, /csvPersistenceSnapshot/);
   assert.match(app, /saveCsv/);
   assert.match(app, /saveLayout/);
   assert.match(settingsPanel, /保存显示设置/);

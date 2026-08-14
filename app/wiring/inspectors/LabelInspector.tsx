@@ -1,6 +1,7 @@
 "use client";
 
 import { type LabelAnchor } from "../types";
+import { lineOptionLabel } from "../../transit/types";
 import { type InspectorProps } from "./inspectorProps";
 
 export function LabelInspector({ ctx }: InspectorProps) {
@@ -141,7 +142,7 @@ export function LabelInspector({ ctx }: InspectorProps) {
             <label>绑定线路</label>
             <select value={selectedLabel.sourceLineId || ""} onChange={(event) => updateLabel(selectedLabel.id, { sourceLineId: event.target.value || undefined }, "绑定文字线路") }>
               <option value="">{selectedLabel.attachedToId ? "自动跟随附着模块" : "请选择线路"}</option>
-              {data.lines.map((line) => <option key={line.id} value={line.id}>{line.id} · {line.nameZh}</option>)}
+              {data.lines.map((line) => <option key={line.id} value={line.id}>{lineOptionLabel(line)}</option>)}
             </select>
           </div>
         )}

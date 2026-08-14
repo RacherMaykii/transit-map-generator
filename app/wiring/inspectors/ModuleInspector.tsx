@@ -6,6 +6,7 @@ import { MODULE_TEMPLATES, supportsAvoidanceTracks } from "../templates";
 import { type DiagramModule } from "../types";
 import { MirrorToggle } from "../ui/svgElements";
 import { type InspectorProps } from "./inspectorProps";
+import { lineOptionLabel, stationOptionLabel } from "../../transit/types";
 
 export function ModuleInspector({ ctx }: InspectorProps) {
   const {
@@ -195,7 +196,7 @@ export function ModuleInspector({ ctx }: InspectorProps) {
           {data.lines.map((line) => {
             const checked = selectedMod.lineIds.includes(line.id);
             return (
-              <label key={line.id} className="wiring-line-option" title={`${line.id} · ${line.nameZh}`}>
+              <label key={line.id} className="wiring-line-option" title={lineOptionLabel(line)}>
                 <input
                   type="checkbox"
                   checked={checked}
@@ -206,7 +207,7 @@ export function ModuleInspector({ ctx }: InspectorProps) {
                   )}
                 />
                 <span className="wiring-line-swatch" style={{ background: line.lineColor || "#202124" }} />
-                <span className="wiring-line-name">{line.id} · {line.nameZh}</span>
+                <span className="wiring-line-name">{lineOptionLabel(line)}</span>
               </label>
             );
           })}
@@ -304,9 +305,10 @@ export function ModuleInspector({ ctx }: InspectorProps) {
             }}
           >
             <option value="">添加关联站点…</option>
-            {data.stations.filter((station) => !selectedMod.sourceStationIds.includes(station.id)).map((st) => (
-              <option key={st.id} value={st.id}>{st.nameZh} ({st.id})</option>
-            ))}
+            {data.stations.filter((station) => !selectedMod.sourceStationIds.includes(station.id)).map((station) => {
+              const stationLine = data.lines.find((line) => line.id === station.lineId);
+              return <option key={station.id} value={station.id}>{stationOptionLabel(station, stationLine)}</option>;
+            })}
           </select>
         </div>
         <div className="wiring-station-associations">

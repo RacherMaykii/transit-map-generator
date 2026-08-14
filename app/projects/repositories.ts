@@ -47,6 +47,24 @@ function projectId(): string {
 }
 function cloneData(data: TransitData): TransitData { return structuredClone(normalizeTransitData(data)); }
 
+/** A new city project starts with editor defaults, but no city-specific lines or stations. */
+export function createEmptyTransitData(): TransitData {
+  return cloneData({
+    schemaVersion: 1,
+    lines: [],
+    stations: [],
+    transfers: [],
+    layout: DEFAULT_LAYOUT,
+    activeStyleTemplate: "classic",
+    layoutTemplates: {
+      classic: DEFAULT_LAYOUT,
+      loop: DEFAULT_LOOP_LAYOUT,
+      scenic: DEFAULT_SCENIC_LAYOUT,
+      pulse: DEFAULT_PULSE_LAYOUT,
+    },
+  });
+}
+
 function sampleDataUrl(root: string, name: string): string {
   return `${root.replace(/\/$/, "")}/${name}`;
 }
@@ -182,7 +200,13 @@ export class BrowserProjectRepository implements ProjectRepository {
   async listProjects(): Promise<ProjectSummary[]> { return this.withDb(async (db) => requestValue(db.transaction("projects", "readonly").objectStore("projects").getAll())); }
   async createProject(name: string): Promise<ProjectSummary> {
     const timestamp = now(); const project: ProjectSummary = { id: projectId(), name: safeName(name), createdAt: timestamp, updatedAt: timestamp, storageMode: this.mode };
-    return this.withDb(async (db) => { const tx = db.transaction("projects", "readwrite"); tx.objectStore("projects").add(project); await transactionDone(tx); return project; });
+    return this.withDb(async (db) => {
+      const tx = db.transaction(["projects", "data"], "readwrite");
+      tx.objectStore("projects").add(project);
+      tx.objectStore("data").add(createEmptyTransitData(), project.id);
+      await transactionDone(tx);
+      return project;
+    });
   }
   async deleteProject(id: string): Promise<void> {
     return this.withDb(async (db) => {
@@ -200,7 +224,9 @@ export class BrowserProjectRepository implements ProjectRepository {
   async loadTransitData(id: string): Promise<TransitData> {
     const stored = await this.withDb(async (db) => requestValue<TransitData | undefined>(db.transaction("data", "readonly").objectStore("data").get(id)));
     if (stored) return normalizeTransitData(stored);
-    const seed = await loadSampleTransitData(this.fetcher, this.publicRoot);
+    const seed = id === DEFAULT_PROJECT_ID
+      ? await loadSampleTransitData(this.fetcher, this.publicRoot)
+      : createEmptyTransitData();
     await this.saveRecord(id, seed, false);
     return seed;
   }

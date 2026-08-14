@@ -6,6 +6,7 @@ import {
   DEFAULT_LOOP_LAYOUT,
   DEFAULT_PULSE_LAYOUT,
   DEFAULT_SCENIC_LAYOUT,
+  lineOptionLabel,
   normalizeTransitData,
   Station,
   TransitData,
@@ -3990,7 +3991,7 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
 
   const filterMenuItems: PopoverMenuItem[] = useMemo(() => [
     { kind: "select", id: "service", label: "交路", value: activeServicePatternId, options: [{ value: "", label: "全部交路" }, ...servicePatterns.filter((p) => p.visible).map((p) => ({ value: p.id, label: `${p.id} · ${p.name}` }))], onChange: (v) => { setActiveServicePatternId(v); setFilterLineIds([]); updateFilters({ lineIds: [], servicePatternIds: v ? [v] : [] }); } },
-    { kind: "select", id: "line", label: "线路", value: filterLineIds[0] || "", options: [{ value: "", label: "全部线路" }, ...(data?.lines || []).map((l) => ({ value: l.id, label: `${l.id} · ${l.nameZh}` }))], onChange: (v) => { const ids = v ? [v] : []; setFilterLineIds(ids); setActiveServicePatternId(""); updateFilters({ lineIds: ids, servicePatternIds: [] }); } },
+    { kind: "select", id: "line", label: "线路", value: filterLineIds[0] || "", options: [{ value: "", label: "全部线路" }, ...(data?.lines || []).map((line) => ({ value: line.id, label: lineOptionLabel(line) }))], onChange: (v) => { const ids = v ? [v] : []; setFilterLineIds(ids); setActiveServicePatternId(""); updateFilters({ lineIds: ids, servicePatternIds: [] }); } },
     { kind: "select", id: "mode", label: "显示模式", value: filterState.mode || "target_only", options: [{ value: "target_only", label: "仅目标" }, { value: "retain_transfers", label: "保留换乘" }, { value: "dim_others", label: "弱化其它" }], onChange: (v) => updateFilters({ mode: v as FilterState["mode"] }) },
     { kind: "section", id: "advanced-filters", label: "高级筛选", defaultExpanded: false, items: [
       { kind: "select", id: "station-status", label: "站点状态", value: filterState.stationStatuses?.[0] || "", options: [{ value: "", label: "全部状态" }, { value: "open", label: "已开通" }, { value: "closed", label: "未开通" }, { value: "terminal", label: "终点" }], onChange: (v) => updateFilters({ stationStatuses: v ? [v as "open" | "closed" | "terminal"] : [] }) },

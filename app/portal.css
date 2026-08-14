@@ -139,11 +139,12 @@
 .portal-tools-note { margin-top: auto; padding: 18px 10px 0; border-top: 1px solid rgba(255, 255, 255, .1); color: rgba(255, 255, 255, .48); font-size: 11px; line-height: 1.7; }
 
 .portal-projects { min-width: 0; padding: 34px 38px 26px; display: flex; flex-direction: column; background: rgba(250, 252, 253, .9); }
-.portal-projects-topline { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; padding-bottom: 24px; border-bottom: 1px solid #dce5e9; }
+.portal-projects-topline { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; column-gap: 24px; row-gap: 9px; padding-bottom: 24px; border-bottom: 1px solid #dce5e9; }
+.portal-projects-heading { min-width: 0; }
 .portal-projects-topline p { margin: 0 0 6px; color: #087fa4; font: 800 10px/1 Arial, sans-serif; letter-spacing: .16em; }
 .portal-projects-topline h2 { margin: 0; font-size: 25px; letter-spacing: -.025em; }
-.portal-projects-topline span { display: block; margin-top: 8px; color: #6a7a84; font-size: 12px; }
-.portal-project-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; flex: 0 0 auto; }
+.portal-projects-description { grid-column: 1 / -1; display: block; width: 100%; color: #6a7a84; font-size: 12px; line-height: 1.65; }
+.portal-project-actions { grid-column: 2; grid-row: 1; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .portal-project-actions button, .new-project-form button, .project-placeholder-card button, .project-workspace-bar button {
   min-height: 38px;
   padding: 0 15px;
@@ -169,7 +170,9 @@
 .project-card.is-selected { border-color: #087fa4; box-shadow: 0 0 0 3px rgba(8, 127, 164, .11); }
 .project-card-icon { width: 58px; height: 58px; display: grid; place-items: center; border-radius: 15px; color: #057a9e; background: #dff3f7; font: 900 20px/1 Arial, sans-serif; }
 .project-card-copy { min-width: 0; }
-.project-card-copy > span { color: #0a85a9; font-size: 10px; font-weight: 800; letter-spacing: .08em; }
+.project-card-meta { display: flex; align-items: center; gap: 7px; }
+.project-card-meta > span { color: #0a85a9; font-size: 10px; font-weight: 800; letter-spacing: .08em; }
+.project-card-meta > .is-sample { padding: 3px 7px; border-radius: 999px; background: #fff0ce; color: #a76600; letter-spacing: .04em; }
 .project-card h3 { margin: 5px 0 4px; font-size: 20px; }
 .project-card p { margin: 0; overflow: hidden; color: #71818a; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .project-card > button { padding: 9px 12px; display: flex; align-items: center; gap: 10px; border: 1px solid transparent; border-radius: 9px; color: #087fa4; background: transparent; font-size: 12px; font-weight: 800; }
@@ -294,8 +297,8 @@
   .portal-tools > button b { display: none; }
   .portal-tools-note { display: none; }
   .portal-projects { padding: 24px 18px 20px; }
-  .portal-projects-topline { display: block; }
-  .portal-project-actions { margin-top: 18px; }
+  .portal-projects-topline { display: flex; flex-direction: column; gap: 10px; }
+  .portal-project-actions { width: 100%; margin-top: 8px; justify-content: flex-start; }
   .new-project-form { grid-template-columns: 1fr 1fr; }
   .new-project-form label, .new-project-form input { grid-column: 1 / -1; }
   .project-card { grid-template-columns: 48px minmax(0, 1fr); }

@@ -40,6 +40,23 @@ test("CSV diff detects changed fields as well as additions and removals", () => 
   assert.equal(diff.changedTransfers, 1);
 });
 
+test("CSV save verification treats omitted optional cells like their round-trip defaults", () => {
+  const beforeWrite = {
+    lines: [],
+    stations: [{
+      id: "S1", lineId: "L1", sequence: 1, nameZh: "测试站", nameEn: "Test Station",
+      code: "L1-01", markerColor: "#00a8ff", terminalType: "normal", isOpen: true,
+      throughLineIds: [], notes: "",
+    }],
+    transfers: [{ id: "T1", stationId: "S1", targetLineId: "L2", order: 1, colorOverride: "", hidden: false }],
+  };
+  const afterRead = structuredClone(beforeWrite);
+  afterRead.stations[0].icon = "";
+  assert.equal(csv.csvPersistenceSnapshot(beforeWrite), csv.csvPersistenceSnapshot(afterRead));
+  afterRead.stations[0].nameZh = "另一个站名";
+  assert.notEqual(csv.csvPersistenceSnapshot(beforeWrite), csv.csvPersistenceSnapshot(afterRead));
+});
+
 test("CSV parsing reports file, row and field through PapaParse and Zod", () => {
   const parsed = csv.parseCsvFile("stations.csv", "id,line_id,sequence,name_zh,is_open\nS1,L1,abc,测试站,maybe\n");
   assert.ok(parsed);

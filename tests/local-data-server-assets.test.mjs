@@ -70,6 +70,14 @@ test("project data is isolated between projects on the local data server", async
   assert.notEqual(first.id, second.id, "each project gets a unique id");
   assert.ok(first.id.startsWith("project-"), "server ids use the project- prefix");
 
+  const initialFirst = await (await fetch(`${origin}/api/data?project=${first.id}`)).json();
+  const initialSecond = await (await fetch(`${origin}/api/data?project=${second.id}`)).json();
+  for (const initial of [initialFirst, initialSecond]) {
+    assert.deepEqual(initial.lines, [], "new projects do not copy the default city's lines");
+    assert.deepEqual(initial.stations, [], "new projects do not copy the default city's stations");
+    assert.deepEqual(initial.transfers, [], "new projects do not copy the default city's transfers");
+  }
+
   const payloadFor = (nameZh) => ({
     schemaVersion: 1,
     lines: [{ id: "L1", kind: "metro", number: "1", nameZh, nameEn: nameZh, code: "1", lineColor: "#111111", stationColor: "#222222", currentColor: "#333333", passedColor: "#444444", textColor: "#ffffff", description: "" }],

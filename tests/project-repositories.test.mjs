@@ -48,3 +48,13 @@ test("factory selects static, HTTP, and browser modes without exposing host deta
   assert.equal(repositories.createProjectRepository({ storageMode: "http", host: "http://example.test/api" }).mode, "http");
   assert.equal(repositories.createProjectRepository({ storageMode: "browser" }).mode, "browser");
 });
+
+test("new browser projects use empty transit data instead of the bundled Void City sample", () => {
+  const data = repositories.createEmptyTransitData();
+  assert.deepEqual(data.lines, []);
+  assert.deepEqual(data.stations, []);
+  assert.deepEqual(data.transfers, []);
+  assert.equal(data.activeStyleTemplate, "classic");
+  assert.ok(data.layoutTemplates.classic);
+  assert.ok(data.layoutTemplates.loop);
+});

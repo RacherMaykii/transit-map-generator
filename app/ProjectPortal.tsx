@@ -92,7 +92,12 @@ export default function ProjectPortal() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [transferring, setTransferring] = useState(false);
-  const [opened, setOpened] = useState<{ tool: ToolKind; project: ProjectSummary } | null>(null);
+  const [opened, setOpened] = useState<{
+    tool: ToolKind;
+    project: ProjectSummary;
+    intent?: "add-station";
+    targetLineId?: string;
+  } | null>(null);
   const [transferDialog, setTransferDialog] = useState<TransferDialog>(null);
   const [transferMode, setTransferMode] = useState<TransferMode>("full");
   const [projectImportFile, setProjectImportFile] = useState<File | null>(null);
@@ -187,7 +192,6 @@ export default function ProjectPortal() {
     setError("");
     try {
       const project = await repository.createProject(name);
-      await repository.loadTransitData(project.id);
       setProjects((current) => [...current, project]);
       setSelectedId(project.id);
       setNewName("");
@@ -322,9 +326,24 @@ export default function ProjectPortal() {
         </div>
         <Suspense fallback={<main className="loading-shell"><div className="loading-card"><h1>正在打开编辑器…</h1><p>项目数据仍保存在本机。</p></div></main>}>
           {opened.tool === "sign"
-            ? <TransitMapApp key={editorKey} projectId={opened.project.id} repository={repository} onNavigationStateChange={updateEditorNavigationGuard} />
+            ? <TransitMapApp
+                key={editorKey}
+                projectId={opened.project.id}
+                repository={repository}
+                onNavigationStateChange={updateEditorNavigationGuard}
+                initialAction={opened.intent}
+                initialLineId={opened.targetLineId}
+              />
             : opened.tool === "name"
-              ? <EntranceSignApp key={editorKey} projectId={opened.project.id} repository={repository} />
+              ? <EntranceSignApp
+                  key={editorKey}
+                  projectId={opened.project.id}
+                  repository={repository}
+                  onRequestAddStation={(targetLineId) => {
+                    setTool("sign");
+                    setOpened({ tool: "sign", project: opened.project, intent: "add-station", targetLineId });
+                  }}
+                />
               : <WiringDiagramApp key={editorKey} projectId={opened.project.id} repository={repository} />}
         </Suspense>
         {leaveDialogOpen && (
@@ -393,7 +412,8 @@ export default function ProjectPortal() {
 
         <div className="portal-projects">
           <div className="portal-projects-topline">
-            <div><p>{copy.eyebrow}</p><h2>{copy.title}</h2><span>{copy.description}</span></div>
+            <div className="portal-projects-heading"><p>{copy.eyebrow}</p><h2>{copy.title}</h2></div>
+            <span className="portal-projects-description">{copy.description}</span>
             <div className="portal-project-actions">
               <button type="button" onClick={() => setCreating(true)} disabled={transferring || !repository?.capabilities.canCreateProjects}>＋ 新建项目</button>
               <button type="button" onClick={() => openTransferDialog("import")} disabled={transferring || !repository?.capabilities.canCreateProjects}>导入项目</button>
@@ -422,7 +442,14 @@ export default function ProjectPortal() {
                   if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelectedId(project.id); }
                 }}>
                   <div className="project-card-icon"><ToolSymbol kind={tool} /></div>
-                  <div className="project-card-copy"><span>城市项目</span><h3>{project.name}</h3><p>三个编辑器共享该项目的线路、站点与换乘数据</p></div>
+                  <div className="project-card-copy">
+                    <div className="project-card-meta">
+                      <span>城市项目</span>
+                      {project.id === DEFAULT_PROJECT_ID && <span className="is-sample">示例数据</span>}
+                    </div>
+                    <h3>{project.name}</h3>
+                    <p>三个编辑器共享该项目的线路、站点与换乘数据</p>
+                  </div>
                   <button type="button" onClick={(event) => { event.stopPropagation(); setOpened({ tool, project }); }}>打开项目 <b aria-hidden="true">→</b></button>
                 </article>
               );

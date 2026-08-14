@@ -502,6 +502,20 @@ export function stationsForLine(data: TransitData, lineId: string): Station[] {
     .sort((a, b) => a.sequence - b.sequence);
 }
 
+/** 面向用户显示站点时使用业务名称与代号，避免暴露内部关联 ID。 */
+export function lineOptionLabel(line: TransitLine): string {
+  const lineName = line.nameZh.trim() || "未命名线路";
+  const lineCode = line.code.trim();
+  return `${lineName}${lineCode ? `（${lineCode}）` : ""}`;
+}
+
+export function stationOptionLabel(station: Station, line?: TransitLine): string {
+  const stationName = station.nameZh.trim() || "未命名站点";
+  const lineName = line?.nameZh.trim() || "未知线路";
+  const stationCode = station.code.trim();
+  return `${stationName} · ${lineName}${stationCode ? `（${stationCode}）` : ""}`;
+}
+
 export function stationCodeParts(station: Station, line: TransitLine): { lineCode: string; stationCode: string } {
   const code = station.code.trim();
   const match = code.match(/^(.+)[\-_\/]([^\-_\/]+)$/);

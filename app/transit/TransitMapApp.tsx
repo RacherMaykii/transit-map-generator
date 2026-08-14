@@ -42,6 +42,7 @@ import type { EditorNavigationGuard } from "../projects/editorNavigation";
 import { nextIndexForDirection, previousIndexForDirection, stepForDirection, terminusForDirection, terminusSideFor, visualDirectionFor } from "./route-orientation.mjs";
 import {
   buildImportPreview,
+  csvPersistenceSnapshot,
   CsvImportPreview,
   detectCsvType,
   hasBlockingIssues,
@@ -158,7 +159,7 @@ function cloneData(data: TransitData): TransitData {
 }
 
 function csvSnapshot(data: TransitData) {
-  return JSON.stringify({ lines: data.lines, stations: data.stations, transfers: data.transfers });
+  return csvPersistenceSnapshot(data);
 }
 
 function layoutSnapshot(data: Pick<TransitData, "activeStyleTemplate" | "layoutTemplates" | "layout" | "lineStyleTemplates">) {
@@ -190,6 +191,8 @@ interface TransitMapAppProps {
   projectId?: string;
   repository?: ProjectRepository;
   onNavigationStateChange?: (guard: EditorNavigationGuard | null) => void;
+  initialAction?: "add-station";
+  initialLineId?: string;
 }
 
 /** 站点删除确认弹窗的数据（删除前的统计 + 影响）。 */
@@ -211,6 +214,8 @@ export default function TransitMapApp({
   projectId = DEFAULT_PROJECT_ID,
   repository,
   onNavigationStateChange,
+  initialAction,
+  initialLineId,
 }: TransitMapAppProps) {
   const projectRepository = useMemo(
     () => repository || createProjectRepository({ storageMode: "http" }),
@@ -298,14 +303,24 @@ export default function TransitMapApp({
         setSavedCsvSnapshot(csvSnapshot(normalized));
         setSavedLayoutSnapshot(layoutSnapshot(normalized));
         const firstWithStations = normalized.lines.find((line) => stationsForLine(normalized, line.id).length);
-        setLineId(normalized.lines.some((line) => line.id === "L4") ? "L4" : firstWithStations?.id || normalized.lines[0]?.id || "");
-        setStatus("CSV 已载入");
+        const preferredLineId = initialLineId && normalized.lines.some((line) => line.id === initialLineId)
+          ? initialLineId
+          : normalized.lines.some((line) => line.id === "L4") ? "L4" : firstWithStations?.id || normalized.lines[0]?.id || "";
+        setLineId(preferredLineId);
+        if (initialAction === "add-station") {
+          setActiveTable(normalized.lines.length ? "stations" : "lines");
+          setStatus(normalized.lines.length
+            ? "请在下方站点表点击“添加站点”"
+            : "请先在下方新建线路，再添加站点");
+        } else {
+          setStatus("CSV 已载入");
+        }
       })
       .catch((reason) => {
         setError(reason instanceof Error ? reason.message : "读取项目数据失败");
         setStatus("数据服务离线");
       });
-  }, [projectId, projectRepository]);
+  }, [initialAction, initialLineId, projectId, projectRepository]);
 
   const line = useMemo(
     () => data?.lines.find((candidate) => candidate.id === lineId),
@@ -633,7 +648,12 @@ export default function TransitMapApp({
   }
 
   function addStation() {
-    if (!data || !line) return;
+    if (!data) return;
+    if (!line) {
+      setActiveTable("lines");
+      setStatus("请先新建线路，再添加站点");
+      return;
+    }
     const sequence = stations.length + 1;
     const station: Station = {
       id: `${line.id}-S${Date.now()}`,
@@ -775,6 +795,7 @@ export default function TransitMapApp({
       description: "轨道交通",
     };
     commit({ ...data, lines: [...data.lines, next], lineStyleTemplates: { ...data.lineStyleTemplates, [id]: data.activeStyleTemplate } });
+    selectPreviewLine(id);
     setEditingLineId(id);
   }
 
@@ -1156,7 +1177,8 @@ export default function TransitMapApp({
         <div className="preview-toolbar">
           <div className="control-group line-picker">
             <label htmlFor="line-select">预览线路</label>
-            <select id="line-select" value={lineId} onChange={(event) => selectPreviewLine(event.target.value)}>
+            <select id="line-select" value={lineId} disabled={!data.lines.length} onChange={(event) => selectPreviewLine(event.target.value)}>
+              {!data.lines.length && <option value="">请先新建线路</option>}
               {data.lines.map((candidate) => (
                 <option key={candidate.id} value={candidate.id}>
                   {candidate.nameZh} · {candidate.code}{stationsForLine(data, candidate.id).length ? "" : "（无站点）"}
@@ -1235,7 +1257,9 @@ export default function TransitMapApp({
               {showSliceGuides && <SliceGuideOverlay count={stations.length + 2} tileSize={data.layout.tileSize} zoom={zoom} />}
             </div>
           ) : (
-            <div className="empty-preview">该线路还没有站点，请在下方添加。</div>
+            <div className="empty-preview">
+              {data.lines.length ? "该线路还没有站点，请在下方添加。" : "当前项目还没有线路，请先在下方新建线路。"}
+            </div>
           )}
         </div>
 
@@ -1290,7 +1314,7 @@ export default function TransitMapApp({
             <button className="secondary-button" onClick={() => csvImportRef.current?.click()}>导入 CSV</button>
             <input ref={csvImportRef} hidden type="file" accept=".csv,text/csv" multiple onChange={(event) => void handleCsvImportSelect(event)} />
             {activeTable === "stations" ? (
-              <button className="primary-button" onClick={addStation} disabled={!line}>添加站点</button>
+              <button className="primary-button" onClick={addStation}>添加站点</button>
             ) : (
               <button className="primary-button" onClick={addLine}>添加线路</button>
             )}
@@ -1335,7 +1359,19 @@ export default function TransitMapApp({
                 })}
               </tbody>
             </table>
-            {!stations.length && <div className="empty-table">暂无站点。点击“添加站点”建立第一站。</div>}
+            {!stations.length && (
+              <div className={`empty-table ${!data.lines.length ? "is-guided" : ""}`}>
+                {data.lines.length ? (
+                  <span>暂无站点。点击“添加站点”建立第一站。</span>
+                ) : (
+                  <>
+                    <strong>当前项目还没有线路</strong>
+                    <span>需要先建立一条线路，才能添加属于该线路的站点。</span>
+                    <button className="primary-button" onClick={() => setActiveTable("lines")}>前往新建线路</button>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         ) : (
           <div className="table-scroll">
@@ -1359,6 +1395,13 @@ export default function TransitMapApp({
                 ))}
               </tbody>
             </table>
+            {!data.lines.length && (
+              <div className="empty-table is-guided">
+                <strong>还没有线路数据</strong>
+                <span>点击“新建第一条线路”，填写线路编号、名称、代号与颜色。</span>
+                <button className="primary-button" onClick={addLine}>新建第一条线路</button>
+              </div>
+            )}
           </div>
         )}
       </section>
@@ -1640,7 +1683,7 @@ export default function TransitMapApp({
 
       {pendingStationDelete && (
         <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && setPendingStationDelete(null)}>
-          <section className="editor-modal confirm-modal" role="dialog" aria-modal="true" aria-labelledby="station-delete-title">
+          <section className="editor-modal confirm-modal" role="alertdialog" aria-modal="true" aria-labelledby="station-delete-title">
             <div className="modal-heading">
               <div><p className="eyebrow">危险操作</p><h2 id="station-delete-title">删除站点</h2></div>
               <button className="close-button" onClick={() => setPendingStationDelete(null)}>×</button>
@@ -1674,7 +1717,7 @@ export default function TransitMapApp({
 
       {pendingLineDelete && (
         <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && setPendingLineDelete(null)}>
-          <section className="editor-modal confirm-modal" role="dialog" aria-modal="true" aria-labelledby="line-delete-title">
+          <section className="editor-modal confirm-modal" role="alertdialog" aria-modal="true" aria-labelledby="line-delete-title">
             <div className="modal-heading">
               <div><p className="eyebrow">危险操作</p><h2 id="line-delete-title">删除线路</h2></div>
               <button className="close-button" onClick={() => setPendingLineDelete(null)}>×</button>

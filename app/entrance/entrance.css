@@ -5,6 +5,10 @@
 .entrance-preview-layout { display: grid; grid-template-columns: minmax(680px, 1fr) minmax(470px, 500px); align-items: start; gap: 22px; padding: 20px; background: #f4f7f8; }
 .entrance-preview-column { min-width: 0; min-height: 550px; overflow: hidden; display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 16px; background: white; }
 .entrance-preview-stage { flex: 1 1 auto; min-height: 0; display: grid; place-items: center; align-content: center; }
+.entrance-empty-state { max-width: 520px; margin: auto; padding: 32px; display: flex; flex-direction: column; justify-content: center; gap: 10px; text-align: center; }
+.entrance-empty-state strong { color: var(--ink); font-size: 18px; }
+.entrance-empty-state span { max-width: 460px; line-height: 1.7; }
+.entrance-empty-state button { align-self: center; margin-top: 5px; }
 .entrance-canvas-paper { margin: 0 auto; transform-origin: center; overflow: hidden; transition: width .15s ease, height .15s ease; }
 .entrance-controller { flex-wrap: wrap; }
 .entrance-quick-export { flex-wrap: wrap; }

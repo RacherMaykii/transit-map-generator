@@ -1,6 +1,7 @@
 "use client";
 
 import { type InspectorProps } from "./inspectorProps";
+import { lineOptionLabel } from "../../transit/types";
 
 export function TransferGroupInspector({ ctx }: InspectorProps) {
   const {
@@ -58,7 +59,7 @@ export function TransferGroupInspector({ ctx }: InspectorProps) {
             return (
               <span key={lineId} className="wiring-line-badge" style={{ borderColor: line?.lineColor || "#999" }}>
                 <i style={{ background: line?.lineColor || "#999" }} />
-                {lineId} {line?.nameZh || ""}
+                {line ? lineOptionLabel(line) : "源线路已删除"}
               </span>
             );
           })}

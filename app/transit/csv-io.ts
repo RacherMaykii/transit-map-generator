@@ -24,6 +24,30 @@ export const TRANSFERS_COLUMNS = [
 
 export type CsvFileType = "lines" | "stations" | "transfers";
 
+/**
+ * Produces the semantic snapshot that survives a CSV write/read round trip.
+ * Optional CSV cells are restored as empty strings, while boolean cells are
+ * restored as explicit booleans. Comparing this snapshot prevents a successful
+ * save from being reported as failed merely because `undefined` became `""`.
+ */
+export function csvPersistenceSnapshot(data: Pick<TransitData, "lines" | "stations" | "transfers">): string {
+  return JSON.stringify({
+    lines: data.lines,
+    stations: data.stations.map((station) => ({
+      ...station,
+      isOpen: station.isOpen !== false,
+      throughLineIds: station.throughLineIds || [],
+      notes: station.notes || "",
+      icon: station.icon || "",
+    })),
+    transfers: data.transfers.map((transfer) => ({
+      ...transfer,
+      colorOverride: transfer.colorOverride || "",
+      hidden: transfer.hidden === true,
+    })),
+  });
+}
+
 export const CSV_FILE_PATTERNS: { type: CsvFileType; label: string; headers: readonly string[] }[] = [
   { type: "lines", label: "线路表", headers: LINES_COLUMNS },
   { type: "stations", label: "站点表", headers: STATIONS_COLUMNS },

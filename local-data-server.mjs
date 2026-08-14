@@ -11,6 +11,11 @@ const LAYOUT_TEMPLATES_FILE = "layout-templates.json";
 const DEFAULT_PROJECT_ID = "default";
 const PORT = Number(process.env.TRANSIT_DATA_PORT || 4175);
 const CSV_FILES = ["lines.csv", "stations.csv", "transfers.csv"];
+const EMPTY_PROJECT_CSV = {
+  "lines.csv": stringifyCsv(["id", "kind", "number", "name_zh", "name_en", "code", "line_color", "station_color", "current_color", "passed_color", "text_color", "description"], []),
+  "stations.csv": stringifyCsv(["id", "line_id", "sequence", "name_zh", "name_en", "code", "marker_color", "terminal_type", "through_line_ids", "notes", "is_open", "icon"], []),
+  "transfers.csv": stringifyCsv(["id", "station_id", "target_line_id", "order", "color_override", "hidden"], []),
+};
 const ICON_EXTENSIONS = new Set([".ico", ".jpg", ".jpeg", ".png"]);
 const CUSTOM_ASSET_MANIFEST = "custom-assets.json";
 
@@ -537,13 +542,17 @@ async function createProject(name) {
   const dir = path.join(PROJECTS_ROOT, id);
   await mkdir(path.join(dir, "history"), { recursive: true });
   await mkdir(path.join(dir, "icons"), { recursive: true });
-  // Seed from the default project so a new project starts as a copy of the current city.
-  await Promise.all([...CSV_FILES, "layout.json", LAYOUT_TEMPLATES_FILE].map(async (name) => {
-    await copyFile(path.join(DATA_DIR, name), path.join(dir, name)).catch((error) => {
-      if (error?.code === "ENOENT") return writeFile(path.join(dir, name), name === "layout.json" ? "{}" : "", "utf8");
-      throw error;
-    });
-  }));
+  // User-created projects inherit only display defaults. City content and
+  // uploaded resources are intentionally exclusive to the built-in sample.
+  await Promise.all([
+    ...CSV_FILES.map((fileName) => writeFile(path.join(dir, fileName), EMPTY_PROJECT_CSV[fileName], "utf8")),
+    ...["layout.json", LAYOUT_TEMPLATES_FILE].map(async (fileName) => {
+      await copyFile(path.join(DATA_DIR, fileName), path.join(dir, fileName)).catch((error) => {
+        if (error?.code === "ENOENT") return writeFile(path.join(dir, fileName), fileName === "layout.json" ? "{}" : "", "utf8");
+        throw error;
+      });
+    }),
+  ]);
   const timestamp = new Date().toISOString();
   const meta = { id, name: safeProjectName(name), createdAt: timestamp, updatedAt: timestamp };
   await writeFile(path.join(dir, "project.json"), `${JSON.stringify(meta, null, 2)}\n`, "utf8");

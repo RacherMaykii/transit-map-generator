@@ -1,7 +1,7 @@
 "use client";
 
 import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { cleanFilePart, normalizeTransitData, Station, TransitData, stationsForLine } from "../transit/types";
+import { cleanFilePart, normalizeTransitData, Station, stationOptionLabel, TransitData, stationsForLine } from "../transit/types";
 import { canvasPngBytes, createStoredZip, ZipEntry } from "../transit/zip";
 import { downloadBlob } from "../lib/browser";
 import SliceGuideOverlay from "../transit/SliceGuideOverlay";
@@ -49,6 +49,7 @@ function stationIconOptions(data: TransitData, station: Station | undefined): st
 interface EntranceSignAppProps {
   projectId?: string;
   repository?: ProjectRepository;
+  onRequestAddStation?: (lineId?: string) => void;
 }
 
 type EntranceEditorDocument = {
@@ -86,7 +87,7 @@ function normalizeEntranceDocument(source: Record<string, unknown> | null): Entr
   };
 }
 
-export default function EntranceSignApp({ projectId = DEFAULT_PROJECT_ID, repository }: EntranceSignAppProps) {
+export default function EntranceSignApp({ projectId = DEFAULT_PROJECT_ID, repository, onRequestAddStation }: EntranceSignAppProps) {
   const projectRepository = useMemo(
     () => repository || createProjectRepository({ storageMode: "http" }),
     [repository],
@@ -545,14 +546,16 @@ export default function EntranceSignApp({ projectId = DEFAULT_PROJECT_ID, reposi
         <div className="preview-toolbar entrance-toolbar">
           <div className="control-group line-picker">
             <label htmlFor="entrance-line">线路</label>
-            <select id="entrance-line" value={lineId} onChange={(event) => selectLine(event.target.value)}>
+            <select id="entrance-line" value={lineId} disabled={!data.lines.length} onChange={(event) => selectLine(event.target.value)}>
+              {!data.lines.length && <option value="">请先在线路站序图中创建线路</option>}
               {data.lines.map((candidate) => <option key={candidate.id} value={candidate.id}>{displayLineName(candidate)}</option>)}
             </select>
           </div>
           <div className="control-group entrance-station-picker">
             <label htmlFor="entrance-station">站点</label>
-            <select id="entrance-station" value={station?.id || ""} onChange={(event) => setStationIndex(stations.findIndex((candidate) => candidate.id === event.target.value))}>
-              {stations.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.nameZh} · {candidate.nameEn}</option>)}
+            <select id="entrance-station" value={station?.id || ""} disabled={!stations.length} onChange={(event) => setStationIndex(stations.findIndex((candidate) => candidate.id === event.target.value))}>
+              {!stations.length && <option value="">当前线路暂无站点</option>}
+              {stations.map((candidate) => <option key={candidate.id} value={candidate.id}>{stationOptionLabel(candidate, line)}</option>)}
             </select>
           </div>
           <div className="toolbar-spacer" />
@@ -671,7 +674,21 @@ export default function EntranceSignApp({ projectId = DEFAULT_PROJECT_ID, reposi
               </svg>
               {showSliceGuides && <SliceGuideOverlay count={5} tileSize={128} zoom={zoom} />}
             </div>
-          ) : <div className="empty-preview">当前线路没有可用站点</div>}
+          ) : (
+            <div className="empty-preview entrance-empty-state">
+              <strong>{data.lines.length ? "当前线路还没有站点" : "当前项目还没有线路和站点"}</strong>
+              <span>
+                {data.lines.length
+                  ? "请前往“线路站序图生成”编辑器，在下方站点表点击“添加站点”。"
+                  : "请前往“线路站序图生成”编辑器，先新建线路，再点击“添加站点”。"}
+              </span>
+              {onRequestAddStation && (
+                <button type="button" className="primary-button" onClick={() => onRequestAddStation(lineId || undefined)}>
+                  前往添加站点
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="station-controller entrance-controller">

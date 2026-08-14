@@ -195,6 +195,10 @@ code { font-family: Consolas, "SFMono-Regular", monospace; font-size: 11px; back
 .open-state-button.is-open { color: #13713a; background: #e2f6e9; }
 .open-state-button.is-closed { color: #8a4b3c; background: #f8eae6; }
 .empty-table { padding: 32px; text-align: center; color: var(--muted); font-size: 13px; }
+.empty-table.is-guided { min-height: 150px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px; }
+.empty-table.is-guided strong { color: var(--ink); font-size: 16px; }
+.empty-table.is-guided span { max-width: 520px; line-height: 1.65; }
+.empty-table.is-guided button { margin-top: 5px; }
 
 .app-footer { max-width: 1600px; margin: 0 auto; display: flex; justify-content: space-between; color: #7b8991; font-size: 11px; padding: 2px 4px; }
 .error-banner { max-width: 1600px; margin: 0 auto 12px; padding: 10px 14px; border: 1px solid #f4c6b0; border-radius: 10px; background: #fff1ea; color: #9b421c; display: flex; justify-content: space-between; font-size: 12px; }
@@ -236,7 +240,9 @@ code { font-family: Consolas, "SFMono-Regular", monospace; font-size: 11px; back
 .danger-button { min-height: 36px; padding: 0 12px; border-radius: 8px; color: #a63838; background: #fff0f0; font-weight: 700; }
 .danger-button:hover { background: #ffe3e3; }
 .danger-text { color: #a63838; font-weight: 600; }
-.confirm-modal { width: min(480px, 100%); }
+.confirm-modal { width: min(540px, 100%); }
+.confirm-modal .modal-scroll-body { padding: 20px 22px; }
+.confirm-modal .modal-actions { justify-content: flex-end; border-top: 1px solid var(--border); }
 .confirm-question { margin: 4px 0 10px; font-size: 16px; font-weight: 700; line-height: 1.5; }
 .confirm-scope { margin: 2px 0; color: #5c686e; font-size: 12px; }
 .confirm-list { margin: 12px 0; padding-left: 20px; color: #2e3940; font-size: 13px; line-height: 1.8; }

@@ -10,6 +10,7 @@ import {
   type Direction,
   type LayoutConfig,
   type Station,
+  stationOptionLabel,
   type StyleTemplateId,
   type TransitData,
   type TransitLine,
@@ -484,7 +485,7 @@ export function SettingsPanel({
                     <span>实时预览</span>
                     <select aria-label="选择设置预览站点" value={currentIndex} onChange={(event) => setCurrentIndex(Number(event.target.value))} disabled={!stations.length}>
                       {stations.map((station, index) => (
-                        <option key={station.id} value={index}>{station.sequence}. {station.nameZh}{data.transfers.some((transfer) => transfer.stationId === station.id && !transfer.hidden) ? " · 换乘站" : ""}</option>
+                        <option key={station.id} value={index}>{station.sequence}. {stationOptionLabel(station, line)}{data.transfers.some((transfer) => transfer.stationId === station.id && !transfer.hidden) ? " · 换乘站" : ""}</option>
                       ))}
                     </select>
                   </div>
