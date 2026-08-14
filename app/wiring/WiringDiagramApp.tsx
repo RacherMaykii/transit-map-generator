@@ -3471,40 +3471,63 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
     return { x: left, y: top, width: Math.max(1, right - left), height: Math.max(1, bottom - top) };
   }
 
-  function exportSvg() {
+  async function exportSvg() {
     const svg = svgRef.current;
     if (!svg) return;
-    const bounds = getExportBounds();
-    const str = svgToString(svg, bounds, exportIncludeBackground, exportTransparent);
-    downloadBlob(new Blob([str], { type: "image/svg+xml;charset=utf-8" }), `${activePage?.name || "配线图"}.svg`);
-    setStatus(`已导出「${activePage?.name || "配线图"}」SVG`);
+    try {
+      setStatus("正在整理导出资源…");
+      const bounds = getExportBounds();
+      const str = await svgToString(svg, bounds, exportIncludeBackground, exportTransparent);
+      downloadBlob(new Blob([str], { type: "image/svg+xml;charset=utf-8" }), `${activePage?.name || "配线图"}.svg`);
+      setStatus(`已导出「${activePage?.name || "配线图"}」SVG`);
+    } catch (error) {
+      setStatus(`导出失败：${error instanceof Error ? error.message : "无法读取背景图"}`);
+    }
   }
 
-  function exportPng(scale: number) {
+  async function exportPng(scale: number) {
     const svg = svgRef.current;
     if (!svg) return;
-    const bounds = getExportBounds();
-    const str = svgToString(svg, bounds, exportIncludeBackground, exportTransparent);
-    const w = Math.round(bounds.width * scale);
-    const h = Math.round(bounds.height * scale);
-    const img = new Image();
-    img.onload = () => {
-      const canvas = document.createElement("canvas");
-      canvas.width = w;
-      canvas.height = h;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
-      if (!exportTransparent) {
-        ctx.fillStyle = activePage?.backgroundColor || "white";
-        ctx.fillRect(0, 0, w, h);
-      }
-      ctx.drawImage(img, 0, 0, w, h);
-      canvas.toBlob((blob) => {
-        if (blob) downloadBlob(blob, `${activePage?.name || "配线图"}_${scale}x.png`);
-        setStatus(`已导出「${activePage?.name || "配线图"}」${scale}× PNG`);
-      });
-    };
-    img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(str);
+    try {
+      setStatus("正在整理背景图并生成 PNG…");
+      const bounds = getExportBounds();
+      const str = await svgToString(svg, bounds, exportIncludeBackground, exportTransparent);
+      const w = Math.round(bounds.width * scale);
+      const h = Math.round(bounds.height * scale);
+      const svgUrl = URL.createObjectURL(new Blob([str], { type: "image/svg+xml;charset=utf-8" }));
+      const img = new Image();
+      img.onload = () => {
+        URL.revokeObjectURL(svgUrl);
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          setStatus("导出失败：浏览器无法创建图片画布");
+          return;
+        }
+        if (!exportTransparent) {
+          ctx.fillStyle = activePage?.backgroundColor || "white";
+          ctx.fillRect(0, 0, w, h);
+        }
+        ctx.drawImage(img, 0, 0, w, h);
+        canvas.toBlob((blob) => {
+          if (!blob) {
+            setStatus("导出失败：浏览器无法编码 PNG");
+            return;
+          }
+          downloadBlob(blob, `${activePage?.name || "配线图"}_${scale}x.png`);
+          setStatus(`已导出「${activePage?.name || "配线图"}」${scale}× PNG`);
+        }, "image/png");
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(svgUrl);
+        setStatus("导出失败：导出画面无法栅格化");
+      };
+      img.src = svgUrl;
+    } catch (error) {
+      setStatus(`导出失败：${error instanceof Error ? error.message : "无法读取背景图"}`);
+    }
   }
 
   function createNewCanvas() {

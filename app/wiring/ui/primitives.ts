@@ -72,8 +72,38 @@ export const PLACEMENT_Z_LEVELS = [
   { label: "背景", value: -100 },
 ] as const;
 
-/** 生成不含编辑辅助元素的独立 SVG。 */
-export function svgToString(svg: SVGSVGElement, bounds: ExportBounds, includeBackground: boolean, transparent: boolean): string {
+async function blobToDataUrl(blob: Blob): Promise<string> {
+  if (typeof FileReader !== "undefined") {
+    return await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error || new Error("读取图片资源失败"));
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+  }
+  return `data:${blob.type || "application/octet-stream"};base64,${btoa(binary)}`;
+}
+
+/** 把外部路径或 blob URL 转成可随 SVG 一起导出的内嵌图片。 */
+export async function exportImageSourceToDataUrl(
+  source: string,
+  fetcher: typeof fetch = fetch,
+): Promise<string> {
+  if (!source || source.startsWith("data:")) return source;
+  const response = await fetcher(source);
+  if (!response.ok) throw new Error(`背景图读取失败（HTTP ${response.status}）`);
+  return blobToDataUrl(await response.blob());
+}
+
+/** 生成不含编辑辅助元素、且图片资源已内嵌的独立 SVG。 */
+export async function svgToString(svg: SVGSVGElement, bounds: ExportBounds, includeBackground: boolean, transparent: boolean): Promise<string> {
   const clone = svg.cloneNode(true) as SVGSVGElement;
   clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
   clone.setAttribute("width", String(bounds.width));
@@ -81,11 +111,12 @@ export function svgToString(svg: SVGSVGElement, bounds: ExportBounds, includeBac
   clone.setAttribute("viewBox", `${bounds.x} ${bounds.y} ${bounds.width} ${bounds.height}`);
   clone.querySelector(".canvas-bg")?.remove();
   clone.querySelectorAll(".grid-group, .selection-box, .port, .track-control-handle, .crossing-point, .crossing-label, .connection-preview, .module-ghost, .bg-image-selection, .bg-image-unlock, .label-anchor").forEach((node) => node.remove());
-  clone.querySelectorAll<SVGImageElement>("image[data-export-src]").forEach((node) => {
-    node.setAttribute("href", node.getAttribute("data-export-src") || node.getAttribute("href") || "");
-    node.removeAttribute("data-export-src");
-  });
   if (!includeBackground) clone.querySelectorAll(".bg-image").forEach((node) => node.remove());
+  await Promise.all(Array.from(clone.querySelectorAll<SVGImageElement>("image[data-export-src]")).map(async (node) => {
+    const source = node.getAttribute("data-export-src") || node.getAttribute("href") || "";
+    node.setAttribute("href", await exportImageSourceToDataUrl(source));
+    node.removeAttribute("data-export-src");
+  }));
   const viewportGroup = clone.querySelector("g[transform]");
   viewportGroup?.removeAttribute("transform");
   const paper = clone.querySelector(".canvas-paper");

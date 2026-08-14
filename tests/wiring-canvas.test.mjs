@@ -7,6 +7,7 @@ const canvas = await server.ssrLoadModule("/app/wiring/canvasLogic.ts");
 const projectStore = await server.ssrLoadModule("/app/wiring/projectStore.ts");
 const templatesMod = await server.ssrLoadModule("/app/wiring/templates.ts");
 const avoidance = await server.ssrLoadModule("/app/wiring/labelAvoidance.ts");
+const primitives = await server.ssrLoadModule("/app/wiring/ui/primitives.ts");
 after(() => server.close());
 
 const TEMPLATES = new Map(templatesMod.MODULE_TEMPLATES.map((template) => [template.id, template]));
@@ -41,6 +42,27 @@ test("background helpers fit, center and restore original scale", () => {
   assert.equal(fitted.y, 0);
   assert.deepEqual({ x: canvas.centerBackgroundOnCanvas(image, page).x, y: canvas.centerBackgroundOnCanvas(image, page).y }, { x: 400, y: 150 });
   assert.equal(canvas.restoreBackgroundSize(image).scale, 1);
+});
+
+test("PNG/SVG export embeds path-backed background images", async () => {
+  let requested = "";
+  const converted = await primitives.exportImageSourceToDataUrl("/assets/map.png", async (source) => {
+    requested = String(source);
+    return new Response(new Uint8Array([137, 80, 78, 71]), { status: 200, headers: { "content-type": "image/png" } });
+  });
+  assert.equal(requested, "/assets/map.png");
+  assert.equal(converted, "data:image/png;base64,iVBORw==");
+  assert.equal(
+    await primitives.exportImageSourceToDataUrl("data:image/png;base64,AAAA", async () => { throw new Error("should not fetch"); }),
+    "data:image/png;base64,AAAA",
+  );
+});
+
+test("background export reports an unreadable source instead of silently omitting it", async () => {
+  await assert.rejects(
+    () => primitives.exportImageSourceToDataUrl("/missing.png", async () => new Response(null, { status: 404 })),
+    /背景图读取失败（HTTP 404）/,
+  );
 });
 
 test("canvas expands at the right and bottom without moving existing content", () => {
