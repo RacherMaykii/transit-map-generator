@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
 import { createServer } from "vite";
+import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 
 const server = await createServer({ configFile: false, appType: "custom", server: { middlewareMode: true } });
 const archives = await server.ssrLoadModule("/app/projects/projectArchive.ts");
@@ -87,6 +88,53 @@ test("complete project archive embeds user assets while public assets stay exclu
   const imported = await archives.importRailProjectArchive(archive, targetRepository, { async save() {}, async deleteProjectDocuments() {} });
   assert.equal(targetRepository.state.assets.has(`${imported.project.id}:icon.png`), true);
   assert.equal(targetRepository.state.assets.has(`${imported.project.id}:public.png`), false);
+});
+
+test("complete project archive embeds URL-backed wiring backgrounds and restores the wiring document", async (t) => {
+  const backgroundUrl = "sample-projects/default/assets/void-city-map.png";
+  t.mock.method(globalThis, "fetch", async (input) => {
+    assert.equal(String(input), backgroundUrl);
+    return new Response(new Uint8Array([137, 80, 78, 71]), { headers: { "content-type": "image/png" } });
+  });
+  const wiring = {
+    schemaVersion: 5,
+    projectInfo: { name: "虚空城示例配线图", createdAt: "2026-08-14T00:00:00.000Z", updatedAt: "2026-08-14T00:00:00.000Z" },
+    pages: [], layers: [], modules: [], connections: [], labels: [], servicePatterns: [], transferGroups: [], platforms: [], graphics: [], assets: [],
+    backgroundImages: [{ id: "bg-map", src: backgroundUrl, name: "虚空城地图.png", x: 0, y: 0, naturalWidth: 100, naturalHeight: 100, scale: 1, opacity: 1, locked: true, visible: true, layerId: "layer-background", zIndex: -100 }],
+    sourceLines: [], sourceStationsOnLine: [], physicalStations: [], sourceMappings: [], filters: { lineIds: [] }, unresolvedChanges: [], pendingPlacement: null,
+    viewport: { panX: 0, panY: 0, scale: 1 },
+  };
+  const sourceRepository = repository();
+  sourceRepository.listCustomAssets = async () => [];
+  const sourceDocuments = { async load(_id, kind) { return kind === "wiring" ? structuredClone(wiring) : null; } };
+  const archive = await archives.createRailProjectArchive(
+    { id: "source", name: "虚空城", createdAt: "", updatedAt: "", storageMode: "browser" },
+    sourceRepository,
+    "full",
+    sourceDocuments,
+  );
+  const entries = unzipSync(new Uint8Array(await archive.arrayBuffer()));
+  const manifest = JSON.parse(strFromU8(entries["manifest.json"]));
+  assert.equal(manifest.assets.length, 1);
+  assert.deepEqual(manifest.assets[0].bindings, [{ kind: "wiring-background", id: "bg-map" }]);
+  assert.ok(entries[manifest.assets[0].path]);
+  assert.equal(JSON.parse(strFromU8(entries[manifest.editors.wiring])).backgroundImages[0].src, "");
+
+  const documents = new Map();
+  const targetDocuments = {
+    async load(id, kind) { return documents.get(`${id}:${kind}`) || null; },
+    async save(id, kind, document) { documents.set(`${id}:${kind}`, structuredClone(document)); },
+    async deleteProjectDocuments() {},
+  };
+  // Browser compatibility storage is covered separately; omit it here so this
+  // Node test can verify the common editor-document restore path without IDB.
+  delete entries[manifest.wiringProjectPath];
+  delete manifest.wiringProjectPath;
+  entries["manifest.json"] = strToU8(JSON.stringify(manifest));
+  const documentOnlyArchive = new Blob([zipSync(entries)]);
+  const imported = await archives.importRailProjectArchive(documentOnlyArchive, repository(), targetDocuments);
+  assert.deepEqual(imported.missingAssets, []);
+  assert.match(documents.get("imported:wiring").backgroundImages[0].src, /^data:image\/png;base64,/);
 });
 
 test("railcity import rejects non-archive input before creating a project", async () => {

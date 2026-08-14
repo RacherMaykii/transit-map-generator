@@ -4,6 +4,7 @@ import type { ProjectFile } from "../wiring/projectStore";
 import { normalizeTransitData, type TransitData } from "../transit/types";
 import { BrowserEditorDocumentStore, type EditorKind, type JsonEditorDocument } from "./editorDocumentStore";
 import type { ProjectRepository, ProjectSummary } from "./types";
+import { newestWiringProject } from "../wiring/sourceSync";
 
 const ARCHIVE_SCHEMA_VERSION = 2;
 const MAX_ARCHIVE_BYTES = 120 * 1024 * 1024;
@@ -158,8 +159,17 @@ async function collectCustomAssets(
     if (blob) await add(blob, asset.name, { kind: "wiring-icon", id: asset.id });
   }
   for (const image of wiringProject?.backgroundImages || []) {
-    const blob = dataUrlBlob(image.src);
-    if (blob) await add(blob, image.name, { kind: "wiring-background", id: image.id });
+    let blob = dataUrlBlob(image.src);
+    if (!blob && image.src) {
+      try {
+        const response = await fetch(image.src);
+        if (response.ok) blob = await response.blob();
+      } catch {
+        // Converted to a clear export error below.
+      }
+    }
+    if (!blob) throw new Error(`无法读取配线图背景“${image.name}”，请重新选择背景图后再导出`);
+    await add(blob, image.name, { kind: "wiring-background", id: image.id });
   }
   return [...byHash.values()];
 }
@@ -172,7 +182,10 @@ function portableWiringProject(project: ProjectFile | null): ProjectFile | null 
     assets: project.assets.map((asset): AssetRecord => ({ ...asset, dataUrl: undefined, missing: Boolean(asset.dataUrl) })),
     backgroundImages: project.backgroundImages.map((image): BackgroundImageObject => ({
       ...image,
-      src: image.src.startsWith("data:") ? "" : image.src,
+      // Every wiring background is an archive-bound project resource. Keeping
+      // a public URL here would make the project appear complete while still
+      // depending on the original deployment.
+      src: "",
       previewSrc: undefined,
     })),
   };
@@ -186,7 +199,11 @@ async function loadProjectParts(project: ProjectSummary, repository: ProjectRepo
     if (document !== null) documents[kind] = document;
   }
   const { loadFromIndexedDB } = await import("../wiring/projectStore");
-  const wiringProject = await loadFromIndexedDB(`wiring:${project.id}:autosave`).catch(() => null);
+  const compatibleWiring = await loadFromIndexedDB(`wiring:${project.id}:autosave`).catch(() => null);
+  const documentWiring = documents.wiring && Array.isArray((documents.wiring as unknown as ProjectFile).modules)
+    ? documents.wiring as unknown as ProjectFile
+    : null;
+  const wiringProject = newestWiringProject(documentWiring, compatibleWiring);
   return { transitData, documents, wiringProject };
 }
 
@@ -213,12 +230,12 @@ export async function createRailProjectArchive(
   const { transitData, documents, wiringProject } = await loadProjectParts(project, repository, documentStore);
   entries["data/transit.json"] = jsonBytes(transitData);
   const editors: RailCityManifestV2["editors"] = {};
+  const portableWiring = portableWiringProject(wiringProject);
   for (const [kind, document] of Object.entries(documents) as [EditorKind, JsonEditorDocument][]) {
     const path = `editors/${kind}.json`;
-    entries[path] = jsonBytes(document);
+    entries[path] = jsonBytes(kind === "wiring" && portableWiring ? portableWiring : document);
     editors[kind] = path;
   }
-  const portableWiring = portableWiringProject(wiringProject);
   if (portableWiring) entries["editors/wiring-project.json"] = jsonBytes(portableWiring);
   const collected = await collectCustomAssets(project, repository, wiringProject);
   const assets = mode === "full" ? addAssetFiles(entries, collected) : collected.map(({ entry }) => entry);
@@ -268,10 +285,15 @@ async function applyAssets(
   assets: ArchiveAssetEntry[],
   projectId: string,
   repository: ProjectRepository,
+  documentStore: BrowserEditorDocumentStore,
 ): Promise<{ imported: number; missing: string[] }> {
   const { loadFromIndexedDB, saveToIndexedDB } = await import("../wiring/projectStore");
   const wiringProject = await loadFromIndexedDB(`wiring:${projectId}:autosave`).catch(() => null);
+  const wiringDocument = typeof documentStore.load === "function"
+    ? await documentStore.load<ProjectFile>(projectId, "wiring").catch(() => null)
+    : null;
   let wiringChanged = false;
+  let documentChanged = false;
   const missing: string[] = [];
   let imported = 0;
   for (const asset of assets) {
@@ -290,10 +312,19 @@ async function applyAssets(
         wiringProject.backgroundImages = wiringProject.backgroundImages.map((item) => item.id === binding.id ? { ...item, src: dataUrl } : item);
         wiringChanged = true;
       }
+      if (binding.kind === "wiring-icon" && wiringDocument) {
+        wiringDocument.assets = wiringDocument.assets.map((item) => item.id === binding.id ? { ...item, dataUrl, missing: false } : item);
+        documentChanged = true;
+      }
+      if (binding.kind === "wiring-background" && wiringDocument) {
+        wiringDocument.backgroundImages = wiringDocument.backgroundImages.map((item) => item.id === binding.id ? { ...item, src: dataUrl } : item);
+        documentChanged = true;
+      }
     }
     imported += 1;
   }
   if (wiringProject && wiringChanged) await saveToIndexedDB(wiringProject, `wiring:${projectId}:autosave`);
+  if (wiringDocument && documentChanged) await documentStore.save(projectId, "wiring", wiringDocument);
   return { imported, missing };
 }
 
@@ -332,7 +363,7 @@ export async function importRailProjectArchive(
       }
       return { project: created, missingAssets: [] };
     }
-    const applied = await applyAssets(entries, manifest.assets, created.id, repository);
+    const applied = await applyAssets(entries, manifest.assets, created.id, repository, documentStore);
     return { project: created, missingAssets: applied.missing };
   } catch (reason) {
     await documentStore.deleteProjectDocuments(created.id).catch(() => undefined);
@@ -350,11 +381,12 @@ export async function importRailAssetsArchive(
   file: Blob,
   targetProjectId: string,
   repository: ProjectRepository,
+  documentStore = new BrowserEditorDocumentStore(),
 ): Promise<{ imported: number; missing: string[]; sourceProjectName: string }> {
   if (!repository.capabilities.canManageAssets) throw new Error("当前存储模式不能导入资源包");
   const entries = await unpack(file);
   const manifest = readJson<RailAssetsManifest>(entries, "manifest.json");
   if (manifest?.kind !== "railcity-assets" || manifest.schemaVersion !== 1 || !Array.isArray(manifest.assets)) throw new Error("不支持的资源包格式");
-  const result = await applyAssets(entries, manifest.assets, targetProjectId, repository);
+  const result = await applyAssets(entries, manifest.assets, targetProjectId, repository, documentStore);
   return { ...result, sourceProjectName: manifest.project?.name || "未知项目" };
 }

@@ -234,7 +234,7 @@ export default function ProjectPortal() {
     try {
       const { importRailAssetsArchive, importRailProjectArchive } = await import("./projects/projectArchive");
       if (supplementOnly && assetImportFile && selectedProject) {
-        const restored = await importRailAssetsArchive(assetImportFile, selectedProject.id, repository);
+        const restored = await importRailAssetsArchive(assetImportFile, selectedProject.id, repository, documentStore);
         setTransferMessage(`已向项目“${selectedProject.name}”补充 ${restored.imported} 个素材${restored.missing.length ? `，仍缺少 ${restored.missing.length} 个` : ""}`);
         setAssetImportFile(null);
         setTransferDialog(null);
@@ -245,7 +245,7 @@ export default function ProjectPortal() {
       const project = result.project;
       let assetMessage = result.missingAssets.length ? `；仍缺少 ${result.missingAssets.length} 个素材` : "";
       if (transferMode === "split" && assetImportFile) {
-        const restored = await importRailAssetsArchive(assetImportFile, project.id, repository);
+        const restored = await importRailAssetsArchive(assetImportFile, project.id, repository, documentStore);
         assetMessage = `；资源包恢复 ${restored.imported} 个素材${restored.missing.length ? `，缺少 ${restored.missing.length} 个` : ""}`;
       }
       setProjects((current) => [...current, project]);
