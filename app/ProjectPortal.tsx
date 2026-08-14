@@ -98,6 +98,9 @@ export default function ProjectPortal() {
   const [assetImportFile, setAssetImportFile] = useState<File | null>(null);
   const [transferMessage, setTransferMessage] = useState("");
   const [infoDialog, setInfoDialog] = useState<"about" | "notes" | "beta" | null>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteConfirmation, setDeleteConfirmation] = useState("");
+  const [deleting, setDeleting] = useState(false);
   const documentStore = useMemo(() => new BrowserEditorDocumentStore(), []);
 
   useEffect(() => {
@@ -155,16 +158,19 @@ export default function ProjectPortal() {
     }
   }
 
-  async function deleteSelectedProject() {
+  function openDeleteDialog() {
     if (!repository || !selectedProject || !repository.capabilities.canDeleteProjects) return;
     if (repository.mode === "http" && selectedProject.id === DEFAULT_PROJECT_ID) {
       setError("默认项目“虚空城”直接使用 data 目录的数据，不能删除。");
       return;
     }
-    const storageNote = repository.mode === "http"
-      ? "该项目在 data 目录中的数据与素材，以及此浏览器中的设计内容都会删除。"
-      : "该项目保存在此浏览器中的数据和素材也会删除。";
-    if (!window.confirm(`确定删除项目“${selectedProject.name}”吗？${storageNote}`)) return;
+    setDeleteConfirmation("");
+    setDeleteDialogOpen(true);
+  }
+
+  async function deleteSelectedProject() {
+    if (!repository || !selectedProject || deleteConfirmation !== selectedProject.name) return;
+    setDeleting(true);
     setError("");
     try {
       await repository.deleteProject(selectedProject.id);
@@ -172,8 +178,12 @@ export default function ProjectPortal() {
       const remaining = projects.filter((project) => project.id !== selectedProject.id);
       setProjects(remaining);
       setSelectedId(remaining[0]?.id || "");
+      setDeleteDialogOpen(false);
+      setDeleteConfirmation("");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "项目删除失败");
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -328,7 +338,7 @@ export default function ProjectPortal() {
               <button type="button" onClick={() => openTransferDialog("import")} disabled={transferring || !repository?.capabilities.canCreateProjects}>导入项目</button>
               <button type="button" onClick={() => openTransferDialog("assets")} disabled={transferring || !selectedProject || !repository?.capabilities.canManageAssets}>导入资源包</button>
               <button type="button" onClick={() => openTransferDialog("export")} disabled={transferring || !selectedProject}>{transferring ? "处理中…" : "导出项目"}</button>
-              <button type="button" className="is-danger" onClick={deleteSelectedProject} disabled={transferring || !selectedProject || !repository?.capabilities.canDeleteProjects}>删除</button>
+              <button type="button" className="is-danger" onClick={openDeleteDialog} disabled={transferring || deleting || !selectedProject || !repository?.capabilities.canDeleteProjects}>删除</button>
             </div>
           </div>
 
@@ -418,6 +428,35 @@ export default function ProjectPortal() {
               <button type="button" onClick={() => setTransferDialog(null)} disabled={transferring}>取消</button>
               <button type="button" className="is-primary" disabled={transferring || (transferDialog === "import" && !projectImportFile && !(transferMode === "split" && assetImportFile && selectedProject)) || (transferDialog === "assets" && (!assetImportFile || !selectedProject))} onClick={() => void (transferDialog === "export" ? exportSelectedProject() : importProject())}>
                 {transferring ? "处理中…" : transferDialog === "export" ? "开始导出" : transferDialog === "assets" || (!projectImportFile && assetImportFile) ? "补充到当前项目" : "开始导入"}
+              </button>
+            </footer>
+          </section>
+        </div>
+      )}
+
+      {deleteDialogOpen && selectedProject && (
+        <div className="portal-modal-backdrop portal-delete-backdrop" role="presentation">
+          <section className="portal-transfer-modal portal-delete-modal" role="alertdialog" aria-modal="true" aria-labelledby="portal-delete-title" aria-describedby="portal-delete-description">
+            <header>
+              <div><span>最高级别警告</span><h2 id="portal-delete-title">永久删除整个城市工程</h2></div>
+              <button type="button" onClick={() => setDeleteDialogOpen(false)} disabled={deleting} aria-label="关闭">×</button>
+            </header>
+            <div className="portal-delete-body" id="portal-delete-description">
+              <p className="portal-delete-lead">这不是只删除当前选中的编辑器。</p>
+              <strong>项目“{selectedProject.name}”下的三个编辑器内容将一起永久删除：</strong>
+              <ul>
+                <li>线路站序图</li>
+                <li>出入口站名标识</li>
+                <li>配线图</li>
+              </ul>
+              <p>共享线路、站点、换乘数据和项目素材也会一并删除，且无法撤销。建议先导出完整工程包备份。</p>
+              <label htmlFor="delete-project-confirmation">输入项目名称 <b>{selectedProject.name}</b> 以确认</label>
+              <input id="delete-project-confirmation" autoFocus value={deleteConfirmation} onChange={(event) => setDeleteConfirmation(event.target.value)} disabled={deleting} autoComplete="off" />
+            </div>
+            <footer>
+              <button type="button" onClick={() => setDeleteDialogOpen(false)} disabled={deleting}>取消</button>
+              <button type="button" className="is-destructive" disabled={deleting || deleteConfirmation !== selectedProject.name} onClick={() => void deleteSelectedProject()}>
+                {deleting ? "正在删除…" : "永久删除三个编辑器内容"}
               </button>
             </footer>
           </section>

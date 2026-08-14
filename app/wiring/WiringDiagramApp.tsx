@@ -131,6 +131,7 @@ import {
 import { newestWiringProject, synchronizeWiringProjectSource } from "./sourceSync";
 import { DEFAULT_WIRING_SAMPLE_MARKER, isWiringProjectEmpty, loadDefaultWiringSample } from "./sampleProject";
 import TutorialOverlay, { useTutorialState } from "./TutorialOverlay";
+import FirstUseNotice, { useFirstUseNoticeState } from "./FirstUseNotice";
 import PopoverMenu, { type PopoverMenuItem } from "./PopoverMenu";
 import {
   createProjectRepository,
@@ -320,6 +321,7 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
   const [layerDragState, setLayerDragState] = useState<{ draggedId: string | null; dropTargetId: string | null; dropPosition: "before" | "after" | "inside" | null }>({ draggedId: null, dropTargetId: null, dropPosition: null });
   const [renamingLayerId, setRenamingLayerId] = useState<string | null>(null);
   const { showTutorial, dismissTutorial, resetTutorial } = useTutorialState();
+  const { showFirstUseNotice, dismissFirstUseNotice } = useFirstUseNoticeState();
 
   // ── 状态镜像 ref（供历史系统读取当前值，避免闭包过期） ──
   const modulesRef = useRef<DiagramModule[]>(modules);
@@ -4875,8 +4877,12 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
         <span><i /> {status}</span>
       </footer>
 
-      {/* 教程覆盖层 */}
-      {showTutorial && <TutorialOverlay onDismiss={dismissTutorial} />}
+      {/* 首次警告优先于教程；确认后才显示原有首次帮助。 */}
+      {showFirstUseNotice ? (
+        <FirstUseNotice onConfirm={dismissFirstUseNotice} />
+      ) : showTutorial ? (
+        <TutorialOverlay onDismiss={dismissTutorial} />
+      ) : null}
     </div>
   );
 }

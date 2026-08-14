@@ -220,6 +220,20 @@
 .portal-transfer-modal footer button { min-height: 40px; padding: 0 18px; border: 1px solid #ccdbe1; border-radius: 10px; background: #fff; color: #18313d; font-weight: 800; }
 .portal-transfer-modal footer .is-primary { border-color: #087fa4; background: #087fa4; color: #fff; }
 .portal-transfer-modal button:disabled { cursor: not-allowed; opacity: .5; }
+.portal-delete-backdrop { z-index: 180; background: rgba(38, 8, 10, .68); }
+.portal-delete-modal { border-color: #efb3b6; box-shadow: 0 30px 90px rgba(76, 8, 12, .42); }
+.portal-delete-modal header { background: #fff7f7; border-bottom-color: #f2c9cb; }
+.portal-delete-modal header span { color: #c92028; }
+.portal-delete-body { padding: 22px 24px 4px; }
+.portal-delete-body .portal-delete-lead { margin: 0 0 12px; color: #c92028; font-size: 16px; font-weight: 900; }
+.portal-delete-body > strong { color: #2c3438; font-size: 14px; }
+.portal-delete-body ul { margin: 12px 0; padding: 14px 18px 14px 38px; border: 1px solid #f0c4c6; border-radius: 12px; background: #fff7f7; color: #9f1d24; font-weight: 800; line-height: 1.8; }
+.portal-delete-body p { color: #596b74; font-size: 13px; line-height: 1.7; }
+.portal-delete-body label { display: block; margin: 18px 0 7px; color: #3c4d55; font-size: 12px; font-weight: 800; }
+.portal-delete-body label b { color: #c92028; }
+.portal-delete-body input { width: 100%; min-height: 44px; box-sizing: border-box; padding: 0 12px; border: 1px solid #d7a2a5; border-radius: 10px; background: #fff; color: #263940; font-size: 14px; outline: none; }
+.portal-delete-body input:focus { border-color: #c92028; box-shadow: 0 0 0 3px rgba(201, 32, 40, .12); }
+.portal-transfer-modal footer .is-destructive { border-color: #c92028; background: #c92028; color: #fff; }
 
 .portal-legal { width: min(1180px, calc(100% - 48px)); margin: 0 auto 26px; display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 12px 22px; color: rgba(255, 255, 255, .78); font-size: 12px; }
 .portal-legal span { font-weight: 700; letter-spacing: .02em; }

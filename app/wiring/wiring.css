@@ -43,6 +43,51 @@
   background: var(--accent); color: white;
 }
 
+.wiring-first-use-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 12000;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(19, 34, 43, .62);
+  backdrop-filter: blur(5px);
+}
+.wiring-first-use-dialog {
+  width: min(520px, 100%);
+  overflow: hidden;
+  border: 1px solid #d8e4e9;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 24px 72px rgba(9, 30, 42, .3);
+}
+.wiring-first-use-dialog > header,
+.wiring-first-use-dialog > footer { padding: 20px 24px; }
+.wiring-first-use-dialog > header { border-bottom: 1px solid #e6eef2; }
+.wiring-first-use-dialog > footer {
+  display: flex;
+  justify-content: flex-end;
+  border-top: 1px solid #e6eef2;
+  background: #f8fbfc;
+}
+.wiring-first-use-eyebrow {
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .08em;
+}
+.wiring-first-use-dialog h2 { margin: 5px 0 0; font-size: 22px; }
+.wiring-first-use-body { padding: 22px 24px; color: #465a64; }
+.wiring-first-use-warning {
+  margin: 0 0 16px;
+  color: #243943;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.7;
+}
+.wiring-first-use-warning span { color: #d9272e; }
+.wiring-first-use-body ul { margin: 0; padding-left: 20px; line-height: 1.8; }
+
 .wiring-toolbar-spacer { flex: 1; }
 .wiring-toolbar-info { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); }
 .wiring-toolbar-info select { min-height: 30px; font-size: 12px; border-radius: 7px; }

@@ -928,6 +928,29 @@ test("unified transfer button, discardSnapshot, and tutorial cleanup", async () 
   assert.match(tutorial, /useLayoutEffect/);
 });
 
+test("project deletion uses a highest-level three-editor confirmation", async () => {
+  const portal = await readFile(new URL("app/ProjectPortal.tsx", root), "utf8");
+  assert.ok(!portal.includes("window.confirm"));
+  assert.match(portal, /最高级别警告/);
+  assert.match(portal, /三个编辑器内容将一起永久删除/);
+  assert.match(portal, /线路站序图/);
+  assert.match(portal, /出入口站名标识/);
+  assert.match(portal, /配线图/);
+  assert.match(portal, /deleteConfirmation !== selectedProject\.name/);
+});
+
+test("wiring first-use safety notice appears before the tutorial", async () => {
+  const [app, notice] = await Promise.all([
+    readFile(new URL("app/wiring/WiringDiagramApp.tsx", root), "utf8"),
+    readFile(new URL("app/wiring/FirstUseNotice.tsx", root), "utf8"),
+  ]);
+  assert.match(notice, /非专业轨道工程软件/);
+  assert.match(notice, /wiring-first-use-warning/);
+  assert.match(notice, /metro-wiring-first-use-notice-dismissed-v1/);
+  assert.match(app, /showFirstUseNotice\s*\?/);
+  assert.match(app, /:\s*showTutorial\s*\?/);
+});
+
 test("auto-avoidance is a persistent toggle with a manual one-shot when off", async () => {
   const app = await readFile(new URL("app/wiring/WiringDiagramApp.tsx", root), "utf8");
 
