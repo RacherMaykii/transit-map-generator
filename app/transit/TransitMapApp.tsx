@@ -38,6 +38,7 @@ import { auditTransitData, calculateOpeningStats, StationAuditIssue } from "./au
 import { deleteLineCascade, deleteStationCascade, type DeleteLineImpact, type DeleteStationImpact } from "./stationDeletion";
 import { wiringAssociationsForStationIds } from "../wiring/stationUnlink";
 import { BrowserEditorDocumentStore } from "../projects/editorDocumentStore";
+import type { EditorNavigationGuard } from "../projects/editorNavigation";
 import { nextIndexForDirection, previousIndexForDirection, stepForDirection, terminusForDirection, terminusSideFor, visualDirectionFor } from "./route-orientation.mjs";
 import {
   buildImportPreview,
@@ -188,6 +189,7 @@ function IconButton({
 interface TransitMapAppProps {
   projectId?: string;
   repository?: ProjectRepository;
+  onNavigationStateChange?: (guard: EditorNavigationGuard | null) => void;
 }
 
 /** 站点删除确认弹窗的数据（删除前的统计 + 影响）。 */
@@ -205,7 +207,11 @@ interface LineDeleteDialogState {
   hasWiringAssociation: boolean;
 }
 
-export default function TransitMapApp({ projectId = DEFAULT_PROJECT_ID, repository }: TransitMapAppProps) {
+export default function TransitMapApp({
+  projectId = DEFAULT_PROJECT_ID,
+  repository,
+  onNavigationStateChange,
+}: TransitMapAppProps) {
   const projectRepository = useMemo(
     () => repository || createProjectRepository({ storageMode: "http" }),
     [repository],
@@ -498,8 +504,8 @@ export default function TransitMapApp({ projectId = DEFAULT_PROJECT_ID, reposito
     setStatus("已重做一步");
   }, [data, redoStack]);
 
-  const saveCsv = useCallback(async () => {
-    if (!data) return;
+  const saveCsv = useCallback(async (): Promise<boolean> => {
+    if (!data) return true;
     setStatus("正在写入 CSV…");
     setError("");
     try {
@@ -510,14 +516,16 @@ export default function TransitMapApp({ projectId = DEFAULT_PROJECT_ID, reposito
       setData((current) => current ? { ...current, lines: verifiedData.lines, stations: verifiedData.stations, transfers: verifiedData.transfers } : verifiedData);
       setSavedCsvSnapshot(verifiedSnapshot);
       setStatus(`CSV 已保存并校验 · ${new Date().toLocaleTimeString("zh-CN", { hour12: false })}`);
+      return true;
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "CSV 保存失败");
       setStatus("CSV 保存失败");
+      return false;
     }
   }, [data, projectId, projectRepository]);
 
-  const saveLayout = useCallback(async () => {
-    if (!data) return;
+  const saveLayout = useCallback(async (): Promise<boolean> => {
+    if (!data) return true;
     setStatus("正在保存显示设置…");
     setError("");
     try {
@@ -532,11 +540,25 @@ export default function TransitMapApp({ projectId = DEFAULT_PROJECT_ID, reposito
       } : current);
       setSavedLayoutSnapshot(layoutSnapshot(verifiedData));
       setStatus(`显示设置已保存 · ${new Date().toLocaleTimeString("zh-CN", { hour12: false })}`);
+      return true;
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "显示设置保存失败");
       setStatus("显示设置保存失败");
+      return false;
     }
   }, [data, projectId, projectRepository]);
+
+  const saveBeforeLeave = useCallback(async (): Promise<boolean> => {
+    if (csvDirty && !(await saveCsv())) return false;
+    if (layoutDirty && !(await saveLayout())) return false;
+    return true;
+  }, [csvDirty, layoutDirty, saveCsv, saveLayout]);
+
+  useEffect(() => {
+    if (!onNavigationStateChange) return;
+    onNavigationStateChange({ dirty, saveBeforeLeave });
+    return () => onNavigationStateChange(null);
+  }, [dirty, onNavigationStateChange, saveBeforeLeave]);
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {

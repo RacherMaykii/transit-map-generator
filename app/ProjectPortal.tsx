@@ -1,7 +1,8 @@
 "use client";
 
-import { FormEvent, lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { FormEvent, lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { BrowserEditorDocumentStore } from "./projects/editorDocumentStore";
+import type { EditorNavigationGuard } from "./projects/editorNavigation";
 import {
   createProjectRepository,
   DEFAULT_PROJECT_ID,
@@ -101,7 +102,45 @@ export default function ProjectPortal() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
   const [deleting, setDeleting] = useState(false);
+  const [editorNavigationGuard, setEditorNavigationGuard] = useState<EditorNavigationGuard | null>(null);
+  const [leaveDialogOpen, setLeaveDialogOpen] = useState(false);
+  const [savingBeforeLeave, setSavingBeforeLeave] = useState(false);
+  const [leaveError, setLeaveError] = useState("");
   const documentStore = useMemo(() => new BrowserEditorDocumentStore(), []);
+
+  const updateEditorNavigationGuard = useCallback((guard: EditorNavigationGuard | null) => {
+    setEditorNavigationGuard(guard);
+  }, []);
+
+  function finishLeavingEditor() {
+    setLeaveDialogOpen(false);
+    setLeaveError("");
+    setEditorNavigationGuard(null);
+    setOpened(null);
+  }
+
+  function requestLeaveEditor() {
+    if (!editorNavigationGuard?.dirty) {
+      finishLeavingEditor();
+      return;
+    }
+    setLeaveError("");
+    setLeaveDialogOpen(true);
+  }
+
+  async function saveAndLeaveEditor() {
+    if (!editorNavigationGuard || savingBeforeLeave) return;
+    setSavingBeforeLeave(true);
+    setLeaveError("");
+    try {
+      if (await editorNavigationGuard.saveBeforeLeave()) finishLeavingEditor();
+      else setLeaveError("保存失败，已保留当前编辑页面和未保存内容。请检查页面中的错误提示后重试。");
+    } catch (reason) {
+      setLeaveError(reason instanceof Error ? reason.message : "保存失败，当前编辑内容仍然保留。");
+    } finally {
+      setSavingBeforeLeave(false);
+    }
+  }
 
   useEffect(() => {
     const mode = requestedStorageMode();
@@ -275,7 +314,7 @@ export default function ProjectPortal() {
     return (
       <div className="project-workspace-shell">
         <div className="project-workspace-bar">
-          <button type="button" onClick={() => setOpened(null)} aria-label="返回项目列表">← 返回项目</button>
+          <button type="button" onClick={requestLeaveEditor} aria-label="返回项目列表">← 返回项目</button>
           <div>
             <span>{TOOL_COPY[opened.tool].label}</span>
             <strong>{opened.project.name}</strong>
@@ -283,11 +322,33 @@ export default function ProjectPortal() {
         </div>
         <Suspense fallback={<main className="loading-shell"><div className="loading-card"><h1>正在打开编辑器…</h1><p>项目数据仍保存在本机。</p></div></main>}>
           {opened.tool === "sign"
-            ? <TransitMapApp key={editorKey} projectId={opened.project.id} repository={repository} />
+            ? <TransitMapApp key={editorKey} projectId={opened.project.id} repository={repository} onNavigationStateChange={updateEditorNavigationGuard} />
             : opened.tool === "name"
               ? <EntranceSignApp key={editorKey} projectId={opened.project.id} repository={repository} />
               : <WiringDiagramApp key={editorKey} projectId={opened.project.id} repository={repository} />}
         </Suspense>
+        {leaveDialogOpen && (
+          <div className="portal-modal-backdrop portal-leave-backdrop" role="presentation">
+            <section className="portal-transfer-modal portal-leave-modal" role="alertdialog" aria-modal="true" aria-labelledby="portal-leave-title" aria-describedby="portal-leave-description">
+              <header>
+                <div><span>未保存修改</span><h2 id="portal-leave-title">返回项目前是否保存？</h2></div>
+                <button type="button" onClick={() => setLeaveDialogOpen(false)} disabled={savingBeforeLeave} aria-label="关闭">×</button>
+              </header>
+              <div className="portal-leave-body" id="portal-leave-description">
+                <p>线路、站点、换乘或显示设置仍有未保存修改。配线图只会读取项目中已经保存的数据。</p>
+                <strong>如果刚刚删除了站点或线路，请选择“保存并返回”，否则打开配线图时仍会看到删除前的数据。</strong>
+                {leaveError && <div className="portal-leave-error" role="alert">{leaveError}</div>}
+              </div>
+              <footer>
+                <button type="button" onClick={() => setLeaveDialogOpen(false)} disabled={savingBeforeLeave}>继续编辑</button>
+                <button type="button" onClick={finishLeavingEditor} disabled={savingBeforeLeave}>不保存并返回</button>
+                <button type="button" className="is-primary" onClick={() => void saveAndLeaveEditor()} disabled={savingBeforeLeave}>
+                  {savingBeforeLeave ? "正在保存…" : "保存并返回"}
+                </button>
+              </footer>
+            </section>
+          </div>
+        )}
       </div>
     );
   }

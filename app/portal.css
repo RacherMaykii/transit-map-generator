@@ -234,6 +234,13 @@
 .portal-delete-body input { width: 100%; min-height: 44px; box-sizing: border-box; padding: 0 12px; border: 1px solid #d7a2a5; border-radius: 10px; background: #fff; color: #263940; font-size: 14px; outline: none; }
 .portal-delete-body input:focus { border-color: #c92028; box-shadow: 0 0 0 3px rgba(201, 32, 40, .12); }
 .portal-transfer-modal footer .is-destructive { border-color: #c92028; background: #c92028; color: #fff; }
+.portal-leave-backdrop { z-index: 190; }
+.portal-leave-modal { width: min(570px, 100%); }
+.portal-leave-modal header { background: #f7fcfd; }
+.portal-leave-body { padding: 22px 24px 6px; }
+.portal-leave-body p { margin: 0 0 12px; color: #526a75; font-size: 14px; line-height: 1.75; }
+.portal-leave-body strong { display: block; color: #1e4656; font-size: 13px; line-height: 1.7; }
+.portal-leave-error { margin-top: 14px; padding: 11px 13px; border: 1px solid #efb7ba; border-radius: 10px; background: #fff4f4; color: #ae2027; font-size: 12px; font-weight: 800; line-height: 1.6; }
 
 .portal-legal { width: min(1180px, calc(100% - 48px)); margin: 0 auto 26px; display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 12px 22px; color: rgba(255, 255, 255, .78); font-size: 12px; }
 .portal-legal span { font-weight: 700; letter-spacing: .02em; }

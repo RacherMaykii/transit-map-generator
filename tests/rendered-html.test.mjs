@@ -996,6 +996,26 @@ test("project deletion uses a highest-level three-editor confirmation", async ()
   assert.match(portal, /deleteConfirmation !== selectedProject\.name/);
 });
 
+test("leaving the route editor preserves unsaved station and line deletions", async () => {
+  const [portal, transit, navigation, css] = await Promise.all([
+    readFile(new URL("app/ProjectPortal.tsx", root), "utf8"),
+    readFile(new URL("app/transit/TransitMapApp.tsx", root), "utf8"),
+    readFile(new URL("app/projects/editorNavigation.ts", root), "utf8"),
+    readFile(new URL("app/portal.css", root), "utf8"),
+  ]);
+
+  assert.match(transit, /onNavigationStateChange\(\{ dirty, saveBeforeLeave \}\)/);
+  assert.match(transit, /if \(csvDirty && !\(await saveCsv\(\)\)\) return false/);
+  assert.match(transit, /if \(layoutDirty && !\(await saveLayout\(\)\)\) return false/);
+  assert.match(navigation, /saveBeforeLeave: \(\) => Promise<boolean>/);
+  assert.match(portal, /onClick=\{requestLeaveEditor\}/);
+  assert.match(portal, /保存并返回/);
+  assert.match(portal, /不保存并返回/);
+  assert.match(portal, /继续编辑/);
+  assert.match(portal, /配线图只会读取项目中已经保存的数据/);
+  assert.match(css, /\.portal-leave-backdrop/);
+});
+
 test("wiring first-use safety notice appears before the tutorial", async () => {
   const [app, notice] = await Promise.all([
     readFile(new URL("app/wiring/WiringDiagramApp.tsx", root), "utf8"),
