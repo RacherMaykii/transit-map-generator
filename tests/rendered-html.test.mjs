@@ -61,6 +61,63 @@ test("renders the project portal", async () => {
   assert.match(html, /兼容性/);
 });
 
+test("static entry index.html ships valid single JSON-LD and complete SEO metadata", async () => {
+  const html = await readFile(new URL("index.html", root), "utf8");
+
+  // 语言与基础元数据
+  assert.match(html, /<html lang="zh-CN">/);
+  assert.match(html, /<title>轨道交通视觉设计工坊｜配线图、站序图与 Minecraft 地图画工具<\/title>/);
+  assert.match(html, /name="description" content="[^"]*轨道交通配线图[^"]*"/);
+  assert.match(html, /rel="canonical" href="https:\/\/rachermaykii\.github\.io\/transit-map-generator\/"/);
+
+  // 页面中只保留一份主 JSON-LD
+  const blocks = [...html.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)];
+  assert.equal(blocks.length, 1, "必须只有一份 application/ld+json");
+
+  // JSON-LD 语法合法，且包含三个实体
+  const graph = JSON.parse(blocks[0][1].trim())["@graph"];
+  const types = graph.map((entity) => entity["@type"]);
+  assert.ok(types.includes("WebSite"), "包含 WebSite");
+  assert.ok(types.includes("WebApplication"), "包含 WebApplication");
+  assert.ok(types.includes("SoftwareSourceCode"), "包含 SoftwareSourceCode");
+
+  const site = graph.find((entity) => entity["@type"] === "WebSite");
+  const webapp = graph.find((entity) => entity["@type"] === "WebApplication");
+  const source = graph.find((entity) => entity["@type"] === "SoftwareSourceCode");
+  assert.ok(webapp, "WebApplication 实体存在");
+  assert.ok(source, "SoftwareSourceCode 实体存在");
+
+  // 核心能力：配线图、站序图、Minecraft 128×128 地图画
+  assert.match(webapp.description, /配线图/);
+  assert.match(webapp.description, /站序图/);
+  assert.match(webapp.description, /128×128/);
+  const features = webapp.featureList.join(" ");
+  assert.match(features, /配线图/);
+  assert.match(features, /站序图/);
+  assert.match(features, /地图画/);
+  assert.match(features, /128×128/);
+
+  // 不得包含虚假评分/评论
+  assert.doesNotMatch(html, /AggregateRating|"Review"/);
+
+  // 所有线上地址使用完整绝对地址，且保留 GitHub Pages 子路径
+  const SITE = "https://rachermaykii.github.io/transit-map-generator/";
+  assert.equal(site.url, SITE);
+  assert.equal(webapp.url, SITE);
+  assert.equal(source.codeRepository, "https://github.com/RacherMaykii/transit-map-generator");
+  assert.equal(webapp.isPartOf["@id"], `${SITE}#website`);
+  assert.match(html, /property="og:url" content="https:\/\/rachermaykii\.github\.io\/transit-map-generator\/"/);
+
+  // Open Graph 与 Twitter Card
+  assert.match(html, /property="og:type" content="website"/);
+  assert.match(html, /property="og:title"/);
+  assert.match(html, /property="og:description"/);
+  assert.match(html, /property="og:site_name" content="轨道交通视觉设计工坊"/);
+  assert.match(html, /name="twitter:card" content="summary_large_image"/);
+  assert.match(html, /name="twitter:title"/);
+  assert.match(html, /name="twitter:description"/);
+});
+
 test("portal about modal has real links, free note, version, and disclaimer", async () => {
   const [content, app, css] = await Promise.all([
     readFile(new URL("app/portalContent.ts", root), "utf8"),

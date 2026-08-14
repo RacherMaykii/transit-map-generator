@@ -3689,8 +3689,24 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
       }
       if (cancelled) return;
       if (project) {
+          const associationKey = (candidate: ProjectFile) => JSON.stringify({
+            modules: candidate.modules.map((module) => [module.sourceStationIds, module.lineIds]),
+            platforms: candidate.platforms.map((platform) => [platform.sourceStationId, platform.sourceLineId]),
+            labels: candidate.labels.map((label) => [label.sourceStationId, label.sourceLineId, label.language]),
+            transferGroups: candidate.transferGroups.map((group) => [group.sourceStationIds, group.lineIds]),
+            servicePatterns: candidate.servicePatterns.map((pattern) => [pattern.memberLineIds, pattern.stationPathIds]),
+            physicalStations: candidate.physicalStations.map((physical) => physical.sourceStationIds),
+            sourceMappings: candidate.sourceMappings.map((mapping) => [mapping.sourceLineId, mapping.sourceStationId, mapping.sourceStationOnLineId, mapping.physicalStationId, mapping.status]),
+            filterLineIds: candidate.filters.lineIds,
+            pendingPlacement: candidate.pendingPlacement,
+          });
+          const associationsBefore = associationKey(project);
           const synchronized = synchronizeWiringProjectSource(project, normalized);
           project = synchronized;
+          if (associationKey(project) !== associationsBefore) {
+            // 同步自动解除了指向已删除站点的关联：把清理结果写回当前工程的配线图文档。
+            await persistWiringProject(project);
+          }
           setProjectName(project.projectInfo?.name || "未命名配线图");
           setModules(project.modules);
           setConnections(project.connections || []);
@@ -4569,7 +4585,7 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
                   <label className="wiring-check" style={{ marginBottom: 10 }}><input type="checkbox" checked={filterState.placement === "unplaced"} onChange={(e) => updateFilters({ placement: e.target.checked ? "unplaced" : "all" })} />只看未放置</label>
                   {pendingSourcePlacements.length > 0 && <div className="wiring-pending-tray"><b>待放置站点（{pendingSourcePlacements.length}）</b>{pendingSourcePlacements.map((change) => { const context = adjacentStationContext(change.entityId); return <span key={change.id}><span>{context?.station.nameZh || change.entityId} · {context?.line?.nameZh || context?.station.lineId || "未知线路"}<small>{context?.previous?.nameZh || "起点"} → {context?.next?.nameZh || "终点"}</small></span><button className="wiring-btn" onClick={() => beginStationPlacement(change.entityId)}>手动放置</button><button className="wiring-btn" disabled={!context?.previousModule || !context.nextModule} onClick={() => insertStationBetweenNeighbors(change.entityId)}>插入相邻模块之间</button></span>; })}</div>}
                   {advancedMode && physicalStationSuggestions.length > 0 && <div className="wiring-change-panel"><header><b>物理站映射建议</b></header>{physicalStationSuggestions.map((suggestion) => <div className={`wiring-change-row ${suggestion.ambiguous ? "warning" : "info"}`} key={suggestion.id}><span>{suggestion.displayName} · {suggestion.sourceStationIds.join(" / ")}{suggestion.ambiguous ? "（存在歧义）" : ""}</span><button onClick={() => confirmPhysicalMapping(suggestion)}>确认合并</button></div>)}</div>}
-                  {unresolvedChanges.length > 0 && <div className="wiring-change-panel"><header><b>数据变更</b><select value={changeSeverity} onChange={(e) => setChangeSeverity(e.target.value as typeof changeSeverity)}><option value="all">全部</option><option value="error">错误</option><option value="warning">警告</option><option value="info">信息</option></select><button onClick={acceptInformationalChanges}>接受全部信息项</button></header>{unresolvedChanges.filter((change) => change.status === "unresolved" && (changeSeverity === "all" || change.severity === changeSeverity)).map((change) => <div className={`wiring-change-row ${change.severity}`} key={change.id}><span>{change.entityType} {change.entityId}: {change.changeType}</span><details><summary>新旧值</summary><code>{JSON.stringify(change.oldValue)} → {JSON.stringify(change.newValue)}</code></details><button onClick={() => locateSourceChange(change)}>定位/手动</button><button onClick={() => resolveSourceChange(change, "accepted")}>接受</button><button onClick={() => resolveSourceChange(change, "ignored")}>忽略</button></div>)}</div>}
+                  {unresolvedChanges.length > 0 && <div className="wiring-change-panel"><header><b>数据变更</b><select value={changeSeverity} onChange={(e) => setChangeSeverity(e.target.value as typeof changeSeverity)}><option value="all">全部</option><option value="error">错误</option><option value="warning">警告</option><option value="info">信息</option></select><button onClick={acceptInformationalChanges}>接受全部信息项</button></header>{unresolvedChanges.filter((change) => change.status === "unresolved" && (changeSeverity === "all" || change.severity === changeSeverity)).map((change) => <div className={`wiring-change-row ${change.severity}`} key={change.id}><span>{change.entityType} {change.entityId}: {change.changeType}</span>{change.notes && <p className="wiring-change-notes">{change.notes}</p>}<details><summary>新旧值</summary><code>{JSON.stringify(change.oldValue)} → {JSON.stringify(change.newValue)}</code></details><button onClick={() => locateSourceChange(change)}>定位/手动</button><button onClick={() => resolveSourceChange(change, "accepted")}>接受</button><button onClick={() => resolveSourceChange(change, "ignored")}>忽略</button></div>)}</div>}
                   {Array.from(filteredStations.entries()).map(([lineId, stations]) => {
                     const line = data.lines.find((l) => l.id === lineId);
                     if (!line) return null;

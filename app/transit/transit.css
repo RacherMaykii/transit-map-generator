@@ -234,6 +234,14 @@ code { font-family: Consolas, "SFMono-Regular", monospace; font-size: 11px; back
 .transfer-option.is-hidden button { color: #69767c; }
 .modal-actions { position: relative; z-index: 4; flex: 0 0 auto; padding: 14px 22px 18px; gap: 8px; background: white; }
 .danger-button { min-height: 36px; padding: 0 12px; border-radius: 8px; color: #a63838; background: #fff0f0; font-weight: 700; }
+.danger-button:hover { background: #ffe3e3; }
+.danger-text { color: #a63838; font-weight: 600; }
+.confirm-modal { width: min(480px, 100%); }
+.confirm-question { margin: 4px 0 10px; font-size: 16px; font-weight: 700; line-height: 1.5; }
+.confirm-scope { margin: 2px 0; color: #5c686e; font-size: 12px; }
+.confirm-list { margin: 12px 0; padding-left: 20px; color: #2e3940; font-size: 13px; line-height: 1.8; }
+.confirm-note { margin: 10px 0 0; color: #69767c; font-size: 12px; line-height: 1.6; }
+.warning-box { margin: 12px 0 0; padding: 10px 12px; border: 1px solid #f2d27b; border-radius: 8px; background: #fff8e6; color: #7a5b10; font-size: 12px; line-height: 1.6; }
 .history-modal { width: min(600px, 100%); }
 .export-package-modal { width: min(640px, 100%); }
 .export-package-grid { align-items: start; }

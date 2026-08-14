@@ -551,6 +551,8 @@ export interface SourceChange {
   affectedObjectIds: string[];
   status: SourceChangeStatus;
   requiresPlacement: boolean;
+  /** 人类可读的补充说明（如自动解除关联的信息记录）。 */
+  notes?: string;
 }
 
 export interface PendingPlacement {

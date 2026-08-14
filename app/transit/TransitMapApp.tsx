@@ -35,6 +35,9 @@ import {
 } from "./types";
 import { canvasImageBytes, canvasPixelHash, canvasPngBytes, CanvasImageFormat, createStoredZip, ZipEntry } from "./zip";
 import { auditTransitData, calculateOpeningStats, StationAuditIssue } from "./audit";
+import { deleteLineCascade, deleteStationCascade, type DeleteLineImpact, type DeleteStationImpact } from "./stationDeletion";
+import { wiringAssociationsForStationIds } from "../wiring/stationUnlink";
+import { BrowserEditorDocumentStore } from "../projects/editorDocumentStore";
 import { nextIndexForDirection, previousIndexForDirection, stepForDirection, terminusForDirection, terminusSideFor, visualDirectionFor } from "./route-orientation.mjs";
 import {
   buildImportPreview,
@@ -187,11 +190,27 @@ interface TransitMapAppProps {
   repository?: ProjectRepository;
 }
 
+/** 站点删除确认弹窗的数据（删除前的统计 + 影响）。 */
+interface StationDeleteDialogState {
+  impact: DeleteStationImpact;
+  line: TransitLine | undefined;
+  unlinkedWiringCount: number;
+  hasWiringAssociation: boolean;
+}
+
+/** 线路删除确认弹窗的数据（删除前的统计 + 影响）。 */
+interface LineDeleteDialogState {
+  impact: DeleteLineImpact;
+  unlinkedWiringCount: number;
+  hasWiringAssociation: boolean;
+}
+
 export default function TransitMapApp({ projectId = DEFAULT_PROJECT_ID, repository }: TransitMapAppProps) {
   const projectRepository = useMemo(
     () => repository || createProjectRepository({ storageMode: "http" }),
     [repository],
   );
+  const documentStore = useMemo(() => new BrowserEditorDocumentStore(), []);
   const [data, setData] = useState<TransitData | null>(null);
   const [savedCsvSnapshot, setSavedCsvSnapshot] = useState("");
   const [savedLayoutSnapshot, setSavedLayoutSnapshot] = useState("");
@@ -207,6 +226,10 @@ export default function TransitMapApp({ projectId = DEFAULT_PROJECT_ID, reposito
   const [showSliceGuides, setShowSliceGuides] = useState(true);
   const [editingStationId, setEditingStationId] = useState<string | null>(null);
   const [editingLineId, setEditingLineId] = useState<string | null>(null);
+  const [pendingStationDelete, setPendingStationDelete] = useState<StationDeleteDialogState | null>(null);
+  const [pendingLineDelete, setPendingLineDelete] = useState<LineDeleteDialogState | null>(null);
+  const stationDeleteLockRef = useRef(false);
+  const lineDeleteLockRef = useRef(false);
   const [activeTable, setActiveTable] = useState<"stations" | "lines">("stations");
   const [status, setStatus] = useState("正在读取本地表格…");
   const [error, setError] = useState("");
@@ -608,14 +631,94 @@ export default function TransitMapApp({ projectId = DEFAULT_PROJECT_ID, reposito
     setCurrentIndex(sequence - 1);
   }
 
-  function removeStation(station: Station) {
-    if (!data || !window.confirm(`确认删除“${station.nameZh}”吗？`)) return;
-    commit({
-      ...data,
-      stations: data.stations.filter((item) => item.id !== station.id),
-      transfers: data.transfers.filter((transfer) => transfer.stationId !== station.id),
-    });
+  /** 读取当前工程配线图文档，统计一组站点被删除后会恢复为"未分配"的元件数。 */
+  async function loadWiringSummary(
+    stationIds: string[],
+    deletedLineIds: string[] = [],
+  ): Promise<{ unlinkedWiringCount: number; hasWiringAssociation: boolean }> {
+    try {
+      const doc = await documentStore.load(projectId, "wiring");
+      if (!doc) return { unlinkedWiringCount: 0, hasWiringAssociation: false };
+      const summary = wiringAssociationsForStationIds(
+        doc as Record<string, unknown>,
+        stationIds,
+        deletedLineIds,
+      );
+      return {
+        unlinkedWiringCount: summary.unlinkedModuleCount
+          + summary.unlinkedPlatformCount
+          + summary.unlinkedTransferGroupCount,
+        hasWiringAssociation: summary.hasAssociation,
+      };
+    } catch {
+      return { unlinkedWiringCount: 0, hasWiringAssociation: false };
+    }
+  }
+
+  /** 打开站点删除确认弹窗。先按当前数据统计影响，再读取配线图关联。 */
+  async function requestDeleteStation(station: Station) {
+    if (!data) return;
+    stationDeleteLockRef.current = false;
+    const { impact } = deleteStationCascade(data, station.id);
+    const line = data.lines.find((candidate) => candidate.id === station.lineId);
+    const wiring = await loadWiringSummary([station.id]);
+    setPendingStationDelete({ impact, line, ...wiring });
+  }
+
+  /** 确认删除站点：一次 commit 产生一个撤销步骤，并修正预览状态。 */
+  function confirmDeleteStation() {
+    if (!data || !pendingStationDelete) return;
+    if (stationDeleteLockRef.current) return;
+    stationDeleteLockRef.current = true;
+    const station = pendingStationDelete.impact.station;
+    const { data: nextData } = deleteStationCascade(data, station.id);
+    commit(nextData);
     setEditingStationId(null);
+    setPendingStationDelete(null);
+    // 被删站在当前预览线路时，收紧 currentIndex，避免访问不存在的站点。
+    if (station.lineId === lineId) {
+      const remaining = stationsForLine(nextData, lineId).length;
+      setCurrentIndex((value) => Math.max(0, Math.min(remaining - 1, value)));
+    }
+    setStatus(`已删除站点“${station.nameZh}”`);
+  }
+
+  /** 打开线路删除确认弹窗。统计站点数、换乘数与配线图关联。 */
+  async function requestDeleteLine(line: TransitLine) {
+    if (!data) return;
+    lineDeleteLockRef.current = false;
+    const { impact } = deleteLineCascade(data, line.id);
+    const lineStationIds = data.stations
+      .filter((station) => station.lineId === line.id)
+      .map((station) => station.id);
+    const wiring = await loadWiringSummary(lineStationIds, [line.id]);
+    setPendingLineDelete({ impact, ...wiring });
+  }
+
+  /** 确认删除线路：一次 commit 产生一个撤销步骤，并切换/修正预览线路。 */
+  function confirmDeleteLine() {
+    if (!data || !pendingLineDelete) return;
+    if (lineDeleteLockRef.current) return;
+    lineDeleteLockRef.current = true;
+    const line = pendingLineDelete.impact.line;
+    const { data: nextData } = deleteLineCascade(data, line.id);
+    commit(nextData);
+    setEditingLineId(null);
+    setPendingLineDelete(null);
+    // 被删线路正是当前预览线路时，切换到剩余线路（优先有站点的线路）。
+    if (lineId === line.id) {
+      const remainingLines = nextData.lines;
+      const firstWithStations = remainingLines.find((candidate) => stationsForLine(nextData, candidate.id).length);
+      if (firstWithStations) {
+        selectPreviewLine(firstWithStations.id);
+      } else if (remainingLines.length) {
+        selectPreviewLine(remainingLines[0].id);
+      } else {
+        setLineId("");
+        setCurrentIndex(0);
+      }
+    }
+    setStatus(`已删除线路“${line.nameZh}”`);
   }
 
   function moveStation(station: Station, delta: number) {
@@ -1226,7 +1329,10 @@ export default function TransitMapApp({ projectId = DEFAULT_PROJECT_ID, reposito
                     <td><code>{candidate.code}</code></td>
                     <td><span className="color-chip" style={{ backgroundColor: candidate.lineColor }} />{candidate.lineColor}</td>
                     <td>{stationsForLine(data, candidate.id).length}</td>
-                    <td><button className="table-edit" onClick={() => setEditingLineId(candidate.id)}>编辑</button></td>
+                    <td className="row-actions">
+                      <button className="table-edit" onClick={() => setEditingLineId(candidate.id)}>编辑</button>
+                      <button className="table-edit danger-text" onClick={() => void requestDeleteLine(candidate)}>删除</button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -1398,7 +1504,7 @@ export default function TransitMapApp({ projectId = DEFAULT_PROJECT_ID, reposito
             </div>
             </div>
             <div className="modal-actions">
-              <button className="danger-button" onClick={() => removeStation(editingStation)}>删除站点</button>
+              <button className="danger-button" onClick={() => void requestDeleteStation(editingStation)}>删除站点</button>
               <div className="toolbar-spacer" />
               <button className="secondary-button" onClick={undo} disabled={!undoStack.length}>撤销修改</button>
               <button className="primary-button" onClick={() => setEditingStationId(null)}>完成</button>
@@ -1506,6 +1612,69 @@ export default function TransitMapApp({ projectId = DEFAULT_PROJECT_ID, reposito
             </div>
             </div>
             <div className="modal-actions"><div className="toolbar-spacer" /><button className="secondary-button" onClick={undo} disabled={!undoStack.length}>撤销修改</button><button className="primary-button" onClick={() => setEditingLineId(null)}>完成</button></div>
+          </section>
+        </div>
+      )}
+
+      {pendingStationDelete && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && setPendingStationDelete(null)}>
+          <section className="editor-modal confirm-modal" role="dialog" aria-modal="true" aria-labelledby="station-delete-title">
+            <div className="modal-heading">
+              <div><p className="eyebrow">危险操作</p><h2 id="station-delete-title">删除站点</h2></div>
+              <button className="close-button" onClick={() => setPendingStationDelete(null)}>×</button>
+            </div>
+            <div className="modal-scroll-body">
+              <p className="confirm-question">确定删除“{pendingStationDelete.impact.station.nameZh}”吗？</p>
+              {pendingStationDelete.line && (
+                <p className="confirm-scope">线路：{pendingStationDelete.line.nameZh}（{pendingStationDelete.line.number || pendingStationDelete.line.code}）</p>
+              )}
+              {pendingStationDelete.impact.station.code && (
+                <p className="confirm-scope">站点代码：{pendingStationDelete.impact.station.code}</p>
+              )}
+              <ul className="confirm-list">
+                <li>删除 1 条站点记录</li>
+                {pendingStationDelete.impact.removedTransferCount > 0 && <li>删除 {pendingStationDelete.impact.removedTransferCount} 条本站换乘记录</li>}
+                {pendingStationDelete.impact.reciprocalTransferCount > 0 && <li>清理 {pendingStationDelete.impact.reciprocalTransferCount} 条其他线路中的对应换乘标记</li>}
+                {pendingStationDelete.unlinkedWiringCount > 0 && <li>将 {pendingStationDelete.unlinkedWiringCount} 个配线图站点元件恢复为“未分配”状态</li>}
+              </ul>
+              <p className="confirm-note">配线图中的站台、轨道、道岔、连接、标签、图标与手动布局都不会被删除。删除后可通过“撤销修改”或工程历史恢复。</p>
+              {pendingStationDelete.hasWiringAssociation && (
+                <div className="warning-box">该站已用于配线图。删除后相关元件会保留，但不再与线路站点数据同步。</div>
+              )}
+            </div>
+            <div className="modal-actions">
+              <button className="secondary-button" onClick={() => setPendingStationDelete(null)}>取消</button>
+              <button className="danger-button" onClick={confirmDeleteStation}>删除站点</button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {pendingLineDelete && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && setPendingLineDelete(null)}>
+          <section className="editor-modal confirm-modal" role="dialog" aria-modal="true" aria-labelledby="line-delete-title">
+            <div className="modal-heading">
+              <div><p className="eyebrow">危险操作</p><h2 id="line-delete-title">删除线路</h2></div>
+              <button className="close-button" onClick={() => setPendingLineDelete(null)}>×</button>
+            </div>
+            <div className="modal-scroll-body">
+              <p className="confirm-question">确定删除“{pendingLineDelete.impact.line.nameZh}”吗？</p>
+              <p className="confirm-scope">线路编号：{pendingLineDelete.impact.line.number || pendingLineDelete.impact.line.code}</p>
+              <ul className="confirm-list">
+                <li>删除 1 条线路记录</li>
+                {pendingLineDelete.impact.removedStationCount > 0 && <li>删除 {pendingLineDelete.impact.removedStationCount} 条站点记录</li>}
+                {pendingLineDelete.impact.removedTransferCount > 0 && <li>删除 {pendingLineDelete.impact.removedTransferCount} 条换乘记录</li>}
+                {pendingLineDelete.unlinkedWiringCount > 0 && <li>将 {pendingLineDelete.unlinkedWiringCount} 个配线图关联元件恢复为“未分配”状态</li>}
+              </ul>
+              <p className="confirm-note">配线图中的站台、轨道、道岔、连接、标签、图标与手动布局都不会被删除。删除后可通过“撤销修改”或工程历史恢复。</p>
+              {pendingLineDelete.hasWiringAssociation && (
+                <div className="warning-box">该线路已用于配线图。删除后相关元件会保留，但不再与线路站点数据同步。</div>
+              )}
+            </div>
+            <div className="modal-actions">
+              <button className="secondary-button" onClick={() => setPendingLineDelete(null)}>取消</button>
+              <button className="danger-button" onClick={confirmDeleteLine}>删除线路</button>
+            </div>
           </section>
         </div>
       )}

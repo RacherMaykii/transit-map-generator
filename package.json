@@ -14,7 +14,7 @@
     "start": "node scripts/sync-sample-data.mjs && vinext dev --hostname 127.0.0.1",
     "start:production": "vinext start",
     "data": "node local-data-server.mjs",
-    "test": "npm run build && node --test --test-concurrency=1 tests/rendered-html.test.mjs tests/project-repositories.test.mjs tests/project-editor-document-store.test.mjs tests/project-archive.test.mjs tests/local-data-server-assets.test.mjs tests/wiring-source-sync.test.mjs tests/wiring-avoidance-tracks.test.mjs tests/wiring-station-association.test.mjs tests/wiring-connections.test.mjs tests/wiring-canvas.test.mjs tests/wiring-data-project.test.mjs tests/wiring-color.test.mjs",
+    "test": "npm run build && node --test --test-concurrency=1 tests/rendered-html.test.mjs tests/project-repositories.test.mjs tests/project-editor-document-store.test.mjs tests/project-archive.test.mjs tests/local-data-server-assets.test.mjs tests/station-deletion.test.mjs tests/wiring-source-sync.test.mjs tests/wiring-avoidance-tracks.test.mjs tests/wiring-station-association.test.mjs tests/wiring-connections.test.mjs tests/wiring-canvas.test.mjs tests/wiring-data-project.test.mjs tests/wiring-color.test.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next"
   },
   "dependencies": {

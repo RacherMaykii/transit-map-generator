@@ -506,9 +506,10 @@
 .wiring-pending-tray > span small { color: var(--muted); overflow-wrap: anywhere; }
 .wiring-pending-tray > span .wiring-btn { min-width: 0; white-space: normal; line-height: 1.25; }
 .wiring-change-panel header,.wiring-change-row { display: flex; align-items: center; gap: 6px; justify-content: space-between; }
-.wiring-change-row { padding: 5px 0; border-top: 1px solid #e3eaed; }
+.wiring-change-row { padding: 5px 0; border-top: 1px solid #e3eaed; flex-wrap: wrap; }
 .wiring-change-row.error { color: #a23333; }.wiring-change-row.warning { color: #8b6514; }
 .wiring-change-row button { font-size: 11px; border: 1px solid var(--border); background: white; border-radius: 3px; padding: 2px 5px; }
+.wiring-change-notes { flex: 1 0 100%; margin: 2px 0 0; color: #8b6514; font-size: 11px; }
 .wiring-svg .label-anchor { pointer-events: none; }
 
 @keyframes wiring-snap-pulse { 0%, 100% { opacity: .5; } 50% { opacity: 1; } }
