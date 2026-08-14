@@ -129,7 +129,7 @@ import {
   type ProjectFile,
 } from "./projectStore";
 import { newestWiringProject, synchronizeWiringProjectSource } from "./sourceSync";
-import { DEFAULT_WIRING_SAMPLE_MARKER, isWiringProjectEmpty, loadDefaultWiringSample } from "./sampleProject";
+import { DEFAULT_WIRING_SAMPLE_MARKER, isWiringProjectEmpty, loadDefaultWiringSample, shouldInstallDefaultWiringSample } from "./sampleProject";
 import TutorialOverlay, { useTutorialState } from "./TutorialOverlay";
 import FirstUseNotice, { useFirstUseNoticeState } from "./FirstUseNotice";
 import PopoverMenu, { type PopoverMenuItem } from "./PopoverMenu";
@@ -3653,7 +3653,7 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
       }
       // 每个浏览器只初始化一次固定的“虚空城”示例。这样旧版空壳能升级，用户之后主动清空也不会被再次覆盖。
       if (projectId === DEFAULT_PROJECT_ID && localStorage.getItem(DEFAULT_WIRING_SAMPLE_MARKER) !== "1") {
-        if (isWiringProjectEmpty(project)) {
+        if (shouldInstallDefaultWiringSample(project)) {
           const sample = await loadDefaultWiringSample(projectId).catch(() => null);
           if (sample) {
             project = sample;

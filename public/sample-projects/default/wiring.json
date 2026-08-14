@@ -2,14 +2,14 @@
   "schemaVersion": 5,
   "projectInfo": {
     "name": "虚空城示例配线图",
-    "createdAt": "2026-08-13T07:53:36.646Z",
-    "updatedAt": "2026-08-13T07:53:36.646Z"
+    "createdAt": "2026-08-14T02:02:17.253Z",
+    "updatedAt": "2026-08-14T02:02:17.253Z"
   },
   "pages": [
     {
       "id": "page-1",
       "name": "主画布",
-      "width": 7600,
+      "width": 8040,
       "height": 4640,
       "backgroundColor": "#FFFFFF",
       "layerRootIds": [
@@ -164,6 +164,7 @@
         "mod-msoucsw2-hkdqe",
         "mod-msov07n1-um30o",
         "mod-msov8fnz-qsa7f",
+        "mod-mss9mx5q-eopco",
         "bgimg-mslg6qc5-f6zbe",
         "label-mslg8scp-zwyo1",
         "label-mslg8scp-jlngn",
@@ -351,6 +352,9 @@
         "label-mslkdm0f-6g0hz",
         "label-mslkdqhc-jvhqf",
         "label-mslkdqhc-yiygx",
+        "label-mss9olss-afaz3",
+        "label-mss9phgv-op909",
+        "label-mss9q6ac-pu512",
         "tgrp-mslkkr1w-snvwx",
         "tgrp-mslkkyjn-ppapc",
         "tgrp-mslkl3uv-yvz5y",
@@ -495,12 +499,13 @@
         "platform-mslhnh1g-yx7iy",
         "platform-mslrp3ia-bhlhz",
         "platform-mslil786-m9mgt",
-        "platform-msmz1f5f-ohqyu"
+        "platform-msmz1f5f-ohqyu",
+        "graphic-mss9nzty-mccuq"
       ],
       "viewport": {
-        "panX": -1305.39890210775,
-        "panY": -1552.233516190853,
-        "scale": 0.7581705427489418
+        "scale": 0.12973880597014928,
+        "panX": 57.94999999999993,
+        "panY": 62.0059701492537
       },
       "gridSize": 20,
       "showGrid": true,
@@ -915,12 +920,12 @@
       "y": 1728,
       "rotation": 0,
       "lineIds": [
-        "L2",
-        "L1"
+        "L1",
+        "L2"
       ],
       "sourceStationIds": [
-        "L2-S02",
-        "L1-S06"
+        "L1-S06",
+        "L2-S02"
       ],
       "locked": false,
       "layerId": "layer-track-station",
@@ -2591,10 +2596,12 @@
       "y": 2553.4338237334173,
       "rotation": 0,
       "lineIds": [
-        "L6"
+        "L6",
+        "T4"
       ],
       "sourceStationIds": [
-        "L6-S01"
+        "L6-S01",
+        "T4-S06"
       ],
       "locked": false,
       "layerId": "layer-track-station",
@@ -2658,10 +2665,12 @@
       "y": 2449.66128465056,
       "rotation": 0,
       "lineIds": [
-        "L7"
+        "L7",
+        "T5"
       ],
       "sourceStationIds": [
-        "L7-S01"
+        "L7-S01",
+        "T5-S01"
       ],
       "locked": false,
       "layerId": "layer-track-station",
@@ -3274,7 +3283,7 @@
       ],
       "locked": false,
       "layerId": "layer-track-station",
-      "zIndex": 112,
+      "zIndex": -20,
       "pageId": "page-1",
       "createdOrder": 1786264594163,
       "customLabel": "林园坊",
@@ -3963,6 +3972,29 @@
       },
       "trackColorMode": "line",
       "labelColorMode": "line"
+    },
+    {
+      "id": "mod-mss9mx5q-eopco",
+      "templateId": "single_crossover",
+      "name": "单渡线",
+      "x": 1200,
+      "y": 3603.451733257117,
+      "rotation": 0,
+      "mirrorX": false,
+      "mirrorY": false,
+      "lineIds": [],
+      "sourceStationIds": [],
+      "locked": false,
+      "layerId": "layer-track-turnout",
+      "zIndex": 0,
+      "pageId": "page-1",
+      "createdOrder": 1786670754398,
+      "customParams": {
+        "length": 100,
+        "spacing": 40
+      },
+      "trackColorMode": "line",
+      "labelColorMode": "line"
     }
   ],
   "connections": [
@@ -4032,16 +4064,16 @@
         {
           "x1": 3980,
           "y1": 1748,
-          "x2": 4159.44,
-          "y2": 1613.12,
+          "x2": 4172.41,
+          "y2": 1594.41,
           "type": "main",
           "curved": true,
-          "cx": 4165.82954544977,
-          "cy": 1596.2922339882766
+          "cx": 4178.169728136285,
+          "cy": 1577.3563924111031
         },
         {
-          "x1": 4159.44,
-          "y1": 1613.12,
+          "x1": 4172.41,
+          "y1": 1594.41,
           "x2": 4210,
           "y2": 1286,
           "type": "main"
@@ -4052,13 +4084,13 @@
       "controlPoints": [
         {
           "id": "mod-mslg9vza-5jnpk:R_up1:mod-mslg94d9-6oigm:L_up:middle",
-          "x": 4159.44,
-          "y": 1613.12,
+          "x": 4172.41,
+          "y": 1594.41,
           "curved": true,
-          "handleX": 6.389545449771015,
-          "handleY": -16.82776601172332,
+          "handleX": 5.759728136285135,
+          "handleY": -17.053607588897,
           "directionOnly": true,
-          "tangentDirection": -69.20810329626367,
+          "tangentDirection": -71.33798851037977,
           "curveKind": "quadratic"
         }
       ],
@@ -4082,16 +4114,16 @@
         {
           "x1": 3980,
           "y1": 1836,
-          "x2": 4219.87,
-          "y2": 1634.2,
+          "x2": 4206.9,
+          "y2": 1652.9,
           "type": "main",
           "curved": true,
-          "cx": 4224.9489938318475,
-          "cy": 1616.9314209717172
+          "cx": 4212.542733735163,
+          "cy": 1635.8073244928114
         },
         {
-          "x1": 4219.87,
-          "y1": 1634.2,
+          "x1": 4206.9,
+          "y1": 1652.9,
           "x2": 4250,
           "y2": 1286,
           "type": "main"
@@ -4102,13 +4134,13 @@
       "controlPoints": [
         {
           "id": "mod-mslg9vza-5jnpk:R_dn1:mod-mslg94d9-6oigm:L_dn:middle",
-          "x": 4219.87,
-          "y": 1634.2,
+          "x": 4206.9,
+          "y": 1652.9,
           "curved": true,
-          "handleX": 5.078993831847665,
-          "handleY": -17.268579028282936,
+          "handleX": 5.64273373516372,
+          "handleY": -17.092675507188606,
           "directionOnly": true,
-          "tangentDirection": -73.61045966596602,
+          "tangentDirection": -71.73060864777794,
           "curveKind": "quadratic"
         }
       ],
@@ -4188,16 +4220,16 @@
         {
           "x1": 3630,
           "y1": 1746,
-          "x2": 3692.19,
-          "y2": 1801.5,
+          "x2": 3681.28,
+          "y2": 1794.72,
           "type": "main",
           "curved": true,
-          "cx": 3710.1462707917717,
-          "cy": 1802.7539295245651
+          "cx": 3699.1019387808906,
+          "cy": 1797.2455688646717
         },
         {
-          "x1": 3692.19,
-          "y1": 1801.5,
+          "x1": 3681.28,
+          "y1": 1794.72,
           "x2": 3780,
           "y2": 1796,
           "type": "main"
@@ -4208,13 +4240,13 @@
       "controlPoints": [
         {
           "id": "mod-mslgj42o-0c8yb:R_dn:mod-mslg9vza-5jnpk:L_dn2:middle",
-          "x": 3692.19,
-          "y": 1801.5,
+          "x": 3681.28,
+          "y": 1794.72,
           "curved": true,
-          "handleX": 17.95627079177144,
-          "handleY": 1.2539295245650701,
+          "handleX": 17.82193878089029,
+          "handleY": 2.525568864671636,
           "directionOnly": true,
-          "tangentDirection": 3.9946170081482184,
+          "tangentDirection": 8.065749203179085,
           "curveKind": "quadratic"
         }
       ],
@@ -4238,16 +4270,16 @@
         {
           "x1": 3670,
           "y1": 1746,
-          "x2": 3696.44,
-          "y2": 1777.87,
+          "x2": 3707.34,
+          "y2": 1784.66,
           "type": "main",
           "curved": true,
-          "cx": 3713.7406377700127,
-          "cy": 1782.83869527651
+          "cx": 3724.985462702143,
+          "cy": 1788.2149466982337
         },
         {
-          "x1": 3696.44,
-          "y1": 1777.87,
+          "x1": 3707.34,
+          "y1": 1784.66,
           "x2": 3780,
           "y2": 1788,
           "type": "main"
@@ -4258,13 +4290,13 @@
       "controlPoints": [
         {
           "id": "mod-mslgj42o-0c8yb:R_up:mod-mslg9vza-5jnpk:L_up2:middle",
-          "x": 3696.44,
-          "y": 1777.87,
+          "x": 3707.34,
+          "y": 1784.66,
           "curved": true,
-          "handleX": 17.30063777001263,
-          "handleY": 4.968695276509962,
+          "handleX": 17.645462702142947,
+          "handleY": 3.5549466982336098,
           "directionOnly": true,
-          "tangentDirection": 16.023919076314282,
+          "tangentDirection": 11.390630701662337,
           "curveKind": "quadratic"
         }
       ],
@@ -4540,16 +4572,16 @@
         {
           "x1": 860,
           "y1": 1836,
-          "x2": 413.44,
-          "y2": 1767.12,
+          "x2": 397.65,
+          "y2": 1773.65,
           "type": "main",
           "curved": true,
-          "cx": 395.5573396634529,
-          "cy": 1765.0680596286234
+          "cx": 379.7129550059071,
+          "cy": 1772.1458667346653
         },
         {
-          "x1": 413.44,
-          "y1": 1767.12,
+          "x1": 397.65,
+          "y1": 1773.65,
           "x2": 150,
           "y2": 1926,
           "type": "main"
@@ -4560,13 +4592,13 @@
       "controlPoints": [
         {
           "id": "mod-mslgojgt-220tl:L_up:mod-mslgotko-ot1qm:L_dn:middle",
-          "x": 413.44,
-          "y": 1767.12,
+          "x": 397.65,
+          "y": 1773.65,
           "curved": true,
-          "handleX": -17.882660336547097,
-          "handleY": -2.0519403713766025,
+          "handleX": -17.93704499409291,
+          "handleY": -1.5041332653346897,
           "directionOnly": true,
-          "tangentDirection": -173.4542410973583,
+          "tangentDirection": -175.20660551137004,
           "curveKind": "quadratic"
         }
       ],
@@ -4590,16 +4622,16 @@
         {
           "x1": 860,
           "y1": 1876,
-          "x2": 408.5,
-          "y2": 1806.82,
+          "x2": 424.22,
+          "y2": 1800.22,
           "type": "main",
           "curved": true,
-          "cx": 390.6183572790247,
-          "cy": 1804.7592104427208
+          "cx": 406.4138184379333,
+          "cy": 1797.5856313510228
         },
         {
-          "x1": 408.5,
-          "y1": 1806.82,
+          "x1": 424.22,
+          "y1": 1800.22,
           "x2": 190,
           "y2": 1926,
           "type": "main"
@@ -4610,13 +4642,13 @@
       "controlPoints": [
         {
           "id": "mod-mslgojgt-220tl:L_dn:mod-mslgotko-ot1qm:L_up:middle",
-          "x": 408.5,
-          "y": 1806.82,
+          "x": 424.22,
+          "y": 1800.22,
           "curved": true,
-          "handleX": -17.88164272097531,
-          "handleY": -2.0607895572790986,
+          "handleX": -17.806181562066737,
+          "handleY": -2.6343686489773135,
           "directionOnly": true,
-          "tangentDirection": -173.4258876303173,
+          "tangentDirection": -171.58431658669892,
           "curveKind": "quadratic"
         }
       ],
@@ -5886,16 +5918,16 @@
         {
           "x1": 4490,
           "y1": 3856,
-          "x2": 4598.33,
-          "y2": 4024.55,
+          "x2": 4602.99,
+          "y2": 4028.01,
           "type": "main",
           "curved": true,
-          "cx": 4614.313621192276,
-          "cy": 4032.8279136007723
+          "cx": 4619.12765912537,
+          "cy": 4035.9834533267194
         },
         {
-          "x1": 4598.33,
-          "y1": 4024.55,
+          "x1": 4602.99,
+          "y1": 4028.01,
           "x2": 4840,
           "y2": 4076,
           "type": "main"
@@ -5906,13 +5938,13 @@
       "controlPoints": [
         {
           "id": "mod-mslhebkh-4vfr0:L_dn:mod-mslheh6i-g3b73:L_up:middle",
-          "x": 4598.33,
-          "y": 4024.55,
+          "x": 4602.99,
+          "y": 4028.01,
           "curved": true,
-          "handleX": 15.983621192275367,
-          "handleY": 8.277913600771987,
+          "handleX": 16.137659125369858,
+          "handleY": 7.9734533267190395,
           "directionOnly": true,
-          "tangentDirection": 27.379628226835738,
+          "tangentDirection": 26.293509231392484,
           "curveKind": "quadratic"
         }
       ],
@@ -5936,16 +5968,16 @@
         {
           "x1": 4450,
           "y1": 3856,
-          "x2": 4579.36,
-          "y2": 4059.76,
+          "x2": 4574.69,
+          "y2": 4056.31,
           "type": "main",
           "curved": true,
-          "cx": 4595.336257409417,
-          "cy": 4068.052116689243
+          "cx": 4590.524908100412,
+          "cy": 4064.86895352549
         },
         {
-          "x1": 4579.36,
-          "y1": 4059.76,
+          "x1": 4574.69,
+          "y1": 4056.31,
           "x2": 4840,
           "y2": 4116,
           "type": "main"
@@ -5956,13 +5988,13 @@
       "controlPoints": [
         {
           "id": "mod-mslhebkh-4vfr0:L_up:mod-mslheh6i-g3b73:L_dn:middle",
-          "x": 4579.36,
-          "y": 4059.76,
+          "x": 4574.69,
+          "y": 4056.31,
           "curved": true,
-          "handleX": 15.976257409417812,
-          "handleY": 8.292116689243006,
+          "handleX": 15.83490810041247,
+          "handleY": 8.558953525489645,
           "directionOnly": true,
-          "tangentDirection": 27.430553136908774,
+          "tangentDirection": 28.391741809567417,
           "curveKind": "quadratic"
         }
       ],
@@ -6350,16 +6382,16 @@
         {
           "x1": 4507.9194600280825,
           "y1": 1396,
-          "x2": 4497.49,
-          "y2": 1268.67,
+          "x2": 4502.82,
+          "y2": 1277.14,
           "type": "main",
           "curved": true,
-          "cx": 4492.321442707081,
-          "cy": 1251.4280159056502
+          "cx": 4498.919509534803,
+          "cy": 1259.56768728565
         },
         {
-          "x1": 4497.49,
-          "y1": 1268.67,
+          "x1": 4502.82,
+          "y1": 1277.14,
           "x2": 4440,
           "y2": 1216,
           "type": "main"
@@ -6370,13 +6402,13 @@
       "controlPoints": [
         {
           "id": "mod-mslhckl6-cmiv9:R_up:mod-mslg9gpz-dgtpe:R_dn:middle",
-          "x": 4497.49,
-          "y": 1268.67,
+          "x": 4502.82,
+          "y": 1277.14,
           "curved": true,
-          "handleX": -5.168557292918871,
-          "handleY": -17.241984094349906,
+          "handleX": -3.9004904651962713,
+          "handleY": -17.57231271435018,
           "directionOnly": true,
-          "tangentDirection": -106.68693315134524,
+          "tangentDirection": -102.51492455469868,
           "curveKind": "quadratic"
         }
       ],
@@ -6400,16 +6432,16 @@
         {
           "x1": 4547.9194600280825,
           "y1": 1396,
-          "x2": 4535.97,
-          "y2": 1257.78,
+          "x2": 4530.72,
+          "y2": 1249.24,
           "type": "main",
           "curved": true,
-          "cx": 4530.830165882023,
-          "cy": 1240.5294317415432
+          "cx": 4524.586676514238,
+          "cy": 1232.3171650419026
         },
         {
-          "x1": 4535.97,
-          "y1": 1257.78,
+          "x1": 4530.72,
+          "y1": 1249.24,
           "x2": 4440,
           "y2": 1176,
           "type": "main"
@@ -6420,13 +6452,13 @@
       "controlPoints": [
         {
           "id": "mod-mslhckl6-cmiv9:R_dn:mod-mslg9gpz-dgtpe:R_up:middle",
-          "x": 4535.97,
-          "y": 1257.78,
+          "x": 4530.72,
+          "y": 1249.24,
           "curved": true,
-          "handleX": -5.1398341179772284,
-          "handleY": -17.2505682584568,
+          "handleX": -6.1333234857616254,
+          "handleY": -16.922834958097443,
           "directionOnly": true,
-          "tangentDirection": -106.5915087071851,
+          "tangentDirection": -109.92197707449543,
           "curveKind": "quadratic"
         }
       ],
@@ -6614,16 +6646,16 @@
         {
           "x1": 4980,
           "y1": 3076,
-          "x2": 5089.48,
-          "y2": 3019.59,
+          "x2": 5091.31,
+          "y2": 3017.31,
           "type": "main",
           "curved": true,
-          "cx": 5099.992259299773,
-          "cy": 3004.9786207217003
+          "cx": 5101.559206731648,
+          "cy": 3002.512913753987
         },
         {
-          "x1": 5089.48,
-          "y1": 3019.59,
+          "x1": 5091.31,
+          "y1": 3017.31,
           "x2": 5130,
           "y2": 2886,
           "type": "main"
@@ -6634,13 +6666,13 @@
       "controlPoints": [
         {
           "id": "mod-mslhlv2z-9o9w3:R_up:mod-mslhm3z7-jhyyy:L_up:middle",
-          "x": 5089.48,
-          "y": 3019.59,
+          "x": 5091.31,
+          "y": 3017.31,
           "curved": true,
-          "handleX": 10.512259299773149,
-          "handleY": -14.611379278299944,
+          "handleX": 10.249206731647654,
+          "handleY": -14.797086246013047,
           "directionOnly": true,
-          "tangentDirection": -54.26660724075717,
+          "tangentDirection": -55.29157741399943,
           "curveKind": "quadratic"
         }
       ],
@@ -6664,16 +6696,16 @@
         {
           "x1": 4980,
           "y1": 3116,
-          "x2": 5121.58,
-          "y2": 3043.46,
+          "x2": 5119.75,
+          "y2": 3045.75,
           "type": "main",
           "curved": true,
-          "cx": 5132.09537036063,
-          "cy": 3028.850859498972
+          "cx": 5130.446777576917,
+          "cy": 3031.2731581665766
         },
         {
-          "x1": 5121.58,
-          "y1": 3043.46,
+          "x1": 5119.75,
+          "y1": 3045.75,
           "x2": 5170,
           "y2": 2886,
           "type": "main"
@@ -6684,13 +6716,13 @@
       "controlPoints": [
         {
           "id": "mod-mslhlv2z-9o9w3:R_dn:mod-mslhm3z7-jhyyy:L_dn:middle",
-          "x": 5121.58,
-          "y": 3043.46,
+          "x": 5119.75,
+          "y": 3045.75,
           "curved": true,
-          "handleX": 10.515370360630616,
-          "handleY": -14.609140501027813,
+          "handleX": 10.69677757691754,
+          "handleY": -14.476841833423272,
           "directionOnly": true,
-          "tangentDirection": -54.254406865294044,
+          "tangentDirection": -53.53971667682199,
           "curveKind": "quadratic"
         }
       ],
@@ -6924,16 +6956,16 @@
         {
           "x1": 5190,
           "y1": 1706,
-          "x2": 5285.62,
-          "y2": 1580.04,
+          "x2": 5278.67,
+          "y2": 1584.67,
           "type": "main",
           "curved": true,
-          "cx": 5302.537764462284,
-          "cy": 1573.8927042043947
+          "cx": 5295.343915864848,
+          "cy": 1577.8891055359952
         },
         {
-          "x1": 5285.62,
-          "y1": 1580.04,
+          "x1": 5278.67,
+          "y1": 1584.67,
           "x2": 5460,
           "y2": 1556,
           "type": "main"
@@ -6944,13 +6976,13 @@
       "controlPoints": [
         {
           "id": "mod-mslhnh19-nec8l:R_up:mod-mslhol9k-l8eu4:L_up:middle",
-          "x": 5285.62,
-          "y": 1580.04,
+          "x": 5278.67,
+          "y": 1584.67,
           "curved": true,
-          "handleX": 16.917764462284456,
-          "handleY": -6.147295795605182,
+          "handleX": 16.673915864847924,
+          "handleY": -6.780894464004933,
           "directionOnly": true,
-          "tangentDirection": -19.96929032262374,
+          "tangentDirection": -22.130434099594062,
           "curveKind": "quadratic"
         }
       ],
@@ -6974,16 +7006,16 @@
         {
           "x1": 5230,
           "y1": 1706,
-          "x2": 5299.84,
-          "y2": 1617.43,
+          "x2": 5306.76,
+          "y2": 1612.76,
           "type": "main",
           "curved": true,
-          "cx": 5316.749204998425,
-          "cy": 1611.259198891452
+          "cx": 5323.930894905625,
+          "cy": 1607.359965913072
         },
         {
-          "x1": 5299.84,
-          "y1": 1617.43,
+          "x1": 5306.76,
+          "y1": 1612.76,
           "x2": 5460,
           "y2": 1596,
           "type": "main"
@@ -6994,13 +7026,13 @@
       "controlPoints": [
         {
           "id": "mod-mslhnh19-nec8l:R_dn:mod-mslhol9k-l8eu4:L_dn:middle",
-          "x": 5299.84,
-          "y": 1617.43,
+          "x": 5306.76,
+          "y": 1612.76,
           "curved": true,
-          "handleX": 16.9092049984244,
-          "handleY": -6.170801108548169,
+          "handleX": 17.170894905624905,
+          "handleY": -5.40003408692803,
           "directionOnly": true,
-          "tangentDirection": -20.048916433533535,
+          "tangentDirection": -17.45771686482375,
           "curveKind": "quadratic"
         }
       ],
@@ -7248,16 +7280,16 @@
         {
           "x1": 930,
           "y1": 1946,
-          "x2": 883.18,
-          "y2": 2381.88,
+          "x2": 889.68,
+          "y2": 2396.32,
           "type": "main",
           "curved": true,
-          "cx": 882.5004375912268,
-          "cy": 2399.867167507214
+          "cx": 889.5316824926164,
+          "cy": 2414.3193889317668
         },
         {
-          "x1": 883.18,
-          "y1": 2381.88,
+          "x1": 889.68,
+          "y1": 2396.32,
           "x2": 1060,
           "y2": 2636,
           "type": "main"
@@ -7268,13 +7300,13 @@
       "controlPoints": [
         {
           "id": "mod-mslhv2rh-lcgpx:L_up:mod-mslhuvd9-fpmi9:L_dn:middle",
-          "x": 883.18,
-          "y": 2381.88,
+          "x": 889.68,
+          "y": 2396.32,
           "curved": true,
-          "handleX": -0.6795624087731292,
-          "handleY": 17.987167507214206,
+          "handleX": -0.14831750738358546,
+          "handleY": 17.999388931766642,
           "directionOnly": true,
-          "tangentDirection": 92.16362851634223,
+          "tangentDirection": 90.4721146314416,
           "curveKind": "quadratic"
         }
       ],
@@ -7298,16 +7330,16 @@
         {
           "x1": 970,
           "y1": 1946,
-          "x2": 923.13,
-          "y2": 2383.81,
+          "x2": 916.57,
+          "y2": 2369.43,
           "type": "main",
           "curved": true,
-          "cx": 922.4476549801158,
-          "cy": 2401.7970621635063
+          "cx": 915.3273360426417,
+          "cy": 2387.387053942367
         },
         {
-          "x1": 923.13,
-          "y1": 2383.81,
+          "x1": 916.57,
+          "y1": 2369.43,
           "x2": 1060,
           "y2": 2596,
           "type": "main"
@@ -7318,13 +7350,13 @@
       "controlPoints": [
         {
           "id": "mod-mslhv2rh-lcgpx:L_dn:mod-mslhuvd9-fpmi9:L_up:middle",
-          "x": 923.13,
-          "y": 2383.81,
+          "x": 916.57,
+          "y": 2369.43,
           "curved": true,
-          "handleX": -0.682345019884274,
-          "handleY": 17.98706216350628,
+          "handleX": -1.2426639573583411,
+          "handleY": 17.95705394236712,
           "directionOnly": true,
-          "tangentDirection": 92.17249218757779,
+          "tangentDirection": 93.95867105001857,
           "curveKind": "quadratic"
         }
       ],
@@ -7558,16 +7590,16 @@
         {
           "x1": 3400,
           "y1": 2516,
-          "x2": 3543.82,
-          "y2": 2604.8,
+          "x2": 3547,
+          "y2": 2609,
           "type": "main",
           "curved": true,
-          "cx": 3552.5557623819936,
-          "cy": 2620.538057555027
+          "cx": 3555.4125501088706,
+          "cy": 2624.913170666644
         },
         {
-          "x1": 3543.82,
-          "y1": 2604.8,
+          "x1": 3547,
+          "y1": 2609,
           "x2": 3590,
           "y2": 2806,
           "type": "main"
@@ -7578,13 +7610,13 @@
       "controlPoints": [
         {
           "id": "mod-mslhtwjq-903gp:R_dn:mod-mslhtmhq-x3g3j:R_up:middle",
-          "x": 3543.82,
-          "y": 2604.8,
+          "x": 3547,
+          "y": 2609,
           "curved": true,
-          "handleX": 8.735762381993597,
-          "handleY": 15.738057555027098,
+          "handleX": 8.412550108870661,
+          "handleY": 15.913170666644035,
           "directionOnly": true,
-          "tangentDirection": 60.96655126470395,
+          "tangentDirection": 62.136683137436414,
           "curveKind": "quadratic"
         }
       ],
@@ -7608,16 +7640,16 @@
         {
           "x1": 3400,
           "y1": 2476,
-          "x2": 3578.51,
-          "y2": 2584.87,
+          "x2": 3575.34,
+          "y2": 2580.66,
           "type": "main",
           "curved": true,
-          "cx": 3587.2314615142814,
-          "cy": 2600.615987077821
+          "cx": 3584.3446684835,
+          "cy": 2596.2457609856647
         },
         {
-          "x1": 3578.51,
-          "y1": 2584.87,
+          "x1": 3575.34,
+          "y1": 2580.66,
           "x2": 3630,
           "y2": 2806,
           "type": "main"
@@ -7628,13 +7660,13 @@
       "controlPoints": [
         {
           "id": "mod-mslhtwjq-903gp:R_up:mod-mslhtmhq-x3g3j:R_dn:middle",
-          "x": 3578.51,
-          "y": 2584.87,
+          "x": 3575.34,
+          "y": 2580.66,
           "curved": true,
-          "handleX": 8.721461514281152,
-          "handleY": 15.745987077821217,
+          "handleX": 9.004668483499476,
+          "handleY": 15.585760985664809,
           "directionOnly": true,
-          "tangentDirection": 61.01860171225613,
+          "tangentDirection": 59.98283938368114,
           "curveKind": "quadratic"
         }
       ],
@@ -7658,16 +7690,16 @@
         {
           "x1": 3700,
           "y1": 3076,
-          "x2": 3649.64,
-          "y2": 3050.27,
+          "x2": 3647.9,
+          "y2": 3048.1,
           "type": "main",
           "curved": true,
-          "cx": 3639.0780455289932,
-          "cy": 3035.69450283001
+          "cx": 3637.7707779836196,
+          "cy": 3033.220522141457
         },
         {
-          "x1": 3649.64,
-          "y1": 3050.27,
+          "x1": 3647.9,
+          "y1": 3048.1,
           "x2": 3630,
           "y2": 2986,
           "type": "main"
@@ -7678,13 +7710,13 @@
       "controlPoints": [
         {
           "id": "mod-mslhsg6q-nxddc:L_up:mod-mslhtmhq-x3g3j:L_dn:middle",
-          "x": 3649.64,
-          "y": 3050.27,
+          "x": 3647.9,
+          "y": 3048.1,
           "curved": true,
-          "handleX": -10.56195447100643,
-          "handleY": -14.575497169990028,
+          "handleX": -10.129222016380469,
+          "handleY": -14.879477858543062,
           "directionOnly": true,
-          "tangentDirection": -125.92850242282069,
+          "tangentDirection": -124.24512229905339,
           "curveKind": "quadratic"
         }
       ],
@@ -7708,16 +7740,16 @@
         {
           "x1": 3700,
           "y1": 3116,
-          "x2": 3617.72,
-          "y2": 3074.37,
+          "x2": 3619.46,
+          "y2": 3076.54,
           "type": "main",
           "curved": true,
-          "cx": 3607.1079078803073,
-          "cy": 3059.8309663029772
+          "cx": 3608.5102055093935,
+          "cy": 3062.253572853457
         },
         {
-          "x1": 3617.72,
-          "y1": 3074.37,
+          "x1": 3619.46,
+          "y1": 3076.54,
           "x2": 3590,
           "y2": 2986,
           "type": "main"
@@ -7728,13 +7760,13 @@
       "controlPoints": [
         {
           "id": "mod-mslhsg6q-nxddc:L_dn:mod-mslhtmhq-x3g3j:L_up:middle",
-          "x": 3617.72,
-          "y": 3074.37,
+          "x": 3619.46,
+          "y": 3076.54,
           "curved": true,
-          "handleX": -10.612092119692702,
-          "handleY": -14.53903369702251,
+          "handleX": -10.94979449060671,
+          "handleY": -14.286427146542936,
           "directionOnly": true,
-          "tangentDirection": -126.12583844295796,
+          "tangentDirection": -127.46826523314084,
           "curveKind": "quadratic"
         }
       ],
@@ -7812,16 +7844,16 @@
         {
           "x1": 930,
           "y1": 1766,
-          "x2": 915.74,
-          "y2": 1715.39,
+          "x2": 917.9,
+          "y2": 1718.1,
           "type": "main",
           "curved": true,
-          "cx": 905.15290944185,
-          "cy": 1700.832750482542
+          "cx": 908.2181767064762,
+          "cy": 1702.925603876497
         },
         {
-          "x1": 915.74,
-          "y1": 1715.39,
+          "x1": 917.9,
+          "y1": 1718.1,
           "x2": 880,
           "y2": 1696,
           "type": "main"
@@ -7832,13 +7864,13 @@
       "controlPoints": [
         {
           "id": "mod-mslhv2rh-lcgpx:R_up:mod-msli6c2e-djwaf:L_up:middle",
-          "x": 915.74,
-          "y": 1715.39,
+          "x": 917.9,
+          "y": 1718.1,
           "curved": true,
-          "handleX": -10.587090558150003,
-          "handleY": -14.557249517457997,
+          "handleX": -9.68182329352372,
+          "handleY": -15.174396123502953,
           "directionOnly": true,
-          "tangentDirection": -126.02737338510036,
+          "tangentDirection": -122.53937446355958,
           "curveKind": "quadratic"
         }
       ],
@@ -7862,16 +7894,16 @@
         {
           "x1": 970,
           "y1": 1766,
-          "x2": 948.47,
-          "y2": 1692.4,
+          "x2": 946.32,
+          "y2": 1689.68,
           "type": "main",
           "curved": true,
-          "cx": 937.8862393732129,
-          "cy": 1677.8403292964824
+          "cx": 935.2416980866836,
+          "cy": 1675.492990917131
         },
         {
-          "x1": 948.47,
-          "y1": 1692.4,
+          "x1": 946.32,
+          "y1": 1689.68,
           "x2": 880,
           "y2": 1656,
           "type": "main"
@@ -7882,13 +7914,13 @@
       "controlPoints": [
         {
           "id": "mod-mslhv2rh-lcgpx:R_dn:mod-msli6c2e-djwaf:L_dn:middle",
-          "x": 948.47,
-          "y": 1692.4,
+          "x": 946.32,
+          "y": 1689.68,
           "curved": true,
-          "handleX": -10.58376062678718,
-          "handleY": -14.559670703517625,
+          "handleX": -11.078301913316372,
+          "handleY": -14.18700908286912,
           "directionOnly": true,
-          "tangentDirection": -126.01426822075754,
+          "tangentDirection": -127.98544081433828,
           "curveKind": "quadratic"
         }
       ],
@@ -8014,16 +8046,16 @@
         {
           "x1": 530,
           "y1": 1296,
-          "x2": 525.56,
-          "y2": 1543.3,
+          "x2": 519.34,
+          "y2": 1531.66,
           "type": "main",
           "curved": true,
-          "cx": 527.6147397373363,
-          "cy": 1561.1823389021629
+          "cx": 520.5400421357056,
+          "cy": 1549.6199526411551
         },
         {
-          "x1": 525.56,
-          "y1": 1543.3,
+          "x1": 519.34,
+          "y1": 1531.66,
           "x2": 620,
           "y2": 1656,
           "type": "main"
@@ -8034,13 +8066,13 @@
       "controlPoints": [
         {
           "id": "mod-msli72b3-fi5qt:L_dn:mod-msli6eel-4tdcy:R_dn:middle",
-          "x": 525.56,
-          "y": 1543.3,
+          "x": 519.34,
+          "y": 1531.66,
           "curved": true,
-          "handleX": 2.0547397373363525,
-          "handleY": 17.882338902162964,
+          "handleX": 1.2000421357055584,
+          "handleY": 17.95995264115502,
           "directionOnly": true,
-          "tangentDirection": 83.44527188959134,
+          "tangentDirection": 86.17731184955237,
           "curveKind": "quadratic"
         }
       ],
@@ -8064,16 +8096,16 @@
         {
           "x1": 490,
           "y1": 1296,
-          "x2": 485.76,
-          "y2": 1547.38,
+          "x2": 491.91,
+          "y2": 1559.09,
           "type": "main",
           "curved": true,
-          "cx": 487.82184880560123,
-          "cy": 1565.261520614949
+          "cx": 494.7332258441189,
+          "cy": 1576.8672156378072
         },
         {
-          "x1": 485.76,
-          "y1": 1547.38,
+          "x1": 491.91,
+          "y1": 1559.09,
           "x2": 620,
           "y2": 1696,
           "type": "main"
@@ -8084,13 +8116,13 @@
       "controlPoints": [
         {
           "id": "mod-msli72b3-fi5qt:L_up:mod-msli6eel-4tdcy:R_up:middle",
-          "x": 485.76,
-          "y": 1547.38,
+          "x": 491.91,
+          "y": 1559.09,
           "curved": true,
-          "handleX": 2.061848805601246,
-          "handleY": 17.881520614948847,
+          "handleX": 2.8232258441189018,
+          "handleY": 17.777215637807263,
           "directionOnly": true,
-          "tangentDirection": 83.42249360961912,
+          "tangentDirection": 80.97613302569263,
           "curveKind": "quadratic"
         }
       ],
@@ -8212,16 +8244,16 @@
         {
           "x1": 3800,
           "y1": 2160,
-          "x2": 3709.67,
-          "y2": 2254.99,
+          "x2": 3715.71,
+          "y2": 2243.71,
           "type": "main",
           "curved": true,
-          "cx": 3707.6212086784485,
-          "cy": 2272.8730213923914
+          "cx": 3712.4926128671286,
+          "cy": 2261.420121965623
         },
         {
-          "x1": 3709.67,
-          "y1": 2254.99,
+          "x1": 3715.71,
+          "y1": 2243.71,
           "x2": 3710,
           "y2": 2406,
           "type": "main"
@@ -8232,13 +8264,13 @@
       "controlPoints": [
         {
           "id": "mod-msli9aep-iponc:L_up:mod-msli9g02-keo1a:R_up:middle",
-          "x": 3709.67,
-          "y": 2254.99,
+          "x": 3715.71,
+          "y": 2243.71,
           "curved": true,
-          "handleX": -2.0487913215513496,
-          "handleY": 17.883021392391612,
+          "handleX": -3.217387132871217,
+          "handleY": 17.710121965622786,
           "directionOnly": true,
-          "tangentDirection": 96.53566949540688,
+          "tangentDirection": 100.29659416009395,
           "curveKind": "quadratic"
         }
       ],
@@ -8262,16 +8294,16 @@
         {
           "x1": 3800,
           "y1": 2200,
-          "x2": 3749.35,
-          "y2": 2260.03,
+          "x2": 3743.2,
+          "y2": 2271.2,
           "type": "main",
           "curved": true,
-          "cx": 3747.312977641048,
-          "cy": 2277.914365795553
+          "cx": 3742.5736870277965,
+          "cy": 2289.189100368302
         },
         {
-          "x1": 3749.35,
-          "y1": 2260.03,
+          "x1": 3743.2,
+          "y1": 2271.2,
           "x2": 3750,
           "y2": 2406,
           "type": "main"
@@ -8282,13 +8314,13 @@
       "controlPoints": [
         {
           "id": "mod-msli9aep-iponc:L_dn:mod-msli9g02-keo1a:R_dn:middle",
-          "x": 3749.35,
-          "y": 2260.03,
+          "x": 3743.2,
+          "y": 2271.2,
           "curved": true,
-          "handleX": -2.0370223589518934,
-          "handleY": 17.88436579555255,
+          "handleX": -0.626312972203366,
+          "handleY": 17.989100368302182,
           "directionOnly": true,
-          "tangentDirection": 96.49796409309067,
+          "tangentDirection": 91.99401860797366,
           "curveKind": "quadratic"
         }
       ],
@@ -8410,16 +8442,16 @@
         {
           "x1": 3870,
           "y1": 3006,
-          "x2": 3602.54,
-          "y2": 3156.36,
+          "x2": 3586.95,
+          "y2": 3162.95,
           "type": "main",
           "curved": true,
-          "cx": 3584.6784651508992,
-          "cy": 3154.1316434678547
+          "cx": 3569.153707803294,
+          "cy": 3160.2496326084292
         },
         {
-          "x1": 3602.54,
-          "y1": 3156.36,
+          "x1": 3586.95,
+          "y1": 3162.95,
           "x2": 3060,
           "y2": 3076,
           "type": "main"
@@ -8430,13 +8462,13 @@
       "controlPoints": [
         {
           "id": "mod-msli9qvn-rjuru:L_up:mod-mslia381-hiubr:R_up:middle",
-          "x": 3602.54,
-          "y": 3156.36,
+          "x": 3586.95,
+          "y": 3162.95,
           "curved": true,
-          "handleX": -17.86153484910089,
-          "handleY": -2.2283565321452627,
+          "handleX": -17.79629219670609,
+          "handleY": -2.700367391570617,
           "directionOnly": true,
-          "tangentDirection": -172.8886768526087,
+          "tangentDirection": -171.3718906132792,
           "curveKind": "quadratic"
         }
       ],
@@ -8460,16 +8492,16 @@
         {
           "x1": 3910,
           "y1": 3006,
-          "x2": 3597.92,
-          "y2": 3196.1,
+          "x2": 3613.56,
+          "y2": 3189.56,
           "type": "main",
           "curved": true,
-          "cx": 3580.05925683432,
-          "cy": 3193.865306828753
+          "cx": 3595.6483398126247,
+          "cy": 3187.7788685247847
         },
         {
-          "x1": 3597.92,
-          "y1": 3196.1,
+          "x1": 3613.56,
+          "y1": 3189.56,
           "x2": 3060,
           "y2": 3116,
           "type": "main"
@@ -8480,13 +8512,13 @@
       "controlPoints": [
         {
           "id": "mod-msli9qvn-rjuru:L_dn:mod-mslia381-hiubr:R_dn:middle",
-          "x": 3597.92,
-          "y": 3196.1,
+          "x": 3613.56,
+          "y": 3189.56,
           "curved": true,
-          "handleX": -17.860743165679956,
-          "handleY": -2.2346931712467355,
+          "handleX": -17.91166018737508,
+          "handleY": -1.7811314752152543,
           "directionOnly": true,
-          "tangentDirection": -172.86834989177748,
+          "tangentDirection": -174.3211892913651,
           "curveKind": "quadratic"
         }
       ],
@@ -8622,16 +8654,16 @@
         {
           "x1": 1900,
           "y1": 2396,
-          "x2": 2094.15,
-          "y2": 2073.09,
+          "x2": 2090.14,
+          "y2": 2076.14,
           "type": "main",
           "curved": true,
-          "cx": 2109.7930218573683,
-          "cy": 2064.1851773083404
+          "cx": 2105.6958723558782,
+          "cy": 2067.0837957593913
         },
         {
-          "x1": 2094.15,
-          "y1": 2073.09,
+          "x1": 2090.14,
+          "y1": 2076.14,
           "x2": 2500,
           "y2": 1976,
           "type": "main"
@@ -8642,13 +8674,13 @@
       "controlPoints": [
         {
           "id": "mod-mslini0x-rx0g5:R_up:mod-mslilp21-895s0:L_up:middle",
-          "x": 2094.15,
-          "y": 2073.09,
+          "x": 2090.14,
+          "y": 2076.14,
           "curved": true,
-          "handleX": 15.643021857368158,
-          "handleY": -8.904822691659955,
+          "handleX": 15.555872355878495,
+          "handleY": -9.056204240608492,
           "directionOnly": true,
-          "tangentDirection": -29.65078559553525,
+          "tangentDirection": -30.206796056980913,
           "curveKind": "quadratic"
         }
       ],
@@ -8672,16 +8704,16 @@
         {
           "x1": 1940,
           "y1": 2396,
-          "x2": 2114.48,
-          "y2": 2107.54,
+          "x2": 2118.49,
+          "y2": 2104.49,
           "type": "main",
           "curved": true,
-          "cx": 2130.1206092294938,
-          "cy": 2098.6309404014632
+          "cx": 2134.223174145573,
+          "cy": 2095.745445619983
         },
         {
-          "x1": 2114.48,
-          "y1": 2107.54,
+          "x1": 2118.49,
+          "y1": 2104.49,
           "x2": 2500,
           "y2": 2016,
           "type": "main"
@@ -8692,13 +8724,13 @@
       "controlPoints": [
         {
           "id": "mod-mslini0x-rx0g5:R_dn:mod-mslilp21-895s0:L_dn:middle",
-          "x": 2114.48,
-          "y": 2107.54,
+          "x": 2118.49,
+          "y": 2104.49,
           "curved": true,
-          "handleX": 15.640609229493716,
-          "handleY": -8.90905959853653,
+          "handleX": 15.733174145573027,
+          "handleY": -8.744554380016881,
           "directionOnly": true,
-          "tangentDirection": -29.666305333641063,
+          "tangentDirection": -29.065461741454115,
           "curveKind": "quadratic"
         }
       ],
@@ -9280,16 +9312,16 @@
         {
           "x1": 6160,
           "y1": 2696,
-          "x2": 6360.78,
-          "y2": 2690.66,
+          "x2": 6350.55,
+          "y2": 2696.55,
           "type": "main",
           "curved": true,
-          "cx": 6378.445790047242,
-          "cy": 2687.207484684063
+          "cx": 6368.373096398354,
+          "cy": 2694.0326135030577
         },
         {
-          "x1": 6360.78,
-          "y1": 2690.66,
+          "x1": 6350.55,
+          "y1": 2696.55,
           "x2": 6450,
           "y2": 2606,
           "type": "main"
@@ -9300,13 +9332,13 @@
       "controlPoints": [
         {
           "id": "mod-mslihp49-c3uzo:R_up:mod-mslihl19-kajf5:L_up:middle",
-          "x": 6360.78,
-          "y": 2690.66,
+          "x": 6350.55,
+          "y": 2696.55,
           "curved": true,
-          "handleX": 17.665790047241604,
-          "handleY": -3.452515315936992,
+          "handleX": 17.823096398353762,
+          "handleY": -2.5173864969426476,
           "directionOnly": true,
-          "tangentDirection": -11.058222815975531,
+          "tangentDirection": -8.03944455083673,
           "curveKind": "quadratic"
         }
       ],
@@ -9330,16 +9362,16 @@
         {
           "x1": 6160,
           "y1": 2736,
-          "x2": 6367.9,
-          "y2": 2730.02,
+          "x2": 6378.2,
+          "y2": 2724.2,
           "type": "main",
           "curved": true,
-          "cx": 6385.569532108371,
-          "cy": 2726.586687449239
+          "cx": 6395.6929984231265,
+          "cy": 2719.9579478823925
         },
         {
-          "x1": 6367.9,
-          "y1": 2730.02,
+          "x1": 6378.2,
+          "y1": 2724.2,
           "x2": 6490,
           "y2": 2606,
           "type": "main"
@@ -9350,13 +9382,13 @@
       "controlPoints": [
         {
           "id": "mod-mslihp49-c3uzo:R_dn:mod-mslihl19-kajf5:L_dn:middle",
-          "x": 6367.9,
-          "y": 2730.02,
+          "x": 6378.2,
+          "y": 2724.2,
           "curved": true,
-          "handleX": 17.669532108371982,
-          "handleY": -3.4333125507607862,
+          "handleX": 17.492998423126423,
+          "handleY": -4.242052117607283,
           "directionOnly": true,
-          "tangentDirection": -10.995948738698381,
+          "tangentDirection": -13.631094443418835,
           "curveKind": "quadratic"
         }
       ],
@@ -9602,16 +9634,16 @@
         {
           "x1": 1900,
           "y1": 2516,
-          "x2": 1866.21,
-          "y2": 2565.3,
+          "x2": 1871.13,
+          "y2": 2560.69,
           "type": "main",
           "curved": true,
-          "cx": 1850.4107974579808,
-          "cy": 2573.924685445641
+          "cx": 1855.0901558131454,
+          "cy": 2568.8584391692307
         },
         {
-          "x1": 1866.21,
-          "y1": 2565.3,
+          "x1": 1871.13,
+          "y1": 2560.69,
           "x2": 1810.3159662932949,
           "y2": 2573.4338237334173,
           "type": "main"
@@ -9622,13 +9654,13 @@
       "controlPoints": [
         {
           "id": "mod-mslini0x-rx0g5:L_up:mod-mslilvv8-mv05t:R_up1:middle",
-          "x": 1866.21,
-          "y": 2565.3,
+          "x": 1871.13,
+          "y": 2560.69,
           "curved": true,
-          "handleX": -15.799202542019273,
-          "handleY": 8.624685445641,
+          "handleX": -16.039844186854783,
+          "handleY": 8.168439169230616,
           "directionOnly": true,
-          "tangentDirection": 151.37015090009018,
+          "tangentDirection": 153.0121094182543,
           "curveKind": "quadratic"
         }
       ],
@@ -9652,16 +9684,16 @@
         {
           "x1": 1940,
           "y1": 2516,
-          "x2": 1908.93,
-          "y2": 2612.95,
+          "x2": 1904.39,
+          "y2": 2617.95,
           "type": "main",
           "curved": true,
-          "cx": 1896.7614474475554,
-          "cy": 2626.2137222821643
+          "cx": 1892.4699010824465,
+          "cy": 2631.4374475641516
         },
         {
-          "x1": 1908.93,
-          "y1": 2612.95,
+          "x1": 1904.39,
+          "y1": 2617.95,
           "x2": 1810.3159662932949,
           "y2": 2661.4338237334173,
           "type": "main"
@@ -9672,13 +9704,13 @@
       "controlPoints": [
         {
           "id": "mod-mslini0x-rx0g5:L_dn:mod-mslilvv8-mv05t:R_dn1:middle",
-          "x": 1908.93,
-          "y": 2612.95,
+          "x": 1904.39,
+          "y": 2617.95,
           "curved": true,
-          "handleX": -12.168552552444712,
-          "handleY": 13.263722282164663,
+          "handleX": -11.920098917553474,
+          "handleY": 13.48744756415166,
           "directionOnly": true,
-          "tangentDirection": 132.5342410050024,
+          "tangentDirection": 131.46999331210847,
           "curveKind": "quadratic"
         }
       ],
@@ -10933,16 +10965,16 @@
         {
           "x1": 5340,
           "y1": 4076,
-          "x2": 5354.34,
-          "y2": 4070.34,
+          "x2": 5354.24,
+          "y2": 4070.24,
           "type": "main",
           "curved": true,
-          "cx": 5366.920793060422,
-          "cy": 4057.466630356785
+          "cx": 5366.82411737464,
+          "cy": 4057.3698799577746
         },
         {
-          "x1": 5354.34,
-          "y1": 4070.34,
+          "x1": 5354.24,
+          "y1": 4070.24,
           "x2": 5360,
           "y2": 4056,
           "type": "main"
@@ -10953,13 +10985,13 @@
       "controlPoints": [
         {
           "id": "mod-mslhg5b4-imyop:R_up:mod-msljok0b-j6v88:L_up:middle",
-          "x": 5354.34,
-          "y": 4070.34,
+          "x": 5354.24,
+          "y": 4070.24,
           "curved": true,
-          "handleX": 12.580793060421573,
-          "handleY": -12.873369643214957,
+          "handleX": 12.584117374639861,
+          "handleY": -12.870120042225214,
           "directionOnly": true,
-          "tangentDirection": -45.65854317754777,
+          "tangentDirection": -45.643745714130645,
           "curveKind": "quadratic"
         }
       ],
@@ -10983,16 +11015,16 @@
         {
           "x1": 5340,
           "y1": 4116,
-          "x2": 5382.63,
-          "y2": 4098.63,
+          "x2": 5382.73,
+          "y2": 4098.73,
           "type": "main",
           "curved": true,
-          "cx": 5395.12271483389,
-          "cy": 4085.671139090217
+          "cx": 5395.219186326367,
+          "cy": 4085.767738434004
         },
         {
-          "x1": 5382.63,
-          "y1": 4098.63,
+          "x1": 5382.73,
+          "y1": 4098.73,
           "x2": 5400,
           "y2": 4056,
           "type": "main"
@@ -11003,13 +11035,13 @@
       "controlPoints": [
         {
           "id": "mod-mslhg5b4-imyop:R_dn:mod-msljok0b-j6v88:L_dn:middle",
-          "x": 5382.63,
-          "y": 4098.63,
+          "x": 5382.73,
+          "y": 4098.73,
           "curved": true,
-          "handleX": 12.492714833890021,
-          "handleY": -12.958860909783088,
+          "handleX": 12.489186326367312,
+          "handleY": -12.962261565995332,
           "directionOnly": true,
-          "tangentDirection": -46.04925594088371,
+          "tangentDirection": -46.064854693443266,
           "curveKind": "quadratic"
         }
       ],
@@ -11033,16 +11065,16 @@
         {
           "x1": 5360,
           "y1": 3976,
-          "x2": 5310.69,
-          "y2": 3945.41,
+          "x2": 5297.17,
+          "y2": 3938.83,
           "type": "main",
           "curved": true,
-          "cx": 5292.692065760034,
-          "cy": 3945.6826959733335
+          "cx": 5279.3053896075235,
+          "cy": 3941.0335642774858
         },
         {
-          "x1": 5310.69,
-          "y1": 3945.41,
+          "x1": 5297.17,
+          "y1": 3938.83,
           "x2": 5180,
           "y2": 3956,
           "type": "main"
@@ -11053,13 +11085,13 @@
       "controlPoints": [
         {
           "id": "mod-msljok0b-j6v88:R_up:mod-msljgude-tes7g:L_up:middle",
-          "x": 5310.69,
-          "y": 3945.41,
+          "x": 5297.17,
+          "y": 3938.83,
           "curved": true,
-          "handleX": -17.997934239965645,
-          "handleY": 0.272695973333457,
+          "handleX": -17.864610392476738,
+          "handleY": 2.2035642774859205,
           "directionOnly": true,
-          "tangentDirection": 179.13194855025242,
+          "tangentDirection": 172.96819796069164,
           "curveKind": "quadratic"
         }
       ],
@@ -11083,16 +11115,16 @@
         {
           "x1": 5400,
           "y1": 3976,
-          "x2": 5310.49,
-          "y2": 3905.41,
+          "x2": 5324.21,
+          "y2": 3911.79,
           "type": "main",
           "curved": true,
-          "cx": 5292.491960437292,
-          "cy": 3905.6756537204824
+          "cx": 5306.254920071962,
+          "cy": 3910.5191322736964
         },
         {
-          "x1": 5310.49,
-          "y1": 3905.41,
+          "x1": 5324.21,
+          "y1": 3911.79,
           "x2": 5180,
           "y2": 3916,
           "type": "main"
@@ -11103,13 +11135,13 @@
       "controlPoints": [
         {
           "id": "mod-msljok0b-j6v88:R_dn:mod-msljgude-tes7g:L_dn:middle",
-          "x": 5310.49,
-          "y": 3905.41,
+          "x": 5324.21,
+          "y": 3911.79,
           "curved": true,
-          "handleX": -17.998039562707763,
-          "handleY": 0.2656537204825262,
+          "handleX": -17.9550799280382,
+          "handleY": -1.2708677263035089,
           "directionOnly": true,
-          "tangentDirection": 179.15436724428116,
+          "tangentDirection": -175.9513339304418,
           "curveKind": "quadratic"
         }
       ],
@@ -11843,16 +11875,16 @@
         {
           "x1": 2520,
           "y1": 2573.4338237334173,
-          "x2": 2190.16,
-          "y2": 2693.17,
+          "x2": 2189.19,
+          "y2": 2693.9,
           "type": "main",
           "curved": true,
-          "cx": 2176.885492617841,
-          "cy": 2705.3267863253827
+          "cx": 2175.9447460878378,
+          "cy": 2706.08865246048
         },
         {
-          "x1": 2190.16,
-          "y1": 2693.17,
+          "x1": 2189.19,
+          "y1": 2693.9,
           "x2": 2050,
           "y2": 3006,
           "type": "main"
@@ -11863,13 +11895,13 @@
       "controlPoints": [
         {
           "id": "mod-msljt78y-4m4of:L_up:mod-msljsznw-u34c8:R_up:middle",
-          "x": 2190.16,
-          "y": 2693.17,
+          "x": 2189.19,
+          "y": 2693.9,
           "curved": true,
-          "handleX": -13.274507382158635,
-          "handleY": 12.156786325382871,
+          "handleX": -13.245253912162138,
+          "handleY": 12.188652460479526,
           "directionOnly": true,
-          "tangentDirection": 137.51656533104858,
+          "tangentDirection": 137.37887222352396,
           "curveKind": "quadratic"
         }
       ],
@@ -11893,16 +11925,16 @@
         {
           "x1": 2520,
           "y1": 2613.4338237334173,
-          "x2": 2216.69,
-          "y2": 2723.11,
+          "x2": 2217.66,
+          "y2": 2722.38,
           "type": "main",
           "curved": true,
-          "cx": 2203.4143392897236,
-          "cy": 2735.265526837847
+          "cx": 2204.352328018683,
+          "cy": 2734.500473028627
         },
         {
-          "x1": 2216.69,
-          "y1": 2723.11,
+          "x1": 2217.66,
+          "y1": 2722.38,
           "x2": 2090,
           "y2": 3006,
           "type": "main"
@@ -11913,13 +11945,13 @@
       "controlPoints": [
         {
           "id": "mod-msljt78y-4m4of:L_dn:mod-msljsznw-u34c8:R_dn:middle",
-          "x": 2216.69,
-          "y": 2723.11,
+          "x": 2217.66,
+          "y": 2722.38,
           "curved": true,
-          "handleX": -13.275660710276552,
-          "handleY": 12.155526837847031,
+          "handleX": -13.307671981317064,
+          "handleY": 12.12047302862676,
           "directionOnly": true,
-          "tangentDirection": 137.52200132827824,
+          "tangentDirection": 137.67310609632113,
           "curveKind": "quadratic"
         }
       ],
@@ -11943,16 +11975,16 @@
         {
           "x1": 2923,
           "y1": 4074,
-          "x2": 2855.52,
-          "y2": 4181.37,
+          "x2": 2851.16,
+          "y2": 4184.66,
           "type": "main",
           "curved": true,
-          "cx": 2839.6917024608842,
-          "cy": 4189.941172440992
+          "cx": 2835.07825213328,
+          "cy": 4192.7456283337315
         },
         {
-          "x1": 2855.52,
-          "y1": 4181.37,
+          "x1": 2851.16,
+          "y1": 4184.66,
           "x2": 2700,
           "y2": 4216,
           "type": "main"
@@ -11963,13 +11995,13 @@
       "controlPoints": [
         {
           "id": "mod-msljyxb3-yt9ks:R_dn:mod-msljsmux-cgt1k:L_dn:middle",
-          "x": 2855.52,
-          "y": 4181.37,
+          "x": 2851.16,
+          "y": 4184.66,
           "curved": true,
-          "handleX": -15.828297539115685,
-          "handleY": 8.571172440992212,
+          "handleX": -16.08174786672012,
+          "handleY": 8.085628333731568,
           "directionOnly": true,
-          "tangentDirection": 151.56403700438204,
+          "tangentDirection": 153.30753069454585,
           "curveKind": "quadratic"
         }
       ],
@@ -11993,16 +12025,16 @@
         {
           "x1": 2963,
           "y1": 4074,
-          "x2": 2875.1,
-          "y2": 4216.25,
+          "x2": 2879.47,
+          "y2": 4212.97,
           "type": "main",
           "curved": true,
-          "cx": 2859.2610810970077,
-          "cy": 4224.801528985184
+          "cx": 2863.852313374954,
+          "cy": 4221.919182335939
         },
         {
-          "x1": 2875.1,
-          "y1": 4216.25,
+          "x1": 2879.47,
+          "y1": 4212.97,
           "x2": 2700,
           "y2": 4256,
           "type": "main"
@@ -12013,13 +12045,13 @@
       "controlPoints": [
         {
           "id": "mod-msljyxb3-yt9ks:R_up:mod-msljsmux-cgt1k:L_up:middle",
-          "x": 2875.1,
-          "y": 4216.25,
+          "x": 2879.47,
+          "y": 4212.97,
           "curved": true,
-          "handleX": -15.838918902992352,
-          "handleY": 8.551528985183383,
+          "handleX": -15.617686625045597,
+          "handleY": 8.949182335938401,
           "directionOnly": true,
-          "tangentDirection": 151.63511915778815,
+          "tangentDirection": 150.18660652925732,
           "curveKind": "quadratic"
         }
       ],
@@ -12587,16 +12619,16 @@
         {
           "x1": 2700,
           "y1": 3752,
-          "x2": 2872.06,
-          "y2": 3782.61,
+          "x2": 2877.83,
+          "y2": 3786.67,
           "type": "main",
           "curved": true,
-          "cx": 2888.301024390357,
-          "cy": 3790.3707426675437
+          "cx": 2893.820090949781,
+          "cy": 3794.9354093315296
         },
         {
-          "x1": 2872.06,
-          "y1": 3782.61,
+          "x1": 2877.83,
+          "y1": 3786.67,
           "x2": 2963,
           "y2": 3914,
           "type": "main"
@@ -12607,13 +12639,13 @@
       "controlPoints": [
         {
           "id": "mod-msljsqxk-3zlgd:L_dn:mod-msljyxb3-yt9ks:L_up:middle",
-          "x": 2872.06,
-          "y": 3782.61,
+          "x": 2877.83,
+          "y": 3786.67,
           "curved": true,
-          "handleX": 16.241024390356866,
-          "handleY": 7.760742667543699,
+          "handleX": 15.990090949780981,
+          "handleY": 8.265409331529344,
           "directionOnly": true,
-          "tangentDirection": 25.540714714653046,
+          "tangentDirection": 27.334813798420885,
           "curveKind": "quadratic"
         }
       ],
@@ -12637,16 +12669,16 @@
         {
           "x1": 2700,
           "y1": 3792,
-          "x2": 2855.37,
-          "y2": 3818.96,
+          "x2": 2849.63,
+          "y2": 3814.87,
           "type": "main",
           "curved": true,
-          "cx": 2871.616866261662,
-          "cy": 3826.7085054478694
+          "cx": 2866.158467686918,
+          "cy": 3821.998096234094
         },
         {
-          "x1": 2855.37,
-          "y1": 3818.96,
+          "x1": 2849.63,
+          "y1": 3814.87,
           "x2": 2923,
           "y2": 3914,
           "type": "main"
@@ -12657,13 +12689,13 @@
       "controlPoints": [
         {
           "id": "mod-msljsqxk-3zlgd:L_up:mod-msljyxb3-yt9ks:L_dn:middle",
-          "x": 2855.37,
-          "y": 3818.96,
+          "x": 2849.63,
+          "y": 3814.87,
           "curved": true,
-          "handleX": 16.24686626166225,
-          "handleY": 7.74850544786934,
+          "handleX": 16.528467686917867,
+          "handleY": 7.128096234094483,
           "directionOnly": true,
-          "tangentDirection": 25.49755149333678,
+          "tangentDirection": 23.32868969857711,
           "curveKind": "quadratic"
         }
       ],
@@ -13407,16 +13439,16 @@
         {
           "x1": 2050,
           "y1": 3186,
-          "x2": 2052.06,
-          "y2": 3535.72,
+          "x2": 2058.06,
+          "y2": 3546.71,
           "type": "main",
           "curved": true,
-          "cx": 2054.810006474858,
-          "cy": 3553.508689226254
+          "cx": 2061.3395084615977,
+          "cy": 3564.408723802871
         },
         {
-          "x1": 2052.06,
-          "y1": 3535.72,
+          "x1": 2058.06,
+          "y1": 3546.71,
           "x2": 2240,
           "y2": 3733.5485764323985,
           "type": "main"
@@ -13428,13 +13460,13 @@
       "controlPoints": [
         {
           "id": "mod-msljsznw-u34c8:L_up:mod-msotpmbj-gitcn:L_dn1:middle",
-          "x": 2052.06,
-          "y": 3535.72,
+          "x": 2058.06,
+          "y": 3546.71,
           "curved": true,
-          "handleX": 2.750006474857914,
-          "handleY": 17.788689226253844,
+          "handleX": 3.279508461597594,
+          "handleY": 17.698723802870923,
           "directionOnly": true,
-          "tangentDirection": 81.21204182242549,
+          "tangentDirection": 79.50236645413777,
           "curveKind": "quadratic"
         }
       ],
@@ -13457,16 +13489,16 @@
         {
           "x1": 2090,
           "y1": 3186,
-          "x2": 2091.66,
-          "y2": 3530.1,
+          "x2": 2085.61,
+          "y2": 3519.16,
           "type": "main",
           "curved": true,
-          "cx": 2094.422979244006,
-          "cy": 3547.8866788832875
+          "cx": 2087.798320372736,
+          "cy": 3537.026484095822
         },
         {
-          "x1": 2091.66,
-          "y1": 3530.1,
+          "x1": 2085.61,
+          "y1": 3519.16,
           "x2": 2240,
           "y2": 3693.5485764323985,
           "type": "main"
@@ -13478,13 +13510,13 @@
       "controlPoints": [
         {
           "id": "mod-msljsznw-u34c8:L_dn:mod-msotpmbj-gitcn:L_up1:middle",
-          "x": 2091.66,
-          "y": 3530.1,
+          "x": 2085.61,
+          "y": 3519.16,
           "curved": true,
-          "handleX": 2.7629792440059315,
-          "handleY": 17.786678883287696,
+          "handleX": 2.188320372735605,
+          "handleY": 17.86648409582228,
           "directionOnly": true,
-          "tangentDirection": 81.1702553320907,
+          "tangentDirection": 83.01708598749353,
           "curveKind": "quadratic"
         }
       ],
@@ -14012,6 +14044,60 @@
       "pageId": "page-1",
       "createdOrder": 1786465165402,
       "colorMode": "auto"
+    },
+    {
+      "id": "conn-mss9mx5v-alks3",
+      "fromModuleId": "mod-mss9mx5q-eopco",
+      "fromPortId": "R_up",
+      "toModuleId": "mod-mslj1o1u-8rcmi",
+      "toPortId": "L_up",
+      "tracks": [
+        {
+          "x1": 1300,
+          "y1": 3639.451733257117,
+          "x2": 1320,
+          "y2": 3639.451733257117,
+          "type": "main"
+        }
+      ],
+      "crossingType": "plain",
+      "lineStyle": "solid",
+      "crossingPoints": [],
+      "controlPoints": [],
+      "autoCurve": true,
+      "layerId": "layer-track-main",
+      "zIndexMode": "auto",
+      "zIndex": 266,
+      "pageId": "page-1",
+      "createdOrder": 1786670754403,
+      "colorMode": "auto"
+    },
+    {
+      "id": "conn-mss9mx5v-6ayuq",
+      "fromModuleId": "mod-mss9mx5q-eopco",
+      "fromPortId": "R_dn",
+      "toModuleId": "mod-mslj1o1u-8rcmi",
+      "toPortId": "L_dn",
+      "tracks": [
+        {
+          "x1": 1300,
+          "y1": 3679.451733257117,
+          "x2": 1320,
+          "y2": 3679.451733257117,
+          "type": "main"
+        }
+      ],
+      "crossingType": "plain",
+      "lineStyle": "solid",
+      "crossingPoints": [],
+      "controlPoints": [],
+      "autoCurve": true,
+      "layerId": "layer-track-main",
+      "zIndexMode": "auto",
+      "zIndex": 266,
+      "pageId": "page-1",
+      "createdOrder": 1786670754403,
+      "colorMode": "auto"
     }
   ],
   "backgroundImages": [
@@ -14207,7 +14293,7 @@
       "positionMode": "attached",
       "offsetX": 100,
       "offsetY": 14,
-      "sourceStationId": "L2-S02",
+      "sourceStationId": "L1-S06",
       "language": "zh"
     },
     {
@@ -14232,7 +14318,7 @@
       "positionMode": "attached",
       "offsetX": 100,
       "offsetY": 140,
-      "sourceStationId": "L2-S02",
+      "sourceStationId": "L1-S06",
       "language": "en"
     },
     {
@@ -18678,6 +18764,87 @@
       "offsetY": 100,
       "sourceStationId": "L10-S07",
       "language": "en"
+    },
+    {
+      "id": "label-mss9olss-afaz3",
+      "text": "虚空城7.3版本规划配线图",
+      "x": 6900,
+      "y": 300,
+      "fontSize": 100,
+      "anchor": "bottom",
+      "rotation": 0,
+      "fill": "#ffffff",
+      "fontWeight": 700,
+      "backgroundMask": false,
+      "maskStrokeWidth": 2,
+      "outlineColor": "#ffffff",
+      "backgroundEnabled": false,
+      "backgroundColor": "#ffffff",
+      "backgroundPadding": 4,
+      "colorMode": "default",
+      "positionMode": "independent",
+      "locked": false,
+      "visible": true,
+      "layerId": "layer-transfer",
+      "zIndex": 24.5,
+      "pageId": "page-1",
+      "createdOrder": 1786670832988,
+      "offsetX": 0,
+      "offsetY": 0
+    },
+    {
+      "id": "label-mss9phgv-op909",
+      "text": "仅供示例参考，非实际地图内位置",
+      "x": 7000,
+      "y": 420,
+      "fontSize": 64,
+      "anchor": "bottom",
+      "rotation": 0,
+      "fill": "#ffffff",
+      "fontWeight": 700,
+      "backgroundMask": false,
+      "maskStrokeWidth": 2,
+      "outlineColor": "#ffffff",
+      "backgroundEnabled": false,
+      "backgroundColor": "#ffffff",
+      "backgroundPadding": 4,
+      "colorMode": "default",
+      "positionMode": "independent",
+      "locked": false,
+      "visible": true,
+      "layerId": "layer-transfer",
+      "zIndex": 25.5,
+      "pageId": "page-1",
+      "createdOrder": 1786670874031,
+      "offsetX": 0,
+      "offsetY": 0
+    },
+    {
+      "id": "label-mss9q6ac-pu512",
+      "text": "请以实际地图为准",
+      "x": 7220,
+      "y": 500,
+      "fontSize": 64,
+      "anchor": "bottom",
+      "rotation": 0,
+      "fill": "#ffffff",
+      "fontWeight": 700,
+      "backgroundMask": false,
+      "maskStrokeWidth": 2,
+      "outlineColor": "#ffffff",
+      "backgroundEnabled": false,
+      "backgroundColor": "#ffffff",
+      "backgroundPadding": 4,
+      "colorMode": "default",
+      "positionMode": "independent",
+      "locked": false,
+      "visible": true,
+      "layerId": "layer-transfer",
+      "zIndex": 25,
+      "pageId": "page-1",
+      "createdOrder": 1786670906196,
+      "offsetX": 0,
+      "offsetY": 0
     }
   ],
   "servicePatterns": [
@@ -21403,7 +21570,7 @@
       "fill": "#D7B06A",
       "label": "岛式站台",
       "layerId": "layer-platform-normal",
-      "zIndex": 112,
+      "zIndex": -20,
       "pageId": "page-1",
       "createdOrder": 1786264594173,
       "visible": true,
@@ -21941,7 +22108,31 @@
       "zIndexMode": "auto"
     }
   ],
-  "graphics": [],
+  "graphics": [
+    {
+      "id": "graphic-mss9nzty-mccuq",
+      "shapeType": "rect",
+      "fill": "#ffbb00",
+      "stroke": "#202124",
+      "positionMode": "independent",
+      "x": 6260,
+      "y": 260,
+      "width": 1285,
+      "height": 360,
+      "rotation": 0,
+      "mirrorX": false,
+      "mirrorY": false,
+      "opacity": 1,
+      "layerId": "layer-icon-facility",
+      "zIndex": 0,
+      "pageId": "page-1",
+      "offsetX": 0,
+      "offsetY": 0,
+      "visible": true,
+      "locked": false,
+      "createdOrder": 1786670804518
+    }
+  ],
   "assets": [],
   "sourceLines": [
     {
@@ -24102,8 +24293,8 @@
   "pendingPlacement": null,
   "thumbnailPath": "thumbnails/preview.png",
   "viewport": {
-    "panX": -1305.39890210775,
-    "panY": -1552.233516190853,
-    "scale": 0.7581705427489418
+    "scale": 0.12973880597014928,
+    "panX": 57.94999999999993,
+    "panY": 62.0059701492537
   }
 }

@@ -3,7 +3,8 @@ import { DEFAULT_PROJECT_ID } from "../projects/types";
 import { migrateProjectSchema, type ProjectFile } from "./projectStore";
 
 const DEFAULT_WIRING_SAMPLE_PATH = "sample-projects/default/wiring.json";
-export const DEFAULT_WIRING_SAMPLE_MARKER = "wiring:default:sample:void-city-v1";
+export const DEFAULT_WIRING_SAMPLE_MARKER = "wiring:default:sample:void-city-v2";
+const PREVIOUS_BUNDLED_SAMPLE_UPDATED_AT = "2026-08-13T07:53:36.646Z";
 
 /**
  * A saved empty shell should not prevent the built-in Void City example from
@@ -18,6 +19,15 @@ export function isWiringProjectEmpty(project: ProjectFile | null): boolean {
     && !project.platforms.length
     && !project.graphics.length
     && !project.backgroundImages.length;
+}
+
+/** Upgrade the untouched v1 bundled example, but never replace user-edited work. */
+export function shouldInstallDefaultWiringSample(project: ProjectFile | null): boolean {
+  if (isWiringProjectEmpty(project)) return true;
+  return project?.projectInfo?.name === "虚空城示例配线图"
+    && project.projectInfo.updatedAt === PREVIOUS_BUNDLED_SAMPLE_UPDATED_AT
+    && project.modules.length === 142
+    && project.connections.length === 266;
 }
 
 /**
