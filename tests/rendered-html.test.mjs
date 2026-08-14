@@ -118,6 +118,7 @@ test("static analytics beacon injects the default Cloudflare Web Analytics token
   assert.match(analytics, /VITE_CLOUDFLARE_ANALYTICS_TOKEN/);
   assert.match(analytics, /ae18141ca60a4a27997d54a2f03f937d/);
   assert.match(analytics, /data-cf-beacon/);
+  assert.match(analytics, /type="module"/);
   assert.match(analytics, /DEFAULT_CLOUDFLARE_ANALYTICS_TOKEN/);
   // 仅静态入口渲染该组件
   assert.match(entry, /AnalyticsBeacon/);
