@@ -1,7 +1,7 @@
 # 构建静态站点并部署到 GitHub Pages。
 # 仓库页面 Settings → Pages → Source 选择 “GitHub Actions”。
-# 可选统计：仓库 Settings → Secrets → Actions 添加 CLOUDFLARE_ANALYTICS_TOKEN
-# （未配置时构建产物不含统计脚本，页面行为不受影响）。
+# 统计默认使用项目内配置的 Cloudflare Web Analytics 站点令牌。
+# 分叉项目可在仓库 Settings → Secrets → Actions 添加 CLOUDFLARE_ANALYTICS_TOKEN 覆盖。
 name: Deploy to GitHub Pages
 
 on:

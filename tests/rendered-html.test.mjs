@@ -108,7 +108,7 @@ test("portal about modal has real links, free note, version, and disclaimer", as
   assert.match(css, /\.portal-beta-alert/);
 });
 
-test("static analytics beacon injects Cloudflare Web Analytics only when token is configured", async () => {
+test("static analytics beacon injects the default Cloudflare Web Analytics token", async () => {
   const [analytics, entry] = await Promise.all([
     readFile(new URL("app/analytics.tsx", root), "utf8"),
     readFile(new URL("app/static-entry.tsx", root), "utf8"),
@@ -116,10 +116,9 @@ test("static analytics beacon injects Cloudflare Web Analytics only when token i
   // 组件读取构建期环境变量，注入 Cloudflare 官方 beacon 脚本
   assert.match(analytics, /beacon\.min\.js/);
   assert.match(analytics, /VITE_CLOUDFLARE_ANALYTICS_TOKEN/);
+  assert.match(analytics, /ae18141ca60a4a27997d54a2f03f937d/);
   assert.match(analytics, /data-cf-beacon/);
-  // 未配置令牌时零输出（构建产物无痕迹）
-  assert.match(analytics, /if \(!token\)/);
-  assert.match(analytics, /return null/);
+  assert.match(analytics, /DEFAULT_CLOUDFLARE_ANALYTICS_TOKEN/);
   // 仅静态入口渲染该组件
   assert.match(entry, /AnalyticsBeacon/);
 });
