@@ -189,20 +189,20 @@ test("portal about modal has real links, free note, version, and disclaimer", as
   assert.match(css, /\.portal-beta-alert/);
 });
 
-test("static analytics beacon injects the default Cloudflare Web Analytics token", async () => {
-  const [analytics, entry] = await Promise.all([
-    readFile(new URL("app/analytics.tsx", root), "utf8"),
+test("static HTML embeds exactly one Cloudflare Web Analytics beacon", async () => {
+  const [html, entry] = await Promise.all([
+    readFile(new URL("index.html", root), "utf8"),
     readFile(new URL("app/static-entry.tsx", root), "utf8"),
   ]);
-  // 组件读取构建期环境变量，注入 Cloudflare 官方 beacon 脚本
-  assert.match(analytics, /beacon\.min\.js/);
-  assert.match(analytics, /VITE_CLOUDFLARE_ANALYTICS_TOKEN/);
-  assert.match(analytics, /ae18141ca60a4a27997d54a2f03f937d/);
-  assert.match(analytics, /data-cf-beacon/);
-  assert.match(analytics, /type="module"/);
-  assert.match(analytics, /DEFAULT_CLOUDFLARE_ANALYTICS_TOKEN/);
-  // 仅静态入口渲染该组件
-  assert.match(entry, /AnalyticsBeacon/);
+  const beaconUrls = html.match(/static\.cloudflareinsights\.com\/beacon\.min\.js/g) ?? [];
+  const beaconConfigs = html.match(/data-cf-beacon=/g) ?? [];
+  const tokens = html.match(/ae18141ca60a4a27997d54a2f03f937d/g) ?? [];
+  assert.equal(beaconUrls.length, 1);
+  assert.equal(beaconConfigs.length, 1);
+  assert.equal(tokens.length, 1);
+  assert.match(html, /<script\s+[\s\S]*?type="module"[\s\S]*?data-cf-beacon='\{"token":"ae18141ca60a4a27997d54a2f03f937d"\}'[\s\S]*?<\/script>/);
+  assert.ok(html.indexOf("static.cloudflareinsights.com/beacon.min.js") < html.indexOf("</body>"));
+  assert.doesNotMatch(entry, /AnalyticsBeacon|cloudflareinsights|data-cf-beacon/);
 });
 
 test("supports deploying under a sub-path (site.ts + relative asset refs)", async () => {

@@ -419,7 +419,34 @@ function matchingTemplatePlatform(
   platform: PlatformObject,
   templatePlatforms: TemplatePlatform[],
   modulePlatforms?: PlatformObject[],
+  owner?: DiagramModule,
+  templateSize?: { width: number; height: number },
 ): TemplatePlatform | undefined {
+  if (owner && templateSize) {
+    const radians = (owner.rotation * Math.PI) / 180;
+    const cos = Math.cos(radians);
+    const sin = Math.sin(radians);
+    const cx = templateSize.width / 2;
+    const cy = templateSize.height / 2;
+    const physicalCenter = {
+      x: platform.x + platform.width / 2,
+      y: platform.y + platform.height / 2,
+    };
+    let best: { platform: TemplatePlatform; distance: number } | undefined;
+    for (const candidate of templatePlatforms.filter((item) => item.type === platform.platformType)) {
+      let localX = candidate.x + candidate.width / 2;
+      let localY = candidate.y + candidate.height / 2;
+      if (owner.mirrorX) localX = templateSize.width - localX;
+      if (owner.mirrorY) localY = templateSize.height - localY;
+      const dx = localX - cx;
+      const dy = localY - cy;
+      const worldX = owner.x + cx + dx * cos - dy * sin;
+      const worldY = owner.y + cy + dx * sin + dy * cos;
+      const distance = Math.hypot(worldX - physicalCenter.x, worldY - physicalCenter.y);
+      if (!best || distance < best.distance) best = { platform: candidate, distance };
+    }
+    if (best) return best.platform;
+  }
   const moduleIslands = (modulePlatforms ?? [])
     .filter((candidate) => candidate.platformType === "island")
     .slice()
@@ -430,6 +457,30 @@ function matchingTemplatePlatform(
     .sort((a, b) => a.y + a.height / 2 - (b.y + b.height / 2));
   const index = moduleIslands.indexOf(platform);
   return index < 0 ? undefined : templateIslands[index];
+}
+
+/**
+ * 物化站台独立于模块绘制；镜像操作会用等价旋转表示矩形朝向。
+ * 当它的局部 Y 轴与模块模板的局部 Y 轴相反时，双色上下半区也必须交换。
+ */
+function physicalPlatformReversesTemplateY(platform: PlatformObject, owner: DiagramModule): boolean {
+  const moduleRadians = (owner.rotation * Math.PI) / 180;
+  const platformRadians = (platform.rotation * Math.PI) / 180;
+  const moduleY = {
+    x: -Math.sin(moduleRadians) * (owner.mirrorY ? -1 : 1),
+    y: Math.cos(moduleRadians) * (owner.mirrorY ? -1 : 1),
+  };
+  const platformY = { x: -Math.sin(platformRadians), y: Math.cos(platformRadians) };
+  return moduleY.x * platformY.x + moduleY.y * platformY.y < 0;
+}
+
+/** 可读的站台文字按屏幕上方→下方（竖向）或左方→右方（横向）排列线路。 */
+function readablePlatformOrderIsReversed(owner: DiagramModule): boolean {
+  const radians = (owner.rotation * Math.PI) / 180;
+  const direction = owner.mirrorY ? -1 : 1;
+  const dx = -Math.sin(radians) * direction;
+  const dy = Math.cos(radians) * direction;
+  return Math.abs(dy) >= Math.abs(dx) ? dy < 0 : dx < 0;
 }
 
 /**
@@ -525,6 +576,7 @@ export function resolvePlatformFillColor(
   templateTracks?: TemplateTrack[],
   templatePlatforms?: TemplatePlatform[],
   linePattern?: number[],
+  templateSize?: { width: number; height: number },
 ): ColorSpec {
   const fallback = defaultFill || DEFAULT_PLATFORM_FILL;
   const mode = platform.colorMode ?? "line";
@@ -550,9 +602,10 @@ export function resolvePlatformFillColor(
     // 带 trackLinePattern 的模板（如同台换乘，含多岛）：每个站台按上下相邻轨道取渐变，
     // 而不是多岛逐岛纯色
     if (platform.platformType === "island" && linePattern && templateTracks?.length && linePattern.length === templateTracks.length) {
-      const templatePlatform = matchingTemplatePlatform(platform, templatePlatforms ?? [], modulePlatforms);
+      const templatePlatform = matchingTemplatePlatform(platform, templatePlatforms ?? [], modulePlatforms, owner, templateSize);
       if (templatePlatform) {
-        const stops = adjacentTrackColors(templatePlatform, templateTracks, colors, linePattern);
+        let stops = adjacentTrackColors(templatePlatform, templateTracks, colors, linePattern);
+        if (owner && stops.length > 1 && physicalPlatformReversesTemplateY(platform, owner)) stops = [...stops].reverse();
         if (stops.length === 1) return solidColor(stops[0]);
         // 物化站台在本地原点绘制（外层 translate 定位），拼色用 0..height 覆盖站台自身
         return twoToneGradient(
@@ -630,6 +683,7 @@ export function platformLineNames(
   templateTracks?: TemplateTrack[],
   templatePlatforms?: TemplatePlatform[],
   linePattern?: number[],
+  templateSize?: { width: number; height: number },
 ): string[] | undefined {
   const owner = platform.moduleId ? modules.find((module) => module.id === platform.moduleId) : undefined;
   const lineIds = owner?.lineIds?.length ? owner.lineIds : platform.sourceLineId ? [platform.sourceLineId] : [];
@@ -644,10 +698,10 @@ export function platformLineNames(
   const islandCount = islands.length || (platform.platformType === "island" ? 1 : 0);
   // 同台换乘（trackLinePattern 多岛）：按上下相邻轨道归线
   if (platform.platformType === "island" && linePattern && templateTracks?.length && linePattern.length === templateTracks.length) {
-    const templatePlatform = matchingTemplatePlatform(platform, templatePlatforms ?? [], modulePlatforms);
+    const templatePlatform = matchingTemplatePlatform(platform, templatePlatforms ?? [], modulePlatforms, owner, templateSize);
     if (templatePlatform) {
       const names = adjacentTrackLineNames(templatePlatform, templateTracks, valid, linePattern);
-      if (names) return names;
+      if (names) return owner && names.length > 1 && readablePlatformOrderIsReversed(owner) ? [...names].reverse() : names;
     }
   }
   if (platform.platformType === "island" && islandCount === 1 && valid.length === 2) {

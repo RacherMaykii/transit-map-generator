@@ -601,6 +601,64 @@ describe("resolvePlatformFillColor", () => {
     assert.deepEqual(color.twoToneColors(bottom), ["#0000ff", "#ff0000"]);
   });
 
+  test("rotated and mirrored cross-platform stations keep platform halves aligned with reordered tracks", () => {
+    const lines = [sourceLine("L1", "#FFC600"), sourceLine("L2", "#FF00FF")];
+    const owner = module("m1", ["L2", "L1"]);
+    owner.trackColorMode = "line";
+    owner.x = 100;
+    owner.y = 200;
+    owner.rotation = 180;
+    const physicalTopTemplate = crossPlatformIsland("template-top", 280);
+    physicalTopTemplate.rotation = 180;
+    const physicalBottomTemplate = crossPlatformIsland("template-bottom", 232);
+    physicalBottomTemplate.rotation = 180;
+    const size = { width: 200, height: 128 };
+
+    const plan = color.resolveModuleColorPlan(owner, lines, 200, crossPlatformTracks, crossPlatformTemplates, { minY: 20, maxY: 108 }, crossPlatformPattern);
+    assert.deepEqual(plan.trackColors, ["#ff00ff", "#ffc600", "#ffc600", "#ff00ff"]);
+
+    // 旋转 180° 后，画布上方的物化站台实际来自模板下方站台，不能再按世界 Y 排序误配。
+    const rotated = color.resolvePlatformFillColor(
+      physicalBottomTemplate,
+      [owner],
+      lines,
+      undefined,
+      [physicalTopTemplate, physicalBottomTemplate],
+      crossPlatformTracks,
+      crossPlatformTemplates,
+      crossPlatformPattern,
+      size,
+    );
+    assert.deepEqual(color.twoToneColors(rotated), ["#ffc600", "#ff00ff"]);
+    assert.deepEqual(color.platformLineNames(
+      physicalBottomTemplate,
+      [owner],
+      lines,
+      [physicalTopTemplate, physicalBottomTemplate],
+      crossPlatformTracks,
+      crossPlatformTemplates,
+      crossPlatformPattern,
+      size,
+    ), ["L2", "L1"]);
+
+    // 纵向镜像会交换模板上下方向，但物化矩形本身保持 0°，双色半区也要反转补偿。
+    const mirroredOwner = { ...owner, rotation: 0, mirrorY: true };
+    const mirroredTop = { ...physicalBottomTemplate, id: "mirrored-top", rotation: 0 };
+    const mirroredBottom = { ...physicalTopTemplate, id: "mirrored-bottom", rotation: 0 };
+    const mirrored = color.resolvePlatformFillColor(
+      mirroredTop,
+      [mirroredOwner],
+      lines,
+      undefined,
+      [mirroredTop, mirroredBottom],
+      crossPlatformTracks,
+      crossPlatformTemplates,
+      crossPlatformPattern,
+      size,
+    );
+    assert.deepEqual(color.twoToneColors(mirrored), ["#ff00ff", "#ffc600"]);
+  });
+
   test("isTwoToneSpec is false when both halves share the same color", () => {
     const lines = [sourceLine("L1", "#FF0000"), sourceLine("L2", "#FF0000")];
     const mods = [module("m1", ["L1", "L2"])];

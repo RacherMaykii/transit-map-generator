@@ -951,11 +951,13 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
       const ownerMod = platform.moduleId ? modules.find((candidate) => candidate.id === platform.moduleId) : undefined;
       const ownerTemplate = ownerMod ? (resolvedTemplateMap.get(ownerMod.id) || templateMap.get(ownerMod.templateId)) : undefined;
       const spec = resolvePlatformFillColor(platform, modules, sourceLines, undefined, platform.moduleId ? modulePlatformsById.get(platform.moduleId) : undefined,
-        ownerTemplate?.tracks, ownerTemplate?.platforms, ownerTemplate?.trackLinePattern);
+        ownerTemplate?.tracks, ownerTemplate?.platforms, ownerTemplate?.trackLinePattern,
+        ownerTemplate ? { width: ownerTemplate.width, height: ownerTemplate.height } : undefined);
       platformSpecs.set(platform.id, spec);
       if (spec.kind === "gradient" && spec.gradientDef) gradientDefs.push(spec.gradientDef);
       const lineNames = platformLineNames(platform, modules, sourceLines, platform.moduleId ? modulePlatformsById.get(platform.moduleId) : undefined,
-        ownerTemplate?.tracks, ownerTemplate?.platforms, ownerTemplate?.trackLinePattern);
+        ownerTemplate?.tracks, ownerTemplate?.platforms, ownerTemplate?.trackLinePattern,
+        ownerTemplate ? { width: ownerTemplate.width, height: ownerTemplate.height } : undefined);
       if (lineNames) platformLineNamesMap.set(platform.id, lineNames);
     }
     for (const label of labels) {
