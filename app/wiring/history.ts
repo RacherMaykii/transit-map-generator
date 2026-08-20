@@ -144,8 +144,19 @@ function useHistoryFromRefs(refs: HistoryStateRefs) {
     }
   }, [forceUpdate]);
   const clearHistory = useCallback(() => { stackRef.current = { past: [], future: [] }; forceUpdate(); }, [forceUpdate]);
+  // 预览下一次撤销/重做的快照但不弹出，用于"撤销涉及画布尺寸变更"时先确认。
+  const peekUndo = useCallback((): HistorySnapshot | null => {
+    const stack = stackRef.current;
+    if (!stack.past.length) return null;
+    return cloneHistorySnapshot(stack.past.at(-1)!);
+  }, []);
+  const peekRedo = useCallback((): HistorySnapshot | null => {
+    const stack = stackRef.current;
+    if (!stack.future.length) return null;
+    return cloneHistorySnapshot(stack.future[0]);
+  }, []);
   const stack = stackRef.current;
-  return { captureSnapshot, discardSnapshot, undo, redo, clearHistory, canUndo: stack.past.length > 0, canRedo: stack.future.length > 0,
+  return { captureSnapshot, discardSnapshot, undo, redo, clearHistory, peekUndo, peekRedo, canUndo: stack.past.length > 0, canRedo: stack.future.length > 0,
     pastCount: stack.past.length, futureCount: stack.future.length, lastOperation: stack.past.at(-1)?.operationName || null,
     nextOperation: stack.future[0]?.operationName || null };
 }

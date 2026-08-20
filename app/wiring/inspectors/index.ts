@@ -1,4 +1,5 @@
 export { BackgroundInspector } from "./BackgroundInspector";
+export { BatchInspector } from "./BatchInspector";
 export { ConnectionInspector } from "./ConnectionInspector";
 export { GraphicInspector } from "./GraphicInspector";
 export { LabelInspector } from "./LabelInspector";

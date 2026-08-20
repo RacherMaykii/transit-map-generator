@@ -59,6 +59,53 @@ export function makeCustomizedTemplate(
   }
 
   switch (base.id) {
+    // ── 双线区间 / 侧式 / 岛式 / 西班牙式：线路间距 —— 上下行围绕中线对称展开，站台与站名跟随 ──
+    case "double_track":
+    case "side_platform":
+    case "island_platform":
+    case "spanish_platform": {
+      width = base.width;
+      height = spacing + 72;
+      const upY = 56 - spacing / 2;
+      const downY = 56 + spacing / 2;
+      const shiftedY = (y: number) => y === UP_MAIN_Y ? upY : y === DOWN_MAIN_Y ? downY : y;
+      ports = base.ports.map((port) => ({ ...port, y: shiftedY(port.y) }));
+      tracks = base.tracks.map((track) => ({ ...track, y1: shiftedY(track.y1), y2: shiftedY(track.y2) }));
+      if (base.id === "island_platform") {
+        // 岛式站台保持居中；中文名贴在上行轨上方、英文名贴在下行轨下方
+        platforms = base.platforms.map((platform) => ({ ...platform, y: 48 }));
+        labels = base.labels.map((label, index) => index === 0 ? { ...label, y: upY - 6 } : { ...label, y: downY + 24 });
+      } else if (base.id === "spanish_platform") {
+        // 上侧式 = 上行轨上方，岛式居中，下侧式 = 下行轨下方
+        platforms = base.platforms.map((platform, index) => ({ ...platform, y: [upY - 20, 48, downY + 4][index] }));
+        labels = base.labels.map((label, index) => index === 0 ? { ...label, y: upY - 22 } : { ...label, y: downY + 29 });
+      } else if (base.id === "side_platform") {
+        platforms = base.platforms.map((platform, index) => ({ ...platform, y: index === 0 ? upY - 20 : downY + 4 }));
+        labels = base.labels.map((label, index) => index === 0 ? { ...label, y: upY - 22 } : { ...label, y: downY + 29 });
+      } else {
+        labels = base.labels;
+      }
+      // 站台长度/宽度可调：平台水平居中，宽度=platformLength、厚度=platformWidth（默认值下与原几何一致）。
+      // 双线区间等无站台模板的 platforms 为空数组，此处为无操作。
+      platforms = platforms.map((platform) => ({
+        ...platform,
+        x: (width - platformLength) / 2,
+        width: platformLength,
+        height: platformWidth,
+      }));
+      break;
+    }
+    // ── 同台换乘：线路间距 = 两座岛式站台之间的间距（上组固定，下组随间距下移）──
+    case "cross_platform": {
+      width = base.width;
+      height = 96 + spacing;
+      const trackYs = [20, 60, 36 + spacing, 76 + spacing];
+      ports = base.ports.map((port, index) => ({ ...port, y: trackYs[index % 4] }));
+      tracks = base.tracks.map((track, index) => ({ ...track, y1: trackYs[index], y2: trackYs[index] }));
+      platforms = base.platforms.map((platform, index) => ({ ...platform, y: index === 0 ? 32 : 48 + spacing }));
+      labels = base.labels.map((label, index) => index === 0 ? { ...label, y: 14 } : { ...label, y: 88 + spacing });
+      break;
+    }
     case "pre_turnback":
     case "post_turnback": {
       const beforePlatform = base.id === "pre_turnback";

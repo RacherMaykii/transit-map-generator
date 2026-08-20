@@ -2,6 +2,9 @@ import { worldPortPosition } from "./types";
 import type { AttachedGraphic, BackgroundImageObject, DiagramModule, LabelObject, LayerNode, ModuleConnection, ModulePort, ModuleTemplate, PlatformObject, PortRole, TransferGroup } from "./types";
 import { defaultModuleLayerId, defaultPlatformLayerId } from "./layerAssignment";
 
+/** 画布尺寸调整方式：infinite=无限流自动适应内容 / manual=手动固定尺寸（关闭自动调整） */
+export type CanvasFlowMode = "infinite" | "manual";
+
 export interface CanvasPageSettings {
   id: string;
   name: string;
@@ -14,6 +17,15 @@ export interface CanvasPageSettings {
   gridSize: number;
   showGrid: boolean;
   orientation: "landscape" | "portrait";
+  /**
+   * 无限流（infinite）或手动尺寸（manual）。旧工程缺省按 infinite，保留原有自动增长行为。
+   * infinite：元件放到画布外自动扩大、画布为空自动缩回基准尺寸。
+   * manual：画布保持固定尺寸，不做任何自动调整。
+   */
+  flowMode?: CanvasFlowMode;
+  /** 基准尺寸：新建画布或手动应用时设定；自动增长不改动，空画布收缩回此尺寸。 */
+  baseWidth?: number;
+  baseHeight?: number;
 }
 
 export interface CanvasPreset {
@@ -45,6 +57,9 @@ export function createCanvasPage(input: Partial<CanvasPageSettings> & Pick<Canva
     gridSize: Math.max(5, Math.round(input.gridSize ?? 20)),
     showGrid: input.showGrid ?? true,
     orientation: input.orientation || (width >= height ? "landscape" : "portrait"),
+    flowMode: input.flowMode ?? "infinite",
+    baseWidth: Math.max(320, Math.round(input.baseWidth ?? width)),
+    baseHeight: Math.max(320, Math.round(input.baseHeight ?? height)),
   };
 }
 
@@ -53,7 +68,16 @@ export function updateCanvasPage(
   pageId: string,
   patch: Partial<Omit<CanvasPageSettings, "id">>,
 ): CanvasPageSettings[] {
-  return pages.map((page) => page.id === pageId ? createCanvasPage({ ...page, ...patch, id: page.id, name: patch.name ?? page.name }) : page);
+  // 手动修改宽高时同步基准尺寸：自动增长不经过 updateCanvasPage，因此不会覆盖 base。
+  const target = pages.find((page) => page.id === pageId);
+  const next: typeof patch = { ...patch };
+  if (next.width !== undefined || next.height !== undefined) {
+    const w = next.width ?? target?.width ?? 1920;
+    const h = next.height ?? target?.height ?? 1080;
+    next.baseWidth = Math.max(320, Math.round(w));
+    next.baseHeight = Math.max(320, Math.round(h));
+  }
+  return pages.map((page) => page.id === pageId ? createCanvasPage({ ...page, ...next, id: page.id, name: patch.name ?? page.name }) : page);
 }
 
 /** Grow a canvas at its right and bottom edges without changing object coordinates. */
@@ -76,6 +100,236 @@ export function expandCanvasToFitBounds(
   return width === page.width && height === page.height
     ? page
     : createCanvasPage({ ...page, width, height });
+}
+
+// ── 画布调整（PS 式锚点九宫格）──────────────────
+
+/** 九宫格锚点索引：0=左上 … 4=中心 … 8=右下 */
+export type CanvasAnchor = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
+
+/**
+ * 九宫格锚点定义。fx/fy 为锚点在旧画布中的位置比例（0/0.5/1），
+ * arrow 为选中该锚点后画布向箭头方向扩张（锚点处内容保持不动）。
+ */
+export const CANVAS_ANCHORS: { fx: number; fy: number; arrow: string }[] = [
+  { fx: 0, fy: 0, arrow: "↘" },   // 左上：向右、向下扩
+  { fx: 0.5, fy: 0, arrow: "↓" }, // 上：向下扩
+  { fx: 1, fy: 0, arrow: "↙" },   // 右上：向左、向下扩
+  { fx: 0, fy: 0.5, arrow: "→" }, // 左：向右扩
+  { fx: 0.5, fy: 0.5, arrow: "✛" }, // 中心：四向平均扩
+  { fx: 1, fy: 0.5, arrow: "←" }, // 右：向左扩
+  { fx: 0, fy: 1, arrow: "↗" },   // 左下：向右、向上扩
+  { fx: 0.5, fy: 1, arrow: "↑" }, // 下：向上扩
+  { fx: 1, fy: 1, arrow: "↖" },   // 右下：向左、向上扩
+];
+
+/** 九宫格锚点的中文名，与索引一一对应。 */
+export const CANVAS_ANCHOR_NAMES = [
+  "左上", "上", "右上",
+  "左", "中心", "右",
+  "左下", "下", "右下",
+] as const;
+
+/**
+ * 以某个锚点为固定点时，九宫格每个格子应显示的箭头：锚点格显示 ●（固定点），
+ * 其余格子按相对锚点的方向显示 单/对角 箭头，直观体现画布向哪些方向扩张。
+ * 返回 9 个字符串，按行优先排列。
+ */
+export function canvasAnchorArrowGrid(anchor: CanvasAnchor): string[] {
+  const anchorRow = Math.floor(anchor / 3);
+  const anchorCol = anchor % 3;
+  const diagonal: Record<string, string> = { "→↓": "↘", "→↑": "↗", "←↓": "↙", "←↑": "↖" };
+  const cells: string[] = [];
+  for (let row = 0; row < 3; row++) {
+    for (let col = 0; col < 3; col++) {
+      if (row === anchorRow && col === anchorCol) {
+        cells.push("●");
+        continue;
+      }
+      let arrow = "";
+      if (col > anchorCol) arrow += "→";
+      else if (col < anchorCol) arrow += "←";
+      if (row > anchorRow) arrow += "↓";
+      else if (row < anchorRow) arrow += "↑";
+      if (arrow.length === 2) arrow = diagonal[arrow] ?? arrow;
+      cells.push(arrow || "·");
+    }
+  }
+  return cells;
+}
+
+/** 描述某个锚点对应的扩张方向，供九宫格下方的预览文案使用。 */
+export function canvasAnchorDescription(anchor: CanvasAnchor): string {
+  const { fx, fy } = CANVAS_ANCHORS[anchor];
+  if (fx === 0.5 && fy === 0.5) return "画布将向四周平均扩展";
+  const parts: string[] = [];
+  if (fx === 0) parts.push("向右");
+  else if (fx === 1) parts.push("向左");
+  else parts.push("向左右");
+  if (fy === 0) parts.push("向下");
+  else if (fy === 1) parts.push("向上");
+  else parts.push("向上下");
+  return `画布将${parts.join("、")}扩展`;
+}
+
+/** 站台缩放最小尺寸（属性面板与拖拽共用）。 */
+export const MIN_PLATFORM_WIDTH = 4;
+export const MIN_PLATFORM_HEIGHT = 4;
+
+/** 描述某个站台缩放锚点：锚点处固定不动，其余方向随之调整。 */
+export function platformAnchorDescription(anchor: CanvasAnchor): string {
+  const { fx, fy } = CANVAS_ANCHORS[anchor];
+  const parts: string[] = [];
+  if (fx === 0) parts.push("向右");
+  else if (fx === 1) parts.push("向左");
+  else parts.push("向左右");
+  if (fy === 0) parts.push("向下");
+  else if (fy === 1) parts.push("向上");
+  else parts.push("向上下");
+  return `以「${CANVAS_ANCHOR_NAMES[anchor]}」为锚点：长度${parts[0]}、厚度${parts[1]}调整`;
+}
+
+export interface PlatformResizeResult {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * 按目标尺寸反解站台 x/y：锚点（fx/fy 为本地坐标比例）在世界坐标中保持不动。
+ * 供属性面板直接输入长度/厚度时使用；也供 computePlatformResize 在钳制尺寸后重算位置。
+ * 旋转绕中心进行，故位置解包含「中心平移 + 锚点本地偏移差旋转」两部分。
+ */
+export function computePlatformResizeFromSize(
+  platform: Pick<PlatformObject, "x" | "y" | "width" | "height" | "rotation">,
+  anchor: CanvasAnchor,
+  newWidth: number,
+  newHeight: number,
+  minWidth = MIN_PLATFORM_WIDTH,
+  minHeight = MIN_PLATFORM_HEIGHT,
+): PlatformResizeResult {
+  const { fx, fy } = CANVAS_ANCHORS[anchor] ?? CANVAS_ANCHORS[0];
+  const rot = platform.rotation ?? 0;
+  const newW = Math.max(minWidth, newWidth);
+  const newH = Math.max(minHeight, newHeight);
+  const centerShiftX = (platform.width - newW) / 2;
+  const centerShiftY = (platform.height - newH) / 2;
+  const anchorShift = rotateAround(
+    { x: (fx - 0.5) * (platform.width - newW), y: (fy - 0.5) * (platform.height - newH) },
+    { x: 0, y: 0 },
+    rot,
+  );
+  return {
+    x: platform.x + centerShiftX + anchorShift.x,
+    y: platform.y + centerShiftY + anchorShift.y,
+    width: newW,
+    height: newH,
+  };
+}
+
+/**
+ * 拖拽缩放站台：手柄位于与锚点相对的那条边角（fx=0→右侧、fx=1→左侧、fy=0→下侧、fy=1→上侧）。
+ * dx/dy 为世界坐标拖拽位移；先把位移转到本地坐标再解算，最后按锚点不动重算位置。
+ */
+export function computePlatformResize(
+  platform: Pick<PlatformObject, "x" | "y" | "width" | "height" | "rotation">,
+  anchor: CanvasAnchor,
+  dx: number,
+  dy: number,
+  minWidth = MIN_PLATFORM_WIDTH,
+  minHeight = MIN_PLATFORM_HEIGHT,
+): PlatformResizeResult {
+  const { fx, fy } = CANVAS_ANCHORS[anchor] ?? CANVAS_ANCHORS[0];
+  const hx = fx === 1 ? 0 : 1;
+  const hy = fy === 1 ? 0 : 1;
+  const rot = platform.rotation ?? 0;
+  // 世界位移 → 本地坐标（旋转逆变换）
+  const inv = rotateAround({ x: dx, y: dy }, { x: 0, y: 0 }, -rot);
+  // 手柄相对锚点的比例差 (hx-fx) 恒为 1 / 0.5 / -1，不会为 0
+  const newW = Math.max(minWidth, platform.width + inv.x / (hx - fx));
+  const newH = Math.max(minHeight, platform.height + inv.y / (hy - fy));
+  return computePlatformResizeFromSize(platform, anchor, newW, newH, minWidth, minHeight);
+}
+
+export interface CanvasResizeTransform {
+  width: number;
+  height: number;
+  /** 世界坐标平移量：应用后把新画布原点重定为 (0,0)，保持元件相对锚点位置不变。 */
+  offsetX: number;
+  offsetY: number;
+  /** 新画布在旧世界坐标中的矩形（用于判定画布外元件）。 */
+  rect: { x: number; y: number; width: number; height: number };
+}
+
+/**
+ * 计算锚点缩放变换：锚点在世界坐标中固定，新画布围绕锚点取新尺寸，
+ * 返回整体平移量 offset（重定原点用）与新画布矩形（判定画布外元件用）。
+ */
+/** 把 -0 归零：0 乘负数在 JS 会产生 -0，深比较会区分 ±0。 */
+function normalizeZero(value: number): number {
+  return value === 0 ? 0 : value;
+}
+
+export function computeCanvasResizeTransform(
+  page: CanvasPageSettings,
+  width: number,
+  height: number,
+  anchor: CanvasAnchor,
+): CanvasResizeTransform {
+  const { fx, fy } = CANVAS_ANCHORS[anchor];
+  const w = Math.max(320, Math.round(width));
+  const h = Math.max(320, Math.round(height));
+  const offsetX = normalizeZero(fx * (w - page.width));
+  const offsetY = normalizeZero(fy * (h - page.height));
+  return {
+    width: w,
+    height: h,
+    offsetX,
+    offsetY,
+    rect: { x: normalizeZero(-offsetX), y: normalizeZero(-offsetY), width: w, height: h },
+  };
+}
+
+/** 计算"适应内容"变换：画布恰好包裹元件范围 + 留白，内容平移使元件从留白处开始。 */
+export function computeCanvasFitTransform(
+  page: CanvasPageSettings,
+  bounds: { x: number; y: number; width: number; height: number },
+  padding = 120,
+): CanvasResizeTransform {
+  const w = Math.max(320, Math.ceil((bounds.width + padding * 2) / page.gridSize) * page.gridSize);
+  const h = Math.max(320, Math.ceil((bounds.height + padding * 2) / page.gridSize) * page.gridSize);
+  const offsetX = normalizeZero(padding - bounds.x);
+  const offsetY = normalizeZero(padding - bounds.y);
+  return {
+    width: w,
+    height: h,
+    offsetX,
+    offsetY,
+    rect: { x: normalizeZero(-offsetX), y: normalizeZero(-offsetY), width: w, height: h },
+  };
+}
+
+/** 生成新尺寸的页面，并把该尺寸作为新的基准尺寸（新建/手动应用语义）。 */
+export function createResizedCanvasPage(
+  page: CanvasPageSettings,
+  width: number,
+  height: number,
+): CanvasPageSettings {
+  return createCanvasPage({ ...page, width, height, baseWidth: width, baseHeight: height, flowMode: "manual" });
+}
+
+/** rect 是否完全落在 container 之外（无任何重叠）。 */
+export function rectFullyOutside(
+  rect: { x: number; y: number; width: number; height: number },
+  container: { x: number; y: number; width: number; height: number },
+): boolean {
+  return (
+    rect.x + rect.width <= container.x
+    || rect.y + rect.height <= container.y
+    || rect.x >= container.x + container.width
+    || rect.y >= container.y + container.height
+  );
 }
 
 function directionAxis(direction: number): "horizontal" | "vertical" {
@@ -369,13 +623,15 @@ export function relayoutModuleOwnedObjects(input: {
   nextId: (prefix: string) => string;
 }): Pick<typeof input, "platforms" | "labels" | "graphics"> {
   const { module, nextTemplate, previousTemplate, nextId } = input;
-  const radians = (module.rotation * Math.PI) / 180;
-  const pivot = { x: module.x + nextTemplate.width / 2, y: module.y + nextTemplate.height / 2 };
-  const localToWorld = (localX: number, localY: number) => {
+  // 局部坐标 → 世界坐标。pivot 用模板中心，模板切换前后宽高可能不同，必须按各模板自身尺寸取支点。
+  const worldFromLocal = (template: ModuleTemplate, localX: number, localY: number) => {
+    const radians = (module.rotation * Math.PI) / 180;
+    const pivot = { x: module.x + template.width / 2, y: module.y + template.height / 2 };
     const dx = module.x + localX - pivot.x;
     const dy = module.y + localY - pivot.y;
     return { x: pivot.x + dx * Math.cos(radians) - dy * Math.sin(radians), y: pivot.y + dx * Math.sin(radians) + dy * Math.cos(radians) };
   };
+  const localToWorld = (localX: number, localY: number) => worldFromLocal(nextTemplate, localX, localY);
   // 站台：以新模板的平台布局为准，保留前缀旧站台的 id/来源绑定，数量变化时补齐或裁掉。
   const owned = input.platforms.filter((platform) => platform.moduleId === module.id);
   const rebuilt = nextTemplate.platforms.map((layout, index) => {
@@ -413,20 +669,31 @@ export function relayoutModuleOwnedObjects(input: {
       label: layout.label,
     };
   });
-  // 站名标签：中文锚点 = 新模板"站名"标签位置；英文锚点 = 模板 "Station" 标签位置（站台下方）。
+  // 站名标签：中文锚点 = 模板"站名"标签位置；英文锚点 = 模板 "Station" 标签位置（站台下方）。
   // 旧逻辑把英文放在中文下方 16px，恰好压在站台上导致"站点遮挡文字"。
-  const stationLabel = nextTemplate.labels.find((label) => label.text === "站名");
-  const englishLabel = nextTemplate.labels.find((label) => label.text === "Station");
-  const baseX = stationLabel?.x ?? nextTemplate.width / 2;
-  const baseY = stationLabel?.y ?? -10;
+  const templateLabelAnchor = (template: ModuleTemplate, isEnglish: boolean) => {
+    const zhLabel = template.labels.find((label) => label.text === "站名");
+    const enLabel = template.labels.find((label) => label.text === "Station");
+    const baseX = zhLabel?.x ?? template.width / 2;
+    const baseY = zhLabel?.y ?? -10;
+    const localX = isEnglish ? (enLabel?.x ?? baseX) : baseX;
+    const localY = isEnglish ? (enLabel?.y ?? baseY + 16) : baseY;
+    return worldFromLocal(template, localX, localY);
+  };
   const labels = input.labels.map((label) => {
     if (label.attachedToId !== module.id || !label.sourceStationId) return label;
     const isEnglish = label.language === "en";
-    const point = localToWorld(
-      isEnglish ? (englishLabel?.x ?? baseX) : baseX,
-      isEnglish ? (englishLabel?.y ?? baseY + 16) : baseY,
-    );
-    return { ...label, x: point.x, y: point.y, rotation: readableLabelRotation(module.rotation), offsetX: point.x - module.x, offsetY: point.y - module.y };
+    const point = templateLabelAnchor(nextTemplate, isEnglish);
+    // 保留标签相对"旧模板锚点"的世界坐标位移（手动拖动或自动避让产生），只平移锚点：
+    // 否则每次编辑元件（改参数/切模板）都会把斜向站名弹回模板默认位置。
+    let displacement = { x: 0, y: 0 };
+    if (previousTemplate) {
+      const oldPoint = templateLabelAnchor(previousTemplate, isEnglish);
+      displacement = { x: label.x - oldPoint.x, y: label.y - oldPoint.y };
+    }
+    const x = point.x + displacement.x;
+    const y = point.y + displacement.y;
+    return { ...label, x, y, rotation: readableLabelRotation(module.rotation), offsetX: x - module.x, offsetY: y - module.y };
   });
   // 站点图标：锚点 (模板宽/2, -26)。只移动最接近旧锚点的那个附着图形，避免动到用户自加的图形。
   let graphics = input.graphics;
@@ -630,7 +897,16 @@ export function compareRenderOrder<T extends { layerId: string; zIndex: number }
   b: T,
   layerRank: Map<string, number>,
   creationIndex: (item: T) => number,
+  isStackObject: (item: T) => boolean = () => false,
 ): number {
+  // 站台堆叠：模块轨道、所属站台、连接线这三类"层叠栈"对象按有效层级交错排序，
+  // 而不是先按图层边界隔开。否则前置模块的轨道虽在同一图层内盖过其它模块的轨道，
+  // 却仍被"站台层永远压住轨道层"的规则盖住（后放站台的站台会压在它上面，错位）。
+  // 站台/标签/图标等非栈对象保持"图层优先"，保证备注文字永远在最上层可读。
+  if (isStackObject(a) && isStackObject(b)) {
+    const stackZDifference = a.zIndex - b.zIndex;
+    if (stackZDifference) return stackZDifference;
+  }
   const layerDifference = (layerRank.get(a.layerId) ?? Number.MAX_SAFE_INTEGER) - (layerRank.get(b.layerId) ?? Number.MAX_SAFE_INTEGER);
   if (layerDifference) return layerDifference;
   const zDifference = a.zIndex - b.zIndex;
@@ -663,6 +939,19 @@ export function effectivePlatformZIndex(
   const owner = modules.find((module) => module.id === platform.moduleId);
   if (!owner) return platform.zIndex;
   return owner.zIndex + (Math.max(0, ownedPlatformIndex) + 1) / 1000;
+}
+
+/** 物化站名标签（附着到模块）跟随所属模块层级，略高于本模块站台，作为整座车站的一部分
+ *  一起升降；独立文字（备注等）保留自己的 zIndex，始终按图层浮在可读的最上层。 */
+export function effectiveLabelZIndex(
+  label: Pick<LabelObject, "attachedToId" | "positionMode" | "zIndex">,
+  modules: readonly Pick<DiagramModule, "id" | "zIndex">[],
+): number {
+  if (label.positionMode === "attached" && label.attachedToId) {
+    const owner = modules.find((module) => module.id === label.attachedToId);
+    if (owner) return owner.zIndex + 0.01;
+  }
+  return label.zIndex;
 }
 
 /** 模块 zIndex 变化时，把同一增量同步给所属站台。

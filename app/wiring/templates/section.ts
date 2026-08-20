@@ -57,6 +57,7 @@ export const doubleTrack: ModuleTemplate = {
   platforms: [],
   labels: [],
   description: "上下行双线区间，无站台",
+  params: [{ key: "spacing", label: "线路间距", min: 10, max: 128, default: 40, unit: "px" }],
 };
 
 export const sidePlatformStation: ModuleTemplate = {
@@ -77,6 +78,11 @@ export const sidePlatformStation: ModuleTemplate = {
     { x: 90, y: 105, text: "Station", fontSize: 9, anchor: "middle", fill: "#6b7b85" },
   ],
   description: "侧式站台中间站，两条站台分别位于正线两侧",
+  params: [
+    { key: "spacing", label: "线路间距", min: 10, max: 128, default: 40, unit: "px" },
+    { key: "platformLength", label: "站台长度", min: 60, max: 240, default: 160, unit: "px" },
+    { key: "platformWidth", label: "站台宽度", min: 8, max: 24, default: 16, unit: "px" },
+  ],
 };
 
 export const islandPlatformStation: ModuleTemplate = {
@@ -97,6 +103,11 @@ export const islandPlatformStation: ModuleTemplate = {
     { x: 90, y: 100, text: "Station", fontSize: 9, anchor: "middle", fill: "#6b7b85" },
   ],
   description: "岛式站台中间站，单个站台位于两条正线之间",
+  params: [
+    { key: "spacing", label: "线路间距", min: 10, max: 128, default: 40, unit: "px" },
+    { key: "platformLength", label: "站台长度", min: 60, max: 240, default: 160, unit: "px" },
+    { key: "platformWidth", label: "站台宽度", min: 8, max: 24, default: 16, unit: "px" },
+  ],
 };
 
 export const singleTrackPlatformStation: ModuleTemplate = {
@@ -156,6 +167,7 @@ export const crossPlatformStation: ModuleTemplate = {
   ],
   trackLinePattern: [0, 1, 1, 0],
   description: "同台换乘站，两条线路各自上、下行同向共用两个岛式站台，换乘不出站",
+  params: [{ key: "spacing", label: "线路间距", min: 10, max: 128, default: 32, unit: "px" }],
 };
 
 export const doubleIslandStation: ModuleTemplate = {
@@ -214,6 +226,11 @@ export const spanishPlatformStation: ModuleTemplate = {
     { x: 90, y: 105, text: "Station", fontSize: 9, anchor: "middle", fill: "#6b7b85" },
   ],
   description: "西班牙式站台，岛式站台居中、两侧各设侧式站台，列车双侧开门",
+  params: [
+    { key: "spacing", label: "线路间距", min: 10, max: 128, default: 40, unit: "px" },
+    { key: "platformLength", label: "站台长度", min: 60, max: 240, default: 160, unit: "px" },
+    { key: "platformWidth", label: "站台宽度", min: 8, max: 24, default: 16, unit: "px" },
+  ],
 };
 
 export const twoIslandThreeTrackStation: ModuleTemplate = {

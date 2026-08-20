@@ -140,16 +140,27 @@ function avoidanceBranch(width: number, mainY: number, bypassY: number): Templat
  */
 export function withAvoidanceTracks(base: ModuleTemplate, lineCount = 0): ModuleTemplate {
   if (!supportsAvoidanceTracks(base.id)) return base;
-  const pairs = base.id === "island_platform"
-    ? [{ main: 36, bypass: 26, source: 0 }, { main: 76, bypass: 86, source: 1 }]
-    : base.id === "side_platform"
-      ? [{ main: 36, bypass: 48, source: 0 }, { main: 76, bypass: 64, source: 1 }]
-      : [
-          { main: 20, bypass: 10, source: 0 },
-          { main: 60, bypass: 52, source: 1 },
-          { main: 68, bypass: 76, source: 2 },
-          { main: 108, bypass: 118, source: 3 },
-        ];
+  // 主轨 Y 从（可能已自定义线路间距的）模板轨道读取，保证避让线跟随 spacing 而非固定 36/76。
+  const mains = base.tracks
+    .filter((track) => track.type === "main" && !track.curved && track.y1 === track.y2)
+    .map((track) => track.y1);
+  const pairSpecs: Record<string, Array<{ main: number; bypass: number; source: number }>> = {
+    island_platform: [
+      { main: mains[0], bypass: (mains[0] ?? 36) - 10, source: 0 },
+      { main: mains[1], bypass: (mains[1] ?? 76) + 10, source: 1 },
+    ],
+    side_platform: [
+      { main: mains[0], bypass: (mains[0] ?? 36) + 12, source: 0 },
+      { main: mains[1], bypass: (mains[1] ?? 76) - 12, source: 1 },
+    ],
+    cross_platform: [
+      { main: mains[0], bypass: (mains[0] ?? 20) - 10, source: 0 },
+      { main: mains[1], bypass: (mains[1] ?? 60) - 8, source: 1 },
+      { main: mains[2], bypass: (mains[2] ?? 68) + 8, source: 2 },
+      { main: mains[3], bypass: (mains[3] ?? 108) + 10, source: 3 },
+    ],
+  };
+  const pairs = pairSpecs[base.id];
   const addedTracks = pairs.flatMap((pair) => avoidanceBranch(base.width, pair.main, pair.bypass));
   const sourcePattern = base.trackLinePattern ?? base.tracks.map((_, index) => Math.min(index, 1));
   const normalizedPattern = sourcePattern.map((value) => lineCount <= 1 ? 0 : value);

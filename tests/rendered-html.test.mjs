@@ -689,7 +689,8 @@ test("wiring editor exposes RAF-backed resize handles and the complete default l
   assert.match(app, /handlePlatformResizeMouseDown/);
   assert.match(app, /handleGraphicResizeMouseDown/);
   assert.match(app, /requestAnimationFrame/);
-  assert.match(app, /Math\.max\(10,/);
+  assert.match(app, /computePlatformResize\b/);
+  assert.match(app, /MIN_PLATFORM_WIDTH/);
   assert.match(app, /Math\.max\(4,/);
   assert.match(css, /object-resize-handle/);
   for (const id of ["layer-background", "layer-bg-reference", "layer-track-depot-access", "layer-platform-normal", "layer-platform-special", "layer-text-yard", "layer-text-line", "layer-text-note", "layer-icon-transfer", "layer-icon-facility", "layer-annotation-service", "layer-annotation-custom", "layer-aux-grid", "layer-aux-snap", "layer-aux-control"]) assert.match(types, new RegExp(id));
@@ -887,7 +888,7 @@ test("wiring editor supports configurable turnout parameters and double-branch t
   assert.match(app, /Object\.fromEntries/);
 
   // App renders property panel param sliders
-  assert.match(app, /道岔参数/);
+  assert.match(app, /初始化模板参数默认值/);
   assert.match(moduleInspector, /wiring-param-slider/);
   assert.match(moduleInspector, /customParams: \{ \.\.\.\(selectedMod\.customParams/);
 
@@ -1074,8 +1075,8 @@ test("wiring first-use safety notice appears before the tutorial", async () => {
 test("auto-avoidance is a persistent toggle with a manual one-shot when off", async () => {
   const app = await readFile(new URL("app/wiring/WiringDiagramApp.tsx", root), "utf8");
 
-  // The automatic avoidance is a persistent checkbox (default on), sibling to 自动连接
-  assert.match(app, /usePersistentState\(PREF_KEY\("autoAvoidance"\), true\)/);
+  // The automatic avoidance is a persistent checkbox (default off), sibling to 自动连接
+  assert.match(app, /usePersistentState\(PREF_KEY\("autoAvoidance"\), false\)/);
   assert.match(app, /checked=\{autoAvoidance\}/);
   assert.match(app, />自动避让</);
 
@@ -1273,4 +1274,44 @@ test("岛式与侧式站台保持相同运行语义，仅改变画面朝向", ()
     assert.equal(terminusSideFor(direction, platform), expectedSide);
     assert.equal(visualDirectionFor(direction, platform), expectedVisual);
   }
+});
+
+test("框选批量设置与复制粘贴接线完整（纯函数导出 / inspector / 快捷键 / 工具栏）", async () => {
+  const [batchSrc, clipboardSrc, batchInspector, inspectorProps, inspectorIndex, app, css] = await Promise.all([
+    readFile(new URL("app/wiring/batch.ts", root), "utf8"),
+    readFile(new URL("app/wiring/clipboard.ts", root), "utf8"),
+    readFile(new URL("app/wiring/inspectors/BatchInspector.tsx", root), "utf8"),
+    readFile(new URL("app/wiring/inspectors/inspectorProps.ts", root), "utf8"),
+    readFile(new URL("app/wiring/inspectors/index.ts", root), "utf8"),
+    readFile(new URL("app/wiring/WiringDiagramApp.tsx", root), "utf8"),
+    readFile(new URL("app/wiring/wiring.css", root), "utf8"),
+  ]);
+  // 纯函数导出
+  assert.match(batchSrc, /export function computeBatchCategoryGroups/);
+  assert.match(batchSrc, /export function applyBatchParam/);
+  assert.match(clipboardSrc, /export function buildCopyPayload/);
+  assert.match(clipboardSrc, /export function buildPasteData/);
+  assert.match(clipboardSrc, /export interface ClipboardPayload/);
+  // BatchInspector 接入 inspector 导出与上下文
+  assert.match(inspectorIndex, /BatchInspector/);
+  assert.match(inspectorProps, /applyBatchParamUpdate:\s*\(ids: string\[\], key: string, value: number\) => void/);
+  assert.match(batchInspector, /wiring-param-slider/);
+  assert.match(batchInspector, /computeBatchCategoryGroups/);
+  // WiringDiagramApp 接线：面板切换、批量更新、剪贴板、快捷键、工具栏
+  assert.match(app, /const isBatchPanel = selectedIds\.length >= 2/);
+  assert.match(app, /<BatchInspector ctx=\{inspectorCtx\} \/>/);
+  assert.match(app, /function applyBatchParamUpdate/);
+  assert.match(app, /function copySelection/);
+  assert.match(app, /function pasteClipboard/);
+  assert.match(app, /function duplicateSelection/);
+  assert.match(app, /const \[clipboard, setClipboard\] = useState<ClipboardPayload \| null>\(null\)/);
+  assert.match(app, /copySelectionActionRef\.current = copySelection/);
+  assert.match(app, /pasteClipboardActionRef\.current = pasteClipboard/);
+  assert.match(app, /duplicateSelectionActionRef\.current = duplicateSelection/);
+  assert.match(app, /Ctrl\+C 复制 \/ Ctrl\+V 粘贴 \/ Ctrl\+D 原位复制/);
+  assert.match(app, /📋 复制/);
+  assert.match(app, /📌 粘贴/);
+  assert.match(app, /⧉ 原位复制/);
+  // CSS 分类 chips
+  assert.match(css, /\.wiring-batch-category-chips/);
 });

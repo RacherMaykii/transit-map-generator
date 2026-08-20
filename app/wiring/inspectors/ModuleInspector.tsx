@@ -165,7 +165,7 @@ export function ModuleInspector({ ctx }: InspectorProps) {
 
       {selectedTemplate.params && selectedTemplate.params.length > 0 && (
         <div className="wiring-prop-group">
-          <h5>道岔参数</h5>
+          <h5>模板参数</h5>
           {selectedTemplate.params.map((param) => (
             <div key={param.key} className="wiring-prop-row wiring-param-slider">
               <label>{param.label}</label>

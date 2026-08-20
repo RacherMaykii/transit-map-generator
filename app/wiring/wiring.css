@@ -395,6 +395,15 @@
 .wiring-param-slider { grid-template-columns: 64px 1fr 48px; gap: 8px; align-items: center; }
 .wiring-param-slider input[type="range"] { width: 100%; accent-color: var(--accent, #087FA4); }
 .wiring-param-value { font-size: 11px; color: var(--muted); text-align: right; min-width: 40px; }
+
+/* ── 框选批量设置面板 ── */
+.wiring-batch-stats { margin: 0 0 10px; font-size: 12px; font-weight: 700; color: var(--ink); }
+.wiring-batch-hint { margin: 0; padding: 8px 10px; font-size: 11px; color: var(--muted); background: #f3f6f8; border: 1px dashed #cfd9de; border-radius: 7px; line-height: 1.5; }
+.wiring-batch-category-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.wiring-batch-category-chips button { position: relative; padding: 6px 10px; border: 1px solid var(--border); border-radius: 99px; font-size: 12px; font-weight: 700; color: var(--ink); background: white; cursor: pointer; }
+.wiring-batch-category-chips button:hover { border-color: var(--accent, #087FA4); color: var(--accent, #087FA4); }
+.wiring-batch-category-chips button.active { background: var(--accent, #087FA4); border-color: var(--accent, #087FA4); color: #fff; }
+.wiring-batch-category-chips button small { margin-left: 4px; font-size: 10px; font-weight: 800; color: inherit; opacity: .75; }
 .wiring-prop-color { display: flex; align-items: center; gap: 6px; }
 .wiring-prop-color input[type="color"] { width: 34px; height: 32px; padding: 3px; border: 1px solid var(--border); border-radius: 7px; background: white; }
 .wiring-prop-color input[type="text"] { flex: 1; min-height: 32px; padding: 0 8px; border: 1px solid var(--border); border-radius: 7px; font-family: Consolas, monospace; font-size: 11px; }
@@ -577,3 +586,50 @@
   .wiring-toolbar-spacer { display: none; }
   .wiring-toolbar-info { flex-basis: auto; }
 }
+
+/* ── 设置弹窗（左栏分类 + 右栏细则）── */
+.wiring-settings-modal { width: min(680px, 100%); height: min(560px, calc(100vh - 36px)); display: flex; flex-direction: column; overflow: hidden; }
+.wiring-settings-body { display: grid; grid-template-columns: 132px 1fr; min-height: 0; flex: 1 1 auto; overflow: hidden; }
+.wiring-settings-categories { border-right: 1px solid var(--border); background: #f7fafb; padding: 10px; display: grid; gap: 4px; align-content: start; overflow-y: auto; min-height: 0; }
+.wiring-settings-categories button { padding: 9px 12px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); font-size: 13px; font-weight: 700; text-align: left; cursor: pointer; }
+.wiring-settings-categories button:hover { background: #eef4f5; color: var(--ink); }
+.wiring-settings-categories button.active { background: var(--accent, #087FA4); color: white; }
+.wiring-settings-detail { padding: 16px; overflow-y: auto; min-height: 0; }
+.wiring-settings-detail::-webkit-scrollbar { width: 7px; }
+.wiring-settings-detail::-webkit-scrollbar-thumb { background: #c0ccd1; border-radius: 99px; }
+.wiring-settings-section { display: grid; gap: 12px; align-content: start; }
+.wiring-settings-section h3 { margin: 0 0 2px; font-size: 12px; font-weight: 800; color: var(--muted); letter-spacing: .06em; text-transform: uppercase; }
+.wiring-settings-section > label { display: grid; gap: 5px; color: var(--muted); font-size: 11px; font-weight: 700; }
+.wiring-settings-section > .wiring-check { display: flex; align-items: center; gap: 7px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 7px; background: white; }
+.wiring-settings-section input[type="number"], .wiring-settings-section select { min-height: 32px; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; background: white; color: var(--ink); font-size: 12px; }
+.wiring-settings-section input[type="color"] { width: 100%; max-width: 120px; padding: 3px; border: 1px solid var(--border); border-radius: 6px; background: white; }
+.wiring-settings-actions { display: flex; justify-content: flex-end; padding-top: 6px; border-top: 1px solid var(--border); margin-top: 6px; }
+/* 吸附间距：跟随网格时锁定——输入框置灰 + 全区域可点击显示解锁提示 */
+.wiring-settings-section .wiring-snap-field { position: relative; display: inline-flex; }
+.wiring-settings-section .wiring-snap-field.locked input[type="number"] { background: #eef1f3; color: #9aa6ad; cursor: not-allowed; border-color: #d9e0e4; }
+.wiring-settings-section .wiring-snap-field.locked::after { content: ""; position: absolute; inset: 0; cursor: not-allowed; border-radius: 6px; }
+.wiring-settings-section .wiring-snap-field-hint { font-size: 10px; color: var(--accent, #087FA4); font-weight: 700; animation: wiring-hint-pop .18s ease; }
+@keyframes wiring-hint-pop { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; transform: translateY(0); } }
+
+/* 无限流 / 手动大小互斥单选 */
+.wiring-radio-row { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; }
+.wiring-radio { display: inline-flex !important; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--ink); cursor: pointer; flex-direction: row !important; }
+.wiring-radio input { accent-color: var(--accent, #087FA4); width: 14px; height: 14px; }
+.wiring-radio-hint { color: var(--muted); font-size: 10px; font-weight: 500; }
+
+/* PS 式九宫格锚点方向 */
+.wiring-anchor-field { display: grid; gap: 6px; }
+.wiring-anchor-field > span { color: var(--muted); font-size: 11px; font-weight: 700; }
+.wiring-anchor-grid { display: grid; grid-template-columns: repeat(3, 44px); grid-template-rows: repeat(3, 40px); gap: 4px; width: max-content; padding: 6px; border: 1px solid var(--border); border-radius: 8px; background: #f8fafb; }
+.wiring-anchor-grid button { border: 1px solid var(--border); border-radius: 6px; background: white; color: var(--ink); font-size: 16px; line-height: 1; cursor: pointer; transition: border-color .12s, background .12s, color .12s; }
+.wiring-anchor-grid button:hover { border-color: var(--accent, #087FA4); }
+.wiring-anchor-grid button.selected { background: var(--accent, #087FA4); border-color: var(--accent, #087FA4); color: white; }
+.wiring-anchor-hint { margin: 0; color: var(--accent, #087FA4); font-size: 11px; font-weight: 600; min-height: 14px; }
+
+/* 缩小画布确认（放弃画布外元件） */
+.wiring-discard-modal { width: min(520px, 100%); }
+.wiring-discard-modal > p, .wiring-discard-list, .wiring-discard-hint { padding: 0 16px; }
+.wiring-discard-modal > p { margin: 12px 0 0; font-size: 12px; color: var(--ink); line-height: 1.7; }
+.wiring-discard-list { margin: 10px 0 0; max-height: 180px; overflow-y: auto; display: grid; gap: 4px; list-style: none; }
+.wiring-discard-list li { font-size: 12px; color: var(--ink); padding: 5px 9px; border: 1px solid var(--border); border-radius: 6px; background: #f8fafb; }
+.wiring-discard-hint { margin: 12px 0 0; font-size: 11px; color: var(--muted); line-height: 1.6; }

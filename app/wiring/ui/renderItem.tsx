@@ -14,7 +14,7 @@ import {
   computeLabelLocalBox,
   computePlatformBbox,
 } from "../labelAvoidance";
-import { effectiveLayerOpacity, readableLabelRotation } from "../canvasLogic";
+import { CANVAS_ANCHORS, effectiveLayerOpacity, readableLabelRotation } from "../canvasLogic";
 import {
   buildPairedOffsetPathD,
   endpointsForConnection,
@@ -529,11 +529,15 @@ export interface RenderItemContext {
 	      const showPlatformTypeLabel = ctx.showAuxLabels && platformOwner?.showAuxLabels !== false;
 		      const platLineNames = ctx.colorSpecs.platformLineNames.get(platform.id);
 		      const platLabelText = platLineNames?.length ? platLineNames.join(" · ") : platform.label;
+		      // 调整手柄位于与锚点相对的那条边角（锚点处固定不动）
+		      const platAnchor = CANVAS_ANCHORS[platform.resizeAnchor ?? 0] ?? CANVAS_ANCHORS[0];
+		      const resizeHandleX = (platAnchor.fx === 1 ? 0 : 1) * platform.width - 3;
+		      const resizeHandleY = (platAnchor.fy === 1 ? 0 : 1) * platform.height - 3;
 	      return <g key={`platform-${platform.id}`} transform={`translate(${platform.x},${platform.y}) rotate(${platform.rotation} ${platform.width / 2} ${platform.height / 2})`} opacity={layerOpacity * filterOpacity} onMouseDown={(event) => ctx.handlePlatformMouseDown(event, platform)} style={{ cursor: platform.locked ? "default" : interactive ? "move" : "pointer" }}>
 	        {platTwoTone ? <><rect className={platClass} width={platform.width} height={platform.height / 2} rx={2} style={{ "--platform-fill": platTwoTone[0], "--platform-stroke": darkenHex(platTwoTone[0]) } as CSSProperties} /><rect className={platClass} y={platform.height / 2} width={platform.width} height={platform.height / 2} rx={2} style={{ "--platform-fill": platTwoTone[1], "--platform-stroke": darkenHex(platTwoTone[1]) } as CSSProperties} /></> : <rect className={platClass} width={platform.width} height={platform.height} rx={2} style={platFillStyle} />}
         {showPlatformTypeLabel && platLabelText && <text className="platform-label" x={platform.width / 2} y={platform.height / 2 + 3} transform={`rotate(${readableLabelRotation(platform.rotation) - platform.rotation} ${platform.width / 2} ${platform.height / 2})`}>{platLabelText}</text>}
 	        {interactive && isSelected && <rect className="selection-box" x={-4} y={-4} width={platform.width + 8} height={platform.height + 8} rx={4} />}
-	        {interactive && isSelected && !platform.locked && !ctx.isLayerLocked(platform.layerId) && <rect className="object-resize-handle" x={platform.width - 3} y={platform.height - 3} width={6} height={6} onMouseDown={(event) => ctx.handlePlatformResizeMouseDown(event, platform)} />}
+	        {interactive && isSelected && !platform.locked && !ctx.isLayerLocked(platform.layerId) && <rect className="object-resize-handle" x={resizeHandleX} y={resizeHandleY} width={6} height={6} onMouseDown={(event) => ctx.handlePlatformResizeMouseDown(event, platform)} />}
 	      </g>;
 	    }
 

@@ -286,6 +286,8 @@ export interface PlatformObject {
   visible?: boolean;
   /** 站台填充着色方式：default=使用 fill 字段 / line=跟随所属模块的线路颜色 */
   colorMode?: "default" | "line";
+  /** 调整尺寸时的九宫格锚点（0-8，与 CANVAS_ANCHORS 一致）。缺省视为 0（左上，左侧端点不动）。 */
+  resizeAnchor?: number;
 }
 
 /** A graphic which can be positioned independently or attached to a diagram object. */

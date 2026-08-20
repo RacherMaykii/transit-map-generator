@@ -8,6 +8,8 @@ const projectStore = await server.ssrLoadModule("/app/wiring/projectStore.ts");
 const templatesMod = await server.ssrLoadModule("/app/wiring/templates.ts");
 const avoidance = await server.ssrLoadModule("/app/wiring/labelAvoidance.ts");
 const primitives = await server.ssrLoadModule("/app/wiring/ui/primitives.ts");
+const batch = await server.ssrLoadModule("/app/wiring/batch.ts");
+const clipboard = await server.ssrLoadModule("/app/wiring/clipboard.ts");
 after(() => server.close());
 
 const TEMPLATES = new Map(templatesMod.MODULE_TEMPLATES.map((template) => [template.id, template]));
@@ -166,6 +168,42 @@ test("layer tree order wins before zIndex, then creation order breaks ties", () 
   assert.deepEqual(ordered.map((item) => item.id), ["first-track", "second-track", "late-track", "early-label"]);
 });
 
+test("层叠栈对象跨图层按有效层级交错：前置模块的轨道盖过后放站台的站台，不再错位", () => {
+  const layers = [
+    { id: "track", parentId: null, order: 0 },
+    { id: "platform", parentId: null, order: 1 },
+  ];
+  const rank = canvas.createLayerRank(layers);
+  const isStack = (item) => item.stack === true;
+  const items = [
+    { id: "back-platform", layerId: "platform", zIndex: 0.002, stack: true },
+    { id: "front-module", layerId: "track", zIndex: 9.999, stack: true },
+    { id: "back-module", layerId: "track", zIndex: 0, stack: true },
+    { id: "front-platform", layerId: "platform", zIndex: 10, stack: true },
+  ];
+  const ordered = [...items].sort((a, b) => canvas.compareRenderOrder(a, b, rank, (item) => items.indexOf(item), isStack));
+  // 整座 A（轨道+站台）在整座 B（轨道+站台）之上；站台层不再无条件压住轨道层
+  assert.deepEqual(ordered.map((item) => item.id), ["back-module", "back-platform", "front-module", "front-platform"]);
+});
+
+test("非层叠栈对象（备注文字等）仍按图层优先排序，始终浮在最上层", () => {
+  const layers = [
+    { id: "track", parentId: null, order: 0 },
+    { id: "platform", parentId: null, order: 1 },
+    { id: "label", parentId: null, order: 2 },
+  ];
+  const rank = canvas.createLayerRank(layers);
+  const isStack = (item) => item.stack === true;
+  const items = [
+    { id: "back-platform", layerId: "platform", zIndex: 0.002, stack: true },
+    { id: "front-module", layerId: "track", zIndex: 9.999, stack: true },
+    { id: "note-label", layerId: "label", zIndex: 0, stack: false },
+  ];
+  const ordered = [...items].sort((a, b) => canvas.compareRenderOrder(a, b, rank, (item) => items.indexOf(item), isStack));
+  // 即使模块 z 更高，备注文字仍在最上层
+  assert.equal(ordered[ordered.length - 1].id, "note-label");
+});
+
 test("connection zIndex follows the midpoint of its endpoint modules unless manually overridden", () => {
   const modules = [
     { id: "left", zIndex: 2 },
@@ -179,6 +217,16 @@ test("connection zIndex follows the midpoint of its endpoint modules unless manu
   assert.equal(canvas.effectiveConnectionZIndex({ ...automatic, zIndexMode: undefined }, modules), 5.5, "旧工程默认自动");
   assert.equal(canvas.effectiveConnectionZIndex({ ...automatic, zIndexMode: "manual", zIndex: 12 }, modules), 12);
   assert.equal(canvas.effectiveConnectionZIndex({ ...automatic, toModuleId: "missing", zIndex: 7 }, modules), 7, "端点缺失时回退保存值");
+});
+
+test("owned station-name label zIndex follows its module while independent notes keep their value", () => {
+  const modules = [{ id: "station", zIndex: 8 }];
+  const attached = { attachedToId: "station", positionMode: "attached", zIndex: 3 };
+  assert.equal(canvas.effectiveLabelZIndex(attached, modules), 8.01, "物化站名随所属模块层级，略高于本模块站台");
+  modules[0].zIndex = 12;
+  assert.equal(canvas.effectiveLabelZIndex(attached, modules), 12.01, "模块层级变化后站名动态重算");
+  assert.equal(canvas.effectiveLabelZIndex({ ...attached, positionMode: "independent" }, modules), 3, "独立文字保留自己的层级");
+  assert.equal(canvas.effectiveLabelZIndex({ ...attached, attachedToId: "missing" }, modules), 3, "所属模块缺失时回退保存值");
 });
 
 test("owned platform zIndex follows its module while manual and standalone platforms keep their values", () => {
@@ -334,6 +382,37 @@ test("custom double-island spacing preserves the standard track clearance", () =
     const below = tracks.find((y) => y > platform.y + platform.height);
     assert.equal(platform.y - above, 12);
     assert.equal(below - (platform.y + platform.height), 12);
+  }
+});
+
+test("station platform length/width params re-center platforms while keeping default geometry", () => {
+  for (const id of ["side_platform", "island_platform", "spanish_platform"]) {
+    const base = TEMPLATES.get(id);
+    const lenParam = base.params.find((p) => p.key === "platformLength");
+    const widthParam = base.params.find((p) => p.key === "platformWidth");
+    assert.ok(lenParam, `${id} 有站台长度参数`);
+    assert.equal(lenParam.default, 160, `${id} 默认站台长度 160`);
+    assert.equal(widthParam.default, 16, `${id} 默认站台宽度 16`);
+
+    // 默认参数下几何与静态基准一致（新增参数不改变默认放置结果）
+    const defaults = templatesMod.makeCustomizedTemplate(base, Object.fromEntries(base.params.map((p) => [p.key, p.default])));
+    assert.deepEqual(
+      defaults.platforms.map((p) => [Math.round(p.x), Math.round(p.y), Math.round(p.width), Math.round(p.height)]),
+      base.platforms.map((p) => [p.x, p.y, p.width, p.height]),
+      `${id} 默认参数平台几何与静态基准一致`,
+    );
+
+    // platformLength=200：平台水平居中、宽度拉长，轨道不受影响
+    const stretched = templatesMod.makeCustomizedTemplate(base, { spacing: 40, platformLength: 200, platformWidth: 16 });
+    for (const platform of stretched.platforms) {
+      assert.equal(platform.width, 200, `${id} 平台宽度=200`);
+      assert.equal(Math.round(platform.x), Math.round((stretched.width - 200) / 2), `${id} 平台水平居中 x=${platform.x}`);
+    }
+    assert.equal(stretched.tracks.length, base.tracks.length, `${id} 轨道数量不变`);
+
+    // platformWidth=24：平台厚度拉高
+    const thick = templatesMod.makeCustomizedTemplate(base, { spacing: 40, platformLength: 160, platformWidth: 24 });
+    for (const platform of thick.platforms) assert.equal(platform.height, 24, `${id} 平台厚度=24`);
   }
 });
 
@@ -834,12 +913,17 @@ function nearlyEqual(actual, expected) {
 
 test("template switch rebuilds owned platforms, labels and icon from the new template", () => {
   const side = TEMPLATES.get("side_platform"); // 2 个站台
-  const { island, module, platform, zhLabel, enLabel, icon } = buildIslandStationObjects();
+  const island = TEMPLATES.get("island_platform");
+  const { module, platform, zhLabel, enLabel, icon } = buildIslandStationObjects();
   const updated = { ...module, templateId: "side_platform" };
+  // 标签放在 island 模板真实锚点上（fixture 的 offsetY 40 与模板 站名(y=30) 有 10px 偏差，
+  // 用真实锚点才能验证"切换模板后站名跟随新模板锚点"；位移保留由下面的 45° 用例单独覆盖）
+  const zhAtAnchor = { ...zhLabel, x: module.x + island.labels[0].x, y: module.y + island.labels[0].y, offsetX: island.labels[0].x, offsetY: island.labels[0].y };
+  const enAtAnchor = { ...enLabel, x: module.x + island.labels[1].x, y: module.y + island.labels[1].y, offsetX: island.labels[1].x, offsetY: island.labels[1].y };
   let seq = 0;
   const relaid = canvas.relayoutModuleOwnedObjects({
     module: updated, nextTemplate: side, previousTemplate: island,
-    platforms: [platform], labels: [zhLabel, enLabel], graphics: [icon],
+    platforms: [platform], labels: [zhAtAnchor, enAtAnchor], graphics: [icon],
     nextId: () => `new-${seq++}`,
   });
 
@@ -893,6 +977,62 @@ test("template switch preserves existing manual platform layers and classifies n
   });
   assert.equal(relaid.platforms[0].layerId, "custom-platform-layer");
   assert.equal(relaid.platforms[1].layerId, "layer-platform-normal");
+});
+
+test("relayout keeps a displaced 45° station label in place on a param edit (same template)", () => {
+  const island = TEMPLATES.get("island_platform");
+  const { module, platform, zhLabel, enLabel } = buildIslandStationObjects();
+  const rotated = { ...module, rotation: 45 };
+  // 45° 旋转下 island 模板"站名"(90,30) / "Station"(90,100) 锚点的世界坐标
+  const anchorWorld = (localX, localY) => {
+    const radians = (45 * Math.PI) / 180;
+    const pivot = { x: rotated.x + island.width / 2, y: rotated.y + island.height / 2 };
+    const dx = rotated.x + localX - pivot.x;
+    const dy = rotated.y + localY - pivot.y;
+    return { x: pivot.x + dx * Math.cos(radians) - dy * Math.sin(radians), y: pivot.y + dx * Math.sin(radians) + dy * Math.cos(radians) };
+  };
+  const zhAnchor = anchorWorld(island.labels[0].x, island.labels[0].y);
+  const enAnchor = anchorWorld(island.labels[1].x, island.labels[1].y);
+  // 自动避让/手动拖动把斜向站名从锚点推开 (12, -8)
+  const movedZh = { ...zhLabel, rotation: 45, x: zhAnchor.x + 12, y: zhAnchor.y - 8, offsetX: zhAnchor.x + 12 - rotated.x, offsetY: zhAnchor.y - 8 - rotated.y };
+  const movedEn = { ...enLabel, rotation: 45, x: enAnchor.x + 12, y: enAnchor.y - 8, offsetX: enAnchor.x + 12 - rotated.x, offsetY: enAnchor.y - 8 - rotated.y };
+  const relaid = canvas.relayoutModuleOwnedObjects({
+    module: rotated, nextTemplate: island, previousTemplate: island,
+    platforms: [platform], labels: [movedZh, movedEn], graphics: [],
+    nextId: () => "new",
+  });
+  // 编辑元件（参数变化）不应把斜向站名弹回模板锚点，应保持位移
+  nearlyEqual(relaid.labels[0].x, movedZh.x);
+  nearlyEqual(relaid.labels[0].y, movedZh.y);
+  nearlyEqual(relaid.labels[1].x, movedEn.x);
+  nearlyEqual(relaid.labels[1].y, movedEn.y);
+  assert.equal(relaid.labels[0].rotation, 45);
+  // offset 与所属模块同步（平移模块时标签跟随）
+  nearlyEqual(relaid.labels[0].offsetX, movedZh.x - rotated.x);
+  nearlyEqual(relaid.labels[0].offsetY, movedZh.y - rotated.y);
+});
+
+test("relayout preserves a displaced 45° label offset when switching templates", () => {
+  const island = TEMPLATES.get("island_platform");
+  const side = TEMPLATES.get("side_platform");
+  const { module, platform, zhLabel, enLabel } = buildIslandStationObjects();
+  const rotated = { ...module, rotation: 45, templateId: "side_platform" };
+  // 位移 (12, -8) 相对 island 锚点；side_platform 新锚点：站名(90,14)、Station(90,105)
+  const zhAtAnchor = { ...zhLabel, rotation: 45, x: 390 + 18.384776, y: 256 - 18.384776, offsetX: 108.384776, offsetY: 37.615224 };
+  const enAtAnchor = { ...enLabel, rotation: 45, x: 390 - 31.112698, y: 256 + 31.112698, offsetX: 58.887302, offsetY: 87.112698 };
+  const movedZh = { ...zhAtAnchor, x: zhAtAnchor.x + 12, y: zhAtAnchor.y - 8, offsetX: zhAtAnchor.x + 12 - rotated.x, offsetY: zhAtAnchor.y - 8 - rotated.y };
+  const movedEn = { ...enAtAnchor, x: enAtAnchor.x + 12, y: enAtAnchor.y - 8, offsetX: enAtAnchor.x + 12 - rotated.x, offsetY: enAtAnchor.y - 8 - rotated.y };
+  const relaid = canvas.relayoutModuleOwnedObjects({
+    module: rotated, nextTemplate: side, previousTemplate: island,
+    platforms: [platform], labels: [movedZh, movedEn], graphics: [],
+    nextId: () => "new",
+  });
+  // 新位置 = side 新锚点 + 相对 island 锚点的位移（12, -8）
+  nearlyEqual(relaid.labels[0].x, 390 + 29.698485 + 12);
+  nearlyEqual(relaid.labels[0].y, 256 - 29.698485 - 8);
+  nearlyEqual(relaid.labels[1].x, 390 - 34.648232 + 12);
+  nearlyEqual(relaid.labels[1].y, 256 + 34.648232 - 8);
+  assert.equal(relaid.labels[0].rotation, 45);
 });
 
 // ─── 自动避让 ───────────────────────────────────────────────
@@ -1128,4 +1268,362 @@ test("label bbox falls back safely for legacy missing anchors", () => {
   const box = avoidance.computeLabelBbox({ text: "站名", x: 100, y: 100, fontSize: 13, anchor: undefined });
   nearlyEqual(box.x, 87);
   nearlyEqual(box.y, 81.8);
+});
+
+// ─── 画布模式 / 基准尺寸 / PS 式锚点缩放 ─────────────────────
+
+test("new canvas defaults to infinite flow and records its base size", () => {
+  const page = canvas.createCanvasPage({ id: "p", name: "画布", width: 1920, height: 1080 });
+  assert.equal(page.flowMode, "infinite");
+  assert.equal(page.baseWidth, 1920);
+  assert.equal(page.baseHeight, 1080);
+  const manual = canvas.createCanvasPage({ id: "pm", name: "手动", width: 2560, height: 1440, flowMode: "manual" });
+  assert.equal(manual.flowMode, "manual");
+  assert.equal(manual.baseWidth, 2560);
+  const tiny = canvas.createCanvasPage({ id: "pt", name: "小", width: 10, height: 10 });
+  assert.equal(tiny.baseWidth, 320, "base 同样受最小尺寸约束");
+  assert.equal(tiny.baseHeight, 320);
+});
+
+test("updateCanvasPage syncs base size when width or height is patched (single-side edit)", () => {
+  const page = canvas.createCanvasPage({ id: "p", name: "画布", width: 1000, height: 800 });
+  const widened = canvas.updateCanvasPage([page], "p", { width: 1200 });
+  assert.equal(widened[0].width, 1200);
+  assert.equal(widened[0].baseWidth, 1200, "只改宽度时 baseWidth 跟随");
+  assert.equal(widened[0].baseHeight, 800, "高度未改则 baseHeight 保持当前高度（不是 0）");
+  const shortened = canvas.updateCanvasPage(widened, "p", { height: 500 });
+  assert.equal(shortened[0].baseHeight, 500, "只改高度时 baseHeight 跟随");
+  assert.equal(shortened[0].baseWidth, 1200);
+});
+
+test("canvas resize transform keeps the chosen anchor fixed and renormalizes the origin", () => {
+  const page = canvas.createCanvasPage({ id: "p", name: "画布", width: 1000, height: 800 });
+  // 左上锚点：原点不动
+  const topLeft = canvas.computeCanvasResizeTransform(page, 800, 600, 0);
+  assert.deepEqual(topLeft, { width: 800, height: 600, offsetX: 0, offsetY: 0, rect: { x: 0, y: 0, width: 800, height: 600 } });
+  // 中心锚点：新画布矩形相对旧画布居中，内容沿左上回移（offset 负）
+  const center = canvas.computeCanvasResizeTransform(page, 800, 600, 4);
+  assert.deepEqual(center.rect, { x: 100, y: 100, width: 800, height: 600 });
+  assert.deepEqual({ offsetX: center.offsetX, offsetY: center.offsetY }, { offsetX: -100, offsetY: -100 });
+  // 右下锚点：固定右下角，缩小后原点向右上收缩
+  const bottomRight = canvas.computeCanvasResizeTransform(page, 800, 600, 8);
+  assert.deepEqual(bottomRight.rect, { x: 200, y: 200, width: 800, height: 600 });
+  assert.deepEqual({ offsetX: bottomRight.offsetX, offsetY: bottomRight.offsetY }, { offsetX: -200, offsetY: -200 });
+  // 右下锚点放大：新画布向左上扩展，内容向右下平移
+  const grow = canvas.computeCanvasResizeTransform(page, 1200, 1000, 8);
+  assert.deepEqual(grow.rect, { x: -200, y: -200, width: 1200, height: 1000 });
+  assert.deepEqual({ offsetX: grow.offsetX, offsetY: grow.offsetY }, { offsetX: 200, offsetY: 200 });
+  // 上锚点：水平居中，垂直固定
+  const top = canvas.computeCanvasResizeTransform(page, 800, 600, 1);
+  assert.deepEqual(top.rect, { x: 100, y: 0, width: 800, height: 600 });
+  // 最小尺寸约束
+  assert.equal(canvas.computeCanvasResizeTransform(page, 1, 1, 0).width, 320);
+  assert.equal(canvas.computeCanvasResizeTransform(page, 1, 1, 0).height, 320);
+});
+
+test("createResizedCanvasPage returns a manual-mode page at the new size", () => {
+  const page = canvas.createCanvasPage({ id: "p", name: "画布", width: 1000, height: 800, flowMode: "infinite" });
+  const resized = canvas.createResizedCanvasPage(page, 1400, 900);
+  assert.equal(resized.width, 1400);
+  assert.equal(resized.height, 900);
+  assert.equal(resized.flowMode, "manual");
+  assert.equal(resized.baseWidth, 1400);
+  assert.equal(resized.baseHeight, 900);
+  assert.equal(resized.id, "p", "保留页面 id");
+});
+
+test("fit transform wraps content bounds with padding and rounds to the grid", () => {
+  const page = canvas.createCanvasPage({ id: "p", name: "画布", width: 1000, height: 800, gridSize: 20 });
+  const fitted = canvas.computeCanvasFitTransform(page, { x: 50, y: 60, width: 200, height: 100 }, 120);
+  assert.equal(fitted.width, 440, "宽 = ceil((200+240)/20)*20");
+  assert.equal(fitted.height, 340, "高 = ceil((100+240)/20)*20");
+  assert.deepEqual({ offsetX: fitted.offsetX, offsetY: fitted.offsetY }, { offsetX: 70, offsetY: 60 }, "内容平移使 bounds 左上角落在 padding 处");
+  assert.deepEqual(fitted.rect, { x: -70, y: -60, width: 440, height: 340 });
+  const empty = canvas.computeCanvasFitTransform(page, { x: 0, y: 0, width: 10, height: 10 }, 120);
+  assert.equal(empty.width, 320, "fit 结果同样受最小尺寸约束");
+});
+
+test("rectFullyOutside only reports rectangles with no overlap at all", () => {
+  const container = { x: 0, y: 0, width: 100, height: 100 };
+  assert.equal(canvas.rectFullyOutside({ x: 0, y: 0, width: 10, height: 10 }, container), false, "内部不视为画布外");
+  assert.equal(canvas.rectFullyOutside({ x: 90, y: 0, width: 20, height: 10 }, container), false, "部分越界不视为画布外");
+  assert.equal(canvas.rectFullyOutside({ x: 100, y: 0, width: 10, height: 10 }, container), true, "完全在右侧之外");
+  assert.equal(canvas.rectFullyOutside({ x: 0, y: 100, width: 10, height: 10 }, container), true, "完全在下方之外");
+  assert.equal(canvas.rectFullyOutside({ x: -10, y: 0, width: 10, height: 10 }, container), true, "完全在左侧之外（贴边即越界）");
+  assert.equal(canvas.rectFullyOutside({ x: 0, y: 0, width: 100, height: 10 }, container), false, "与容器右缘对齐不算画布外");
+});
+
+test("canvasAnchorArrowGrid radiates arrows from the anchor (real-time preview)", () => {
+  const all = [0, 1, 2, 3, 4, 5, 6, 7, 8].map((a) => canvas.canvasAnchorArrowGrid(a));
+  assert.ok(all.every((g) => g.length === 9), "每个锚点都生成 9 格");
+  assert.deepEqual(canvas.canvasAnchorArrowGrid(0), ["●", "→", "→", "↓", "↘", "↘", "↓", "↘", "↘"], "左上：固定点 + 右/下扩张");
+  assert.deepEqual(canvas.canvasAnchorArrowGrid(8), ["↖", "↖", "↑", "↖", "↖", "↑", "←", "←", "●"], "右下：固定点 + 左/上扩张");
+  assert.deepEqual(canvas.canvasAnchorArrowGrid(4), ["↖", "↑", "↗", "←", "●", "→", "↙", "↓", "↘"], "中心：四向辐射");
+  assert.deepEqual(canvas.canvasAnchorArrowGrid(1), ["←", "●", "→", "↙", "↓", "↘", "↙", "↓", "↘"], "上边中点：左/右/下扩张");
+});
+
+test("canvasAnchorDescription describes the expansion direction per anchor", () => {
+  assert.equal(canvas.canvasAnchorDescription(0), "画布将向右、向下扩展");
+  assert.equal(canvas.canvasAnchorDescription(8), "画布将向左、向上扩展");
+  assert.equal(canvas.canvasAnchorDescription(4), "画布将向四周平均扩展");
+  assert.equal(canvas.canvasAnchorDescription(1), "画布将向左右、向下扩展");
+  assert.equal(canvas.canvasAnchorDescription(6), "画布将向右、向上扩展");
+});
+
+// ── 站台调整锚点（九宫格）缩放几何 ──
+function near(actual, expected, eps = 1e-6) {
+  assert.ok(Math.abs(actual - expected) < eps, `${actual} ≈ ${expected}`);
+}
+function assertResize(actual, expected) {
+  near(actual.x, expected.x); near(actual.y, expected.y);
+  near(actual.width, expected.width); near(actual.height, expected.height);
+}
+const PLAT = { x: 100, y: 200, width: 100, height: 20, rotation: 0 };
+
+test("computePlatformResize 左上锚点：左边缘固定，向右下增长", () => {
+  assertResize(canvas.computePlatformResize(PLAT, 0, 30, 10), { x: 100, y: 200, width: 130, height: 30 });
+});
+
+test("computePlatformResize 中心锚点：中心不动，宽度两倍增速对称外扩", () => {
+  assertResize(canvas.computePlatformResize(PLAT, 4, 20, 0), { x: 80, y: 200, width: 140, height: 20 });
+  // 中心点保持 (150, 210)
+  const r = canvas.computePlatformResize(PLAT, 4, 20, 0);
+  near(r.x + r.width / 2, 150); near(r.y + r.height / 2, 210);
+});
+
+test("computePlatformResize 右锚点：右边缘固定，往左拖增长", () => {
+  assertResize(canvas.computePlatformResize(PLAT, 5, -20, 0), { x: 80, y: 200, width: 120, height: 20 });
+  const r = canvas.computePlatformResize(PLAT, 5, -20, 0);
+  near(r.x + r.width, 200); near(r.y, 200); // 右边缘与 y 都保持
+});
+
+test("computePlatformResize 右下锚点：右下角固定，向左上拖增长", () => {
+  assertResize(canvas.computePlatformResize(PLAT, 8, -15, -5), { x: 85, y: 195, width: 115, height: 25 });
+  const r = canvas.computePlatformResize(PLAT, 8, -15, -5);
+  near(r.x + r.width, 200); near(r.y + r.height, 220); // 右下角保持
+});
+
+test("computePlatformResize 旋转 90°：世界位移映射到本地长度轴", () => {
+  const rotated = { x: 100, y: 200, width: 100, height: 20, rotation: 90 };
+  assertResize(canvas.computePlatformResize(rotated, 0, 0, 40), { x: 80, y: 220, width: 140, height: 20 });
+});
+
+test("computePlatformResize 钳制最小尺寸后锚点仍保持不动", () => {
+  assertResize(canvas.computePlatformResize(PLAT, 0, -500, 0), { x: 100, y: 200, width: canvas.MIN_PLATFORM_WIDTH, height: 20 });
+  const shrunk = canvas.computePlatformResize(PLAT, 8, 999, 999);
+  assertResize(shrunk, { x: 196, y: 216, width: canvas.MIN_PLATFORM_WIDTH, height: canvas.MIN_PLATFORM_HEIGHT });
+  near(shrunk.x + shrunk.width, 200); near(shrunk.y + shrunk.height, 220); // 右下角仍保持
+});
+
+test("computePlatformResize 非法锚点回退到左上", () => {
+  assertResize(canvas.computePlatformResize(PLAT, 99, 30, 10), { x: 100, y: 200, width: 130, height: 30 });
+});
+
+test("computePlatformResizeFromSize 属性面板输入长度：右锚点时右边缘不动", () => {
+  assertResize(canvas.computePlatformResizeFromSize(PLAT, 5, 120, 20), { x: 80, y: 200, width: 120, height: 20 });
+  const r = canvas.computePlatformResizeFromSize(PLAT, 5, 120, 20);
+  near(r.x + r.width, 200);
+});
+
+test("platformAnchorDescription 描述站台锚点调整方向", () => {
+  assert.equal(canvas.platformAnchorDescription(0), "以「左上」为锚点：长度向右、厚度向下调整");
+  assert.equal(canvas.platformAnchorDescription(5), "以「右」为锚点：长度向左、厚度向上下调整");
+  assert.equal(canvas.platformAnchorDescription(4), "以「中心」为锚点：长度向左右、厚度向上下调整");
+});
+
+// ── 框选批量设置（batch.ts）──
+
+const mkTestModule = (id, templateId = "double_track", extra = {}) => ({
+  id,
+  templateId,
+  name: id,
+  x: 100,
+  y: 100,
+  rotation: 0,
+  mirrorX: false,
+  mirrorY: false,
+  lineIds: ["L1"],
+  sourceStationIds: [],
+  locked: false,
+  layerId: "layer-track-main",
+  zIndex: 1,
+  pageId: "page-1",
+  createdOrder: 1,
+  customParams: { spacing: 45 },
+  ...extra,
+});
+
+const mkTestConn = (id, from, to, extra = {}) => ({
+  id,
+  fromModuleId: from,
+  fromPortId: "L_main",
+  toModuleId: to,
+  toPortId: "R_main",
+  tracks: [{ x1: 0, y1: 0, x2: 100, y2: 0, type: "main" }],
+  crossingType: "plain",
+  crossingPoints: [{ x: 50, y: 0, t: 0.5 }],
+  controlPoints: [{ id: "cp", x: 50, y: 0, curved: false, handleX: 0, handleY: 0 }],
+  lineStyle: "solid",
+  layerId: "layer-track-main",
+  zIndex: 1,
+  pageId: "page-1",
+  createdOrder: 1,
+  ...extra,
+});
+
+test("computeBatchCategoryGroups 按模板分类聚合模块与参数并集", () => {
+  const modules = [
+    mkTestModule("m-side", "side_platform", { customParams: { spacing: 50 } }),
+    mkTestModule("m-double", "double_track"),
+    mkTestModule("m-cross", "single_crossover", { customParams: { length: 120 } }),
+  ];
+  const groups = batch.computeBatchCategoryGroups(modules, TEMPLATES, ["m-side", "m-double", "m-cross"]);
+  assert.deepEqual(groups.groups.map((g) => g.category), ["section", "turnout"]);
+  const section = groups.byCategory.section;
+  assert.equal(section.categoryName, "区间与车站");
+  assert.deepEqual(section.moduleIds, ["m-side", "m-double"]);
+  assert.deepEqual(section.params.map((p) => p.key), ["spacing", "platformLength", "platformWidth"]);
+  const turnout = groups.byCategory.turnout;
+  assert.equal(turnout.categoryName, "道岔与连接");
+  assert.deepEqual(turnout.moduleIds, ["m-cross"]);
+  assert.deepEqual(turnout.params.map((p) => p.key), ["length", "spacing"]);
+  // 缺失模板的 id 被跳过
+  const partial = batch.computeBatchCategoryGroups(modules, TEMPLATES, ["m-side", "ghost"]);
+  assert.deepEqual(partial.byCategory.section.moduleIds, ["m-side"]);
+  assert.equal(partial.byCategory.turnout, undefined);
+});
+
+test("applyBatchParam 只改声明了该 key 且值不同的模块，不修改入参", () => {
+  const modules = [
+    mkTestModule("m-side", "side_platform", { customParams: { spacing: 50 } }),
+    mkTestModule("m-double", "double_track"),
+    mkTestModule("m-cross", "single_crossover", { customParams: { length: 120 } }),
+  ];
+  const frozen = JSON.parse(JSON.stringify(modules));
+  // 只有 side_platform 声明了 platformLength（新引用）；其余两个不变（同引用）
+  const length = batch.applyBatchParam(modules, TEMPLATES, ["m-side", "m-double", "m-cross"], "platformLength", 200);
+  assert.notEqual(length[0], modules[0]);
+  assert.equal(length[0].customParams.platformLength, 200);
+  assert.equal(length[1], modules[1]);
+  assert.equal(length[2], modules[2]);
+  // 三个模块都声明了 spacing
+  const spacing = batch.applyBatchParam(modules, TEMPLATES, ["m-side", "m-double", "m-cross"], "spacing", 60);
+  assert.deepEqual(spacing.map((m) => m.customParams?.spacing), [60, 60, 60]);
+  // 值相同 → 返回原数组引用（目标模块当前值已等于目标时短路）
+  const same = batch.applyBatchParam(modules, TEMPLATES, ["m-double"], "spacing", 45);
+  assert.equal(same, modules);
+  // 入参不被修改
+  assert.deepEqual(modules, frozen);
+});
+
+// ── 复制/粘贴（clipboard.ts）──
+
+test("buildCopyPayload 单模块只保留属性与所属对象，不带连接", () => {
+  const modules = [mkTestModule("m1", "side_platform"), mkTestModule("m2", "double_track")];
+  const conn = mkTestConn("c12", "m1", "m2");
+  const platform = { id: "pf1", moduleId: "m1", x: 110, y: 90, width: 160, height: 16, rotation: 0, fill: "#D7B06A", layerId: "layer-platform-normal", zIndex: 0, pageId: "page-1", platformType: "side", attachedTrackIds: [] };
+  const label = { id: "lb1", text: "站名", x: 120, y: 60, fontSize: 13, anchor: "top", rotation: 0, fill: "#202124", fontWeight: 700, backgroundMask: true, maskStrokeWidth: 2, locked: false, visible: true, layerId: "layer-label", zIndex: 0, pageId: "page-1", attachedToId: "m1", positionMode: "attached", offsetX: 20, offsetY: -40, sourceStationId: "st1" };
+  const graphic = { id: "g1", attachedToId: "m1", positionMode: "attached", x: 100, y: 70, width: 32, height: 32, rotation: 0, opacity: 1, layerId: "layer-icon", zIndex: 0, pageId: "page-1", offsetX: 0, offsetY: -30, visible: true, locked: false };
+  const payload = clipboard.buildCopyPayload({
+    selectedIds: ["m1"], modules, platforms: [platform], labels: [label], graphics: [graphic], connections: [conn],
+    isOnActivePage: (p) => (p || "page-1") === "page-1", isLayerLocked: () => false,
+  });
+  assert.equal(payload.modules.length, 1);
+  assert.deepEqual(payload.platforms.map((p) => p.id), ["pf1"]);
+  assert.deepEqual(payload.labels.map((l) => l.id), ["lb1"]);
+  assert.deepEqual(payload.graphics.map((g) => g.id), ["g1"]);
+  assert.deepEqual(payload.connections, []);
+});
+
+test("buildCopyPayload 两模块及以上保留内部连接，排除外部连接、跨页与锁定模块", () => {
+  const modules = [mkTestModule("m1", "side_platform"), mkTestModule("m2", "double_track"), mkTestModule("m3", "single_crossover"), mkTestModule("m4", "double_track", { pageId: "page-2" })];
+  const c12 = mkTestConn("c12", "m1", "m2");
+  const c23 = mkTestConn("c23", "m2", "m3");
+  const c14 = mkTestConn("c14", "m1", "m4"); // m4 未选中 → 排除
+  const payload = clipboard.buildCopyPayload({
+    selectedIds: ["m1", "m2", "m3"], modules, platforms: [], labels: [], graphics: [], connections: [c12, c23, c14],
+    isOnActivePage: (p) => (p || "page-1") === "page-1", isLayerLocked: () => false,
+  });
+  assert.equal(payload.modules.length, 3);
+  assert.deepEqual(payload.connections.map((c) => c.id), ["c12", "c23"]);
+  // 跨页模块不计入复制集
+  const crossPage = clipboard.buildCopyPayload({
+    selectedIds: ["m1", "m4"], modules, platforms: [], labels: [], graphics: [], connections: [c14],
+    isOnActivePage: (p) => (p || "page-1") === "page-1", isLayerLocked: () => false,
+  });
+  assert.deepEqual(crossPage.modules.map((m) => m.id), ["m1"]);
+  assert.deepEqual(crossPage.connections, []);
+  // 锁定模块被排除
+  const locked = modules.map((m) => m.id === "m2" ? { ...m, locked: true } : m);
+  const payload2 = clipboard.buildCopyPayload({
+    selectedIds: ["m1", "m2", "m3"], modules: locked, platforms: [], labels: [], graphics: [], connections: [c12, c23],
+    isOnActivePage: (p) => (p || "page-1") === "page-1", isLayerLocked: () => false,
+  });
+  assert.deepEqual(payload2.modules.map((m) => m.id), ["m1", "m3"]);
+  assert.deepEqual(payload2.connections, []);
+});
+
+test("buildCopyPayload 无可复制模块返回 null", () => {
+  const payload = clipboard.buildCopyPayload({ selectedIds: ["none"], modules: [], platforms: [], labels: [], graphics: [], connections: [], isOnActivePage: () => true, isLayerLocked: () => false });
+  assert.equal(payload, null);
+});
+
+test("buildPasteData 偏移复制：id 重映射、坐标平移、参数保留、连接重连", () => {
+  const srcModules = [mkTestModule("m1", "side_platform"), mkTestModule("m2", "double_track")];
+  const srcPlatform = { id: "pf1", moduleId: "m1", x: 110, y: 90, width: 160, height: 16, rotation: 0, fill: "#D7B06A", layerId: "layer-platform-normal", zIndex: 0, pageId: "page-1", platformType: "side", attachedTrackIds: [] };
+  const srcLabel = { id: "lb1", text: "站名", x: 120, y: 60, fontSize: 13, anchor: "top", rotation: 0, fill: "#202124", fontWeight: 700, backgroundMask: true, maskStrokeWidth: 2, locked: false, visible: true, layerId: "layer-label", zIndex: 0, pageId: "page-1", attachedToId: "m1", positionMode: "attached", offsetX: 20, offsetY: -40, sourceStationId: "st1" };
+  const srcConn = mkTestConn("c12", "m1", "m2", { pairedConnectionId: "c21" });
+  const pair = mkTestConn("c21", "m2", "m1", { pairedConnectionId: "c12" });
+  const payload = { kind: "modules", modules: srcModules, platforms: [srcPlatform], labels: [srcLabel], graphics: [], connections: [srcConn, pair] };
+  const result = clipboard.buildPasteData(payload, 24, 24, {
+    pageId: "page-2", createdOrderBase: 1000,
+    zIndexBases: { modules: 5, platforms: 2, labels: 3, graphics: 0, connections: 4 },
+    genId: (prefix) => `${prefix}-new-${Math.random().toString(36).slice(2, 8)}`,
+  });
+  // 全部 id 新且唯一
+  const allIds = [...result.modules.map((m) => m.id), ...result.connections.map((c) => c.id), ...result.platforms.map((p) => p.id), ...result.labels.map((l) => l.id)];
+  assert.equal(new Set(allIds).size, allIds.length);
+  assert.equal(result.idMap.get("m1"), result.modules[0].id);
+  assert.equal(result.idMap.get("m2"), result.modules[1].id);
+  // 模块坐标偏移、pageId、locked=false、customParams 保留、zIndex 底 + 序号
+  assert.equal(result.modules[0].x, 124);
+  assert.equal(result.modules[0].y, 124);
+  assert.equal(result.modules[0].pageId, "page-2");
+  assert.equal(result.modules[0].locked, false);
+  assert.deepEqual(result.modules[0].customParams, { spacing: 45 });
+  assert.equal(result.modules[0].zIndex, 5);
+  assert.equal(result.modules[1].zIndex, 6);
+  // 所属站台/标签：moduleId/attachedToId 重映射、坐标偏移、offset 相对量不变
+  assert.equal(result.platforms[0].moduleId, result.modules[0].id);
+  assert.equal(result.platforms[0].x, 134);
+  assert.equal(result.platforms[0].y, 114);
+  assert.equal(result.labels[0].attachedToId, result.modules[0].id);
+  assert.equal(result.labels[0].x, 144);
+  assert.equal(result.labels[0].offsetX, 20);
+  assert.equal(result.labels[0].offsetY, -40);
+  // 连接：端点重映射、pairedConnectionId 双向保留、tracks/交叉点/控制点偏移
+  const c12new = result.connections.find((c) => c.id === result.idMap.get("c12"));
+  assert.equal(c12new.fromModuleId, result.modules[0].id);
+  assert.equal(c12new.toModuleId, result.modules[1].id);
+  assert.equal(c12new.pairedConnectionId, result.idMap.get("c21"));
+  assert.deepEqual(c12new.tracks[0], { x1: 24, y1: 24, x2: 124, y2: 24, type: "main" });
+  assert.deepEqual(c12new.crossingPoints[0], { x: 74, y: 24, t: 0.5 });
+  assert.deepEqual(c12new.controlPoints[0], { id: "cp", x: 74, y: 24, curved: false, handleX: 0, handleY: 0 });
+  assert.equal(c12new.pageId, "page-2");
+  // 对端不在复制集的 pairedConnectionId 清空
+  const solo = mkTestConn("solo", "m1", "m2", { pairedConnectionId: "ghost" });
+  const soloResult = clipboard.buildPasteData({ kind: "modules", modules: srcModules, platforms: [], labels: [], graphics: [], connections: [solo] }, 0, 0, {
+    pageId: "page-1", createdOrderBase: 0, zIndexBases: { modules: 0, platforms: 0, labels: 0, graphics: 0, connections: 0 }, genId: (prefix) => `${prefix}-x`,
+  });
+  assert.equal(soloResult.connections[0].pairedConnectionId, undefined);
+});
+
+test("buildPasteData 原位复制（dx=dy=0）坐标不变", () => {
+  const srcModules = [mkTestModule("m1", "side_platform")];
+  const result = clipboard.buildPasteData({ kind: "modules", modules: srcModules, platforms: [], labels: [], graphics: [], connections: [] }, 0, 0, {
+    pageId: "page-1", createdOrderBase: 0, zIndexBases: { modules: 0, platforms: 0, labels: 0, graphics: 0, connections: 0 }, genId: (prefix) => `${prefix}-x`,
+  });
+  assert.equal(result.modules[0].x, 100);
+  assert.equal(result.modules[0].y, 100);
+  assert.equal(result.modules[0].id, "module-x");
 });

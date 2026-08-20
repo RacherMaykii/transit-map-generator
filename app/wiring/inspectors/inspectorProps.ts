@@ -31,6 +31,8 @@ export interface InspectorContext {
   connections: ModuleConnection[];
   layers: LayerNode[];
   platforms: PlatformObject[];
+  labels: LabelObject[];
+  graphics: AttachedGraphic[];
   selectedIds: string[];
   history: ReturnType<typeof useHistory>;
 
@@ -97,6 +99,8 @@ export interface InspectorContext {
   handleReplaceBackgroundInput: (e: ChangeEvent<HTMLInputElement>) => void;
   deleteBgImage: (id: string) => void;
   updateModule: (id: string, patch: Partial<DiagramModule>, operationName?: string) => void;
+  /** 批量设置多个模块的公共模板参数（仅对 base 模板声明了该 key 的模块生效） */
+  applyBatchParamUpdate: (ids: string[], key: string, value: number) => void;
   deleteSelected: () => void;
   updatePlatform: (id: string, patch: Partial<PlatformObject>, operationName?: string) => void;
   deletePlatform: (id: string) => void;

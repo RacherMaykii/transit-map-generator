@@ -1,6 +1,6 @@
 "use client";
 
-import { effectivePlatformZIndex } from "../canvasLogic";
+import { CANVAS_ANCHOR_NAMES, canvasAnchorArrowGrid, computePlatformResizeFromSize, effectivePlatformZIndex, MIN_PLATFORM_HEIGHT, MIN_PLATFORM_WIDTH, platformAnchorDescription, type CanvasAnchor } from "../canvasLogic";
 import { type PlatformObject } from "../types";
 import { type InspectorProps } from "./inspectorProps";
 
@@ -16,6 +16,21 @@ export function PlatformInspector({ ctx }: InspectorProps) {
   } = ctx;
 
   if (!selectedPlatform) return null;
+
+  const anchor = (selectedPlatform.resizeAnchor ?? 0) as CanvasAnchor;
+
+  /** 输入框改长度/厚度：按九宫格锚点反解位置，锚点处保持不动 */
+  const applyAnchoredSize = (patch: { width?: number; height?: number }, opName: string) => {
+    const result = computePlatformResizeFromSize(
+      { x: selectedPlatform.x, y: selectedPlatform.y, width: selectedPlatform.width, height: selectedPlatform.height, rotation: selectedPlatform.rotation },
+      anchor,
+      patch.width ?? selectedPlatform.width,
+      patch.height ?? selectedPlatform.height,
+      MIN_PLATFORM_WIDTH,
+      MIN_PLATFORM_HEIGHT,
+    );
+    updatePlatform(selectedPlatform.id, { x: result.x, y: result.y, width: result.width, height: result.height }, opName);
+  };
 
   return (
     <>
@@ -48,9 +63,24 @@ export function PlatformInspector({ ctx }: InspectorProps) {
         <div className="wiring-prop-row"><label>类型</label><select value={selectedPlatform.platformType} onChange={(e) => updatePlatform(selectedPlatform.id, { platformType: e.target.value as PlatformObject["platformType"] })}><option value="side">侧式</option><option value="island">岛式</option><option value="double_island">双岛</option><option value="spanish">西班牙式</option></select></div>
         <div className="wiring-prop-row"><label>X</label><input type="number" value={Math.round(selectedPlatform.x)} onChange={(e) => updatePlatform(selectedPlatform.id, { x: Number(e.target.value) })} /></div>
         <div className="wiring-prop-row"><label>Y</label><input type="number" value={Math.round(selectedPlatform.y)} onChange={(e) => updatePlatform(selectedPlatform.id, { y: Number(e.target.value) })} /></div>
-        <div className="wiring-prop-row"><label>长度</label><input type="number" min={10} value={selectedPlatform.width} onChange={(e) => updatePlatform(selectedPlatform.id, { width: Math.max(10, Number(e.target.value)) })} /></div>
-        <div className="wiring-prop-row"><label>厚度</label><input type="number" min={4} value={selectedPlatform.height} onChange={(e) => updatePlatform(selectedPlatform.id, { height: Math.max(4, Number(e.target.value)) })} /></div>
+        <div className="wiring-prop-row"><label>长度</label><input type="number" min={MIN_PLATFORM_WIDTH} value={selectedPlatform.width} onChange={(e) => { const raw = Number(e.target.value); if (Number.isFinite(raw)) applyAnchoredSize({ width: raw }, "设置站台长度"); }} /></div>
+        <div className="wiring-prop-row"><label>厚度</label><input type="number" min={MIN_PLATFORM_HEIGHT} value={selectedPlatform.height} onChange={(e) => { const raw = Number(e.target.value); if (Number.isFinite(raw)) applyAnchoredSize({ height: raw }, "设置站台厚度"); }} /></div>
         <div className="wiring-prop-row"><label>旋转</label><input type="number" value={selectedPlatform.rotation} onChange={(e) => updatePlatform(selectedPlatform.id, { rotation: Number(e.target.value) })} /></div>
+        <div className="wiring-anchor-field" style={{ marginBottom: 8 }}>
+          <span>调整锚点</span>
+          <div className="wiring-anchor-grid">
+            {canvasAnchorArrowGrid(anchor).map((arrow, index) => (
+              <button
+                key={index}
+                type="button"
+                className={anchor === index ? "selected" : ""}
+                onClick={() => updatePlatform(selectedPlatform.id, { resizeAnchor: index }, "设置站台调整锚点")}
+                title={`锚点：${CANVAS_ANCHOR_NAMES[index] ?? ""}（${platformAnchorDescription(index as CanvasAnchor)}）`}
+              >{arrow}</button>
+            ))}
+          </div>
+          <p className="wiring-anchor-hint">{platformAnchorDescription(anchor)}</p>
+        </div>
         {selectedPlatform.colorMode === "default" && <div className="wiring-prop-row"><label>填充</label><input type="color" value={selectedPlatform.fill} onChange={(e) => updatePlatform(selectedPlatform.id, { fill: e.target.value })} /></div>}
         <div className="wiring-prop-row"><label>图层</label><select value={selectedPlatform.layerId} onChange={(e) => updatePlatform(selectedPlatform.id, { layerId: e.target.value })}>{layers.filter((layer) => selectableLayers.includes(layer.id)).map((layer) => <option key={layer.id} value={layer.id}>{layer.name}</option>)}</select></div>
         <div className="wiring-prop-row" style={{ gridTemplateColumns: "1fr" }}>

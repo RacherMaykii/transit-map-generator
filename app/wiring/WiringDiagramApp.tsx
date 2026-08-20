@@ -16,6 +16,7 @@ import { findAssetByFilename, importIconArchive, importIconFiles } from "./asset
 import { evaluateFilter } from "./filtering";
 import {
   buildResolvedTemplateMap,
+  makeCustomizedTemplate,
   MODULE_TEMPLATES,
   supportsAvoidanceTracks,
   templatesByCategory,
@@ -71,7 +72,7 @@ import {
   parseCsvFile,
   type ParsedCsvFile,
 } from "../transit/csv-io";
-import { alignModuleToTrackPorts, CANVAS_PRESETS, centerBackgroundOnCanvas, compareRenderOrder, createCanvasPage, createLayerRank, effectiveConnectionZIndex, effectiveLayerOpacity, effectivePlatformZIndex, expandCanvasToFitBounds, fitBackgroundToCanvas, leafLayerIds, mirrorModuleOwnedObjects, readableLabelRotation, relayoutModuleOwnedObjects, restoreBackgroundSize, rotateModuleOwnedObjects, shiftOwnedPlatformZIndex, toggleOwnedModuleSelection, translateCanvasSelection, translateModuleGroup } from "./canvasLogic";
+import { alignModuleToTrackPorts, CANVAS_ANCHOR_NAMES, CANVAS_PRESETS, canvasAnchorArrowGrid, canvasAnchorDescription, centerBackgroundOnCanvas, compareRenderOrder, computeCanvasFitTransform, computeCanvasResizeTransform, computePlatformResize, computePlatformResizeFromSize, createCanvasPage, createLayerRank, effectiveConnectionZIndex, effectiveLabelZIndex, effectiveLayerOpacity, effectivePlatformZIndex, expandCanvasToFitBounds, fitBackgroundToCanvas, leafLayerIds, MIN_PLATFORM_HEIGHT, MIN_PLATFORM_WIDTH, mirrorModuleOwnedObjects, readableLabelRotation, rectFullyOutside, relayoutModuleOwnedObjects, restoreBackgroundSize, rotateModuleOwnedObjects, shiftOwnedPlatformZIndex, toggleOwnedModuleSelection, translateCanvasSelection, translateModuleGroup, type CanvasAnchor, type CanvasFlowMode, type CanvasResizeTransform } from "./canvasLogic";
 import { computeGraphicBbox, computeLabelBbox, computeLabelLocalBox, computePlatformBbox, resolveLabelIconOverlaps } from "./labelAvoidance";
 import { reconcileLineIdsForStationAssociations } from "./stationAssociation";
 import { duplicateTransferStationLabelIds } from "./transferLabels";
@@ -117,7 +118,7 @@ import {
   type ColorSpec,
   type GradientDef,
 } from "./color";
-import { useHistory } from "./history";
+import { useHistory, type HistorySnapshot } from "./history";
 import {
   deleteFromIndexedDB,
   downloadBlob,
@@ -171,6 +172,7 @@ import "../transit/transit.css";
 import "./wiring.css";
 import {
   BackgroundInspector,
+  BatchInspector,
   ConnectionInspector,
   GraphicInspector,
   LabelInspector,
@@ -180,8 +182,14 @@ import {
   TransferGroupInspector,
 } from "./inspectors";
 import type { InspectorContext } from "./inspectors/inspectorProps";
+import { applyBatchParam } from "./batch";
+import { buildCopyPayload, buildPasteData, type ClipboardPayload } from "./clipboard";
 import { renderItemBounds as pureRenderItemBounds, renderItemName as pureRenderItemName, moveLabelRelative as pureMoveLabelRelative, moveLabelToEdge as pureMoveLabelToEdge, renderCanvasItem as pureRenderCanvasItem, type RenderItemContext } from "./ui/renderItem";
 import { siteUrl } from "../site";
+
+// ── 导出保护：超出浏览器 canvas 安全上限时中止，避免超大画布导出卡死 ──
+const MAX_EXPORT_DIMENSION = 16384;
+const MAX_EXPORT_PIXELS = 100_000_000;
 
 // ── 主组件 ────────────────────────────────────
 
@@ -210,6 +218,8 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
   const [pages, setPages] = useState<DiagramPage[]>([createCanvasPage({ id: "page-1", name: "主画布", width: 1920, height: 1080, layerRootIds: DEFAULT_LAYERS.filter((layer) => layer.parentId === null).map((layer) => layer.id) })]);
   const [activePageId, setActivePageId] = useState("page-1");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  /** 复制的模块载荷（含所属对象与内部连接）；Ctrl+V/工具栏粘贴使用 */
+  const [clipboard, setClipboard] = useState<ClipboardPayload | null>(null);
   const [manualCurveEditingId, setManualCurveEditingId] = useState<string | null>(null);
   const [activeTool, setActiveTool] = useState<WiringTool>("auto");
   const [activeTemplateId, setActiveTemplateId] = useState<string | null>(null);
@@ -223,8 +233,18 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
   const [showGrid, setShowGrid] = useState(true);
   const [showAuxLabels, setShowAuxLabels] = usePersistentState(PREF_KEY("showAuxLabels"), true);
   const [snapEnabled, setSnapEnabled] = usePersistentState(PREF_KEY("snapEnabled"), true);
+  /** 吸附间距：0 = 跟随画布网格间距；>0 = 独立步长（吸附不随网格显示变化） */
+  const [snapStep, setSnapStep] = usePersistentState<number>(PREF_KEY("snapStep"), 0);
+  const [snapLockHint, setSnapLockHint] = useState(false);
+  const snapHintTimer = useRef<number | undefined>(undefined);
+  /** 点击被锁定的「吸附间距」输入框：提示需解锁「吸附跟随网格」才能编辑 */
+  const showSnapLockHint = () => {
+    setSnapLockHint(true);
+    window.clearTimeout(snapHintTimer.current);
+    snapHintTimer.current = window.setTimeout(() => setSnapLockHint(false), 3000);
+  };
   const [autoConnect, setAutoConnect] = usePersistentState(PREF_KEY("autoConnect"), true);
-  const [autoAvoidance, setAutoAvoidance] = usePersistentState(PREF_KEY("autoAvoidance"), true);
+  const [autoAvoidance, setAutoAvoidance] = usePersistentState(PREF_KEY("autoAvoidance"), false);
   const [filterLineIds, setFilterLineIds] = useState<string[]>([]);
   const [servicePatterns, setServicePatterns] = useState(DEFAULT_SERVICE_PATTERNS);
   const [activeServicePatternId, setActiveServicePatternId] = useState("");
@@ -244,6 +264,10 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
   const [showPlacedOnly, setShowPlacedOnly] = useState(false);
   const [advancedMode, setAdvancedMode] = usePersistentState(PREF_KEY("advancedMode"), false);
   const [continuousPlace, setContinuousPlace] = usePersistentState(PREF_KEY("continuousPlace"), false);
+  /** 默认放置参数：新放置模板时按模板支持的参数键覆盖其默认值（站台长度/宽度、线路间距等） */
+  const [defaultSpacing, setDefaultSpacing] = usePersistentState<number>(PREF_KEY("defaultSpacing"), 40);
+  const [defaultPlatformLength, setDefaultPlatformLength] = usePersistentState<number>(PREF_KEY("defaultPlatformLength"), 160);
+  const [defaultPlatformWidth, setDefaultPlatformWidth] = usePersistentState<number>(PREF_KEY("defaultPlatformWidth"), 16);
   const [editingPlatformModuleId, setEditingPlatformModuleId] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
@@ -269,11 +293,32 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
   const [connectFrom, setConnectFrom] = useState<{ moduleId: string; portId: string } | null>(null);
   const [doubleTrackConnect, setDoubleTrackConnect] = useState(true);
   const [newCanvasOpen, setNewCanvasOpen] = useState(false);
-  const [newCanvasDraft, setNewCanvasDraft] = useState<{ name: string; width: number; height: number; backgroundColor: string; gridSize: number; showGrid: boolean; orientation: "landscape" | "portrait" }>({ name: "新画布", width: 1920, height: 1080, backgroundColor: "#FFFFFF", gridSize: 20, showGrid: true, orientation: "landscape" });
+  const [newCanvasDraft, setNewCanvasDraft] = useState<{ name: string; width: number; height: number; backgroundColor: string; gridSize: number; showGrid: boolean; orientation: "landscape" | "portrait"; flowMode: CanvasFlowMode }>({ name: "新画布", width: 1920, height: 1080, backgroundColor: "#FFFFFF", gridSize: 20, showGrid: true, orientation: "landscape", flowMode: "infinite" });
   const [exportIncludeBackground, setExportIncludeBackground] = useState(true);
   const [exportTransparent, setExportTransparent] = useState(false);
   const [pngScale, setPngScale] = useState(2);
   const [exportScope, setExportScope] = useState<"canvas" | "selection">("canvas");
+  // ── 设置面板（左栏分类 + 右栏细则）──
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<"general" | "canvas" | "defaults">("general");
+  interface CanvasSettingsDraft {
+    flowMode: CanvasFlowMode;
+    width: number;
+    height: number;
+    orientation: "landscape" | "portrait";
+    gridSize: number;
+    showGrid: boolean;
+    backgroundColor: string;
+    anchor: CanvasAnchor;
+    preset: string;
+  }
+  const [canvasDraft, setCanvasDraft] = useState<CanvasSettingsDraft | null>(null);
+  const lastCanvasDraftPageRef = useRef<string | null>(null);
+  const newCanvasInitPageRef = useRef<string | null>(null);
+  /** 手动缩小画布且存在画布外元件时，等待用户确认是否放弃 */
+  const [pendingCanvasDiscard, setPendingCanvasDiscard] = useState<{ width: number; height: number; anchor: CanvasAnchor; ids: string[]; names: string[] } | null>(null);
+  /** 撤销/重做涉及画布尺寸变更时，等待用户确认 */
+  const [pendingHistoryApply, setPendingHistoryApply] = useState<{ kind: "undo" | "redo"; opName: string; curW: number; curH: number; tgtW: number; tgtH: number } | null>(null);
 
   // ── 引用 ──
   const svgRef = useRef<SVGSVGElement>(null);
@@ -284,6 +329,9 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
   const iconDirectoryInputRef = useRef<HTMLInputElement>(null);
   const saveProjectActionRef = useRef<() => void>(() => undefined);
   const deleteSelectedActionRef = useRef<() => void>(() => undefined);
+  const copySelectionActionRef = useRef<() => void>(() => undefined);
+  const pasteClipboardActionRef = useRef<() => void>(() => undefined);
+  const duplicateSelectionActionRef = useRef<() => void>(() => undefined);
   const dragRef = useRef<{
     type: "none" | "module" | "selection" | "transferGroup" | "pan" | "bgImage" | "label" | "platform" | "graphic" | "platformResize" | "graphicResize" | "controlPoint" | "controlPointHandle" | "selectionBox";
     selectionIds?: string[];
@@ -308,6 +356,10 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
     startPY: number;
     startWidth?: number;
     startHeight?: number;
+    /** 站台缩放：九宫格锚点（0-8） */
+    anchor?: number;
+    /** 站台缩放：起始旋转角 */
+    startRotation?: number;
     moved: boolean;
     /** mousedown 时对象是否已处于选中状态：mouseup 未移动时据此决定取消选中还是选中，避免闭包陈旧 */
     wasSelected?: boolean;
@@ -350,49 +402,79 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
   // ── 撤销/重做 ──
   const history = useHistory({ modules: modulesRef, connections: connectionsRef, layers: layersRef, backgroundImages: backgroundImagesRef, labels: labelsRef, transferGroups: transferGroupsRef, transitData: dataRef, pages: pagesRef, servicePatterns: servicePatternsRef, platforms: platformsRef, graphics: graphicsRef, assets: assetsRef, sourceLines: sourceLinesRef, sourceStationsOnLine: sourceStationsOnLineRef, physicalStations: physicalStationsRef, sourceMappings: sourceMappingsRef, filters: filterStateRef, unresolvedChanges: unresolvedChangesRef, pendingPlacement: pendingPlacementRef });
 
-  /** 执行撤销 */
-  const handleUndo = useCallback(() => {
-    const snapshot = history.undo();
-    if (snapshot) {
-      setModules(snapshot.modules);
-      setConnections(snapshot.connections);
-      setLayers(snapshot.layers);
-      setBackgroundImages(snapshot.backgroundImages);
-      setLabels(snapshot.labels);
-      setTransferGroups(snapshot.transferGroups);
-      setData(snapshot.transitData); setPages(snapshot.pages); setServicePatterns(snapshot.servicePatterns); setPlatforms(snapshot.platforms); setGraphics(snapshot.graphics); setAssets(snapshot.assets); setSourceLines(snapshot.sourceLines); setSourceStationsOnLine(snapshot.sourceStationsOnLine); setPhysicalStations(snapshot.physicalStations); setSourceMappings(snapshot.sourceMappings); setFilterState(snapshot.filters); setUnresolvedChanges(snapshot.unresolvedChanges); setPendingPlacement(snapshot.pendingPlacement);
-      setSelectedIds([]);
-      setHasUnsavedChanges(true);
-      setStatus(`已撤销：${snapshot.operationName}`);
-    }
-  }, [history]);
+  /** 应用历史快照（撤销/重做共用） */
+  const activePage = useMemo(
+    () => pages.find((page) => page.id === activePageId) || pages[0],
+    [pages, activePageId],
+  );
 
-  /** 执行重做 */
-  const handleRedo = useCallback(() => {
-    const snapshot = history.redo();
-    if (snapshot) {
-      setModules(snapshot.modules);
-      setConnections(snapshot.connections);
-      setLayers(snapshot.layers);
-      setBackgroundImages(snapshot.backgroundImages);
-      setLabels(snapshot.labels);
-      setTransferGroups(snapshot.transferGroups);
-      setData(snapshot.transitData); setPages(snapshot.pages); setServicePatterns(snapshot.servicePatterns); setPlatforms(snapshot.platforms); setGraphics(snapshot.graphics); setAssets(snapshot.assets); setSourceLines(snapshot.sourceLines); setSourceStationsOnLine(snapshot.sourceStationsOnLine); setPhysicalStations(snapshot.physicalStations); setSourceMappings(snapshot.sourceMappings); setFilterState(snapshot.filters); setUnresolvedChanges(snapshot.unresolvedChanges); setPendingPlacement(snapshot.pendingPlacement);
-      setSelectedIds([]);
-      setHasUnsavedChanges(true);
-      setStatus(`已重做：${snapshot.operationName}`);
+  const applySnapshot = useCallback((snapshot: HistorySnapshot, verb: "撤销" | "重做") => {
+    if (!snapshot) return;
+    setModules(snapshot.modules);
+    setConnections(snapshot.connections);
+    setLayers(snapshot.layers);
+    setBackgroundImages(snapshot.backgroundImages);
+    setLabels(snapshot.labels);
+    setTransferGroups(snapshot.transferGroups);
+    setData(snapshot.transitData); setPages(snapshot.pages); setServicePatterns(snapshot.servicePatterns); setPlatforms(snapshot.platforms); setGraphics(snapshot.graphics); setAssets(snapshot.assets); setSourceLines(snapshot.sourceLines); setSourceStationsOnLine(snapshot.sourceStationsOnLine); setPhysicalStations(snapshot.physicalStations); setSourceMappings(snapshot.sourceMappings); setFilterState(snapshot.filters); setUnresolvedChanges(snapshot.unresolvedChanges); setPendingPlacement(snapshot.pendingPlacement);
+    setSelectedIds([]);
+    setHasUnsavedChanges(true);
+    // 撤销/重做改变了画布尺寸时，同步回被恢复页面保存的视口与网格显示
+    const restoredPage = snapshot.pages.find((page) => page.id === activePageId);
+    if (restoredPage && activePage && (activePage.width !== restoredPage.width || activePage.height !== restoredPage.height)) {
+      setViewport(restoredPage.viewport);
+      setShowGrid(restoredPage.showGrid);
     }
-  }, [history]);
+    setStatus(`已${verb}：${snapshot.operationName}`);
+  }, [activePage, activePageId]);
+
+  /** 撤销涉及画布尺寸变更时弹窗确认；否则直接应用。 */
+  const handleUndo = useCallback(() => {
+    const peek = history.peekUndo();
+    if (!peek) return;
+    const target = peek.pages.find((page) => page.id === activePageId);
+    if (activePage && target && (activePage.width !== target.width || activePage.height !== target.height)) {
+      setPendingHistoryApply({ kind: "undo", opName: peek.operationName, curW: activePage.width, curH: activePage.height, tgtW: target.width, tgtH: target.height });
+      return;
+    }
+    const snapshot = history.undo();
+    if (snapshot) applySnapshot(snapshot, "撤销");
+  }, [history, activePage, activePageId, applySnapshot]);
+
+  /** 执行重做（同上，画布尺寸变更时先确认） */
+  const handleRedo = useCallback(() => {
+    const peek = history.peekRedo();
+    if (!peek) return;
+    const target = peek.pages.find((page) => page.id === activePageId);
+    if (activePage && target && (activePage.width !== target.width || activePage.height !== target.height)) {
+      setPendingHistoryApply({ kind: "redo", opName: peek.operationName, curW: activePage.width, curH: activePage.height, tgtW: target.width, tgtH: target.height });
+      return;
+    }
+    const snapshot = history.redo();
+    if (snapshot) applySnapshot(snapshot, "重做");
+  }, [history, activePage, activePageId, applySnapshot]);
+
+  /** 确认画布尺寸变更的撤销/重做 */
+  function confirmHistoryApply() {
+    const pending = pendingHistoryApply;
+    if (!pending) return;
+    if (pending.kind === "undo") { const snapshot = history.undo(); if (snapshot) applySnapshot(snapshot, "撤销"); }
+    else { const snapshot = history.redo(); if (snapshot) applySnapshot(snapshot, "重做"); }
+    setPendingHistoryApply(null);
+  }
 
   // ── 站台编辑模式   // ── 加载数据 ── 加载数据 ──
 
-  // 选中不同模块时退出站台编辑模式
+  // 选中不同模块时退出站台编辑模式；但选中同一模块的站台时保持编辑模式
+  // （否则点一下站台就让 interactive 失效，画布上的调整手柄/拖拽都不可用）
   useEffect(() => {
     if (editingPlatformModuleId) {
-      const stillEditing = modules.find(m => m.id === editingPlatformModuleId && selectedIds.includes(m.id));
-      if (!stillEditing) setEditingPlatformModuleId(null);
+      const moduleExists = modules.some((m) => m.id === editingPlatformModuleId);
+      const ownerSelected = selectedIds.includes(editingPlatformModuleId)
+        || platforms.some((p) => selectedIds.includes(p.id) && p.moduleId === editingPlatformModuleId);
+      if (!(moduleExists && ownerSelected)) setEditingPlatformModuleId(null);
     }
-  }, [selectedIds, editingPlatformModuleId, modules]);
+  }, [selectedIds, editingPlatformModuleId, modules, platforms]);
   function cancelCsvImport() {
     setShowCsvImport(false);
     setCsvImportPreview(null);
@@ -583,13 +665,11 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
     });
   }
 
-  const activePage = useMemo(
-    () => pages.find((page) => page.id === activePageId) || pages[0],
-    [pages, activePageId],
-  );
   const pageWidth = activePage?.width || 1920;
   const pageHeight = activePage?.height || 1080;
   const pageGridSize = activePage?.gridSize || GRID_SIZE;
+  /** 吸附步长：snapStep>0 时用独立步长，否则跟随画布网格间距 */
+  const snapGridSize = snapStep > 0 ? snapStep : pageGridSize;
   const activeLayerRank = useMemo(() => createLayerRank(layers), [layers]);
   const selectableLayers = useMemo(() => leafLayerIds(layers), [layers]);
   function resolvePlacementLayer(defaultLayerId: string): string {
@@ -703,10 +783,63 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
     if (changed) setLabels(synchronized);
   }, [modules, labels]);
 
-  // The canvas is finite for export, but grows on demand as users arrange
-  // modules beyond its right or bottom edge. Object coordinates stay stable.
+  /** 当前页已放置元件（不含背景图）——用于无限流空画布判定 */
+  const activePageHasContent = useCallback(
+    () => modules.some((m) => isOnActivePage(m.pageId))
+      || platforms.some((p) => isOnActivePage(p.pageId))
+      || graphics.some((g) => isOnActivePage(g.pageId))
+      || labels.some((l) => isOnActivePage(l.pageId))
+      || connections.some((c) => isOnActivePage(c.pageId))
+      || transferGroups.some((g) => isOnActivePage(g.pageId)),
+    [modules, platforms, graphics, labels, connections, transferGroups, isOnActivePage],
+  );
+
+  /** 当前页所有元件的整体包围盒（用于适应内容 / 画布外判定）。 */
+  function computePageContentBounds(includeBackground: boolean) {
+    const rects: { x: number; y: number; width: number; height: number }[] = [];
+    const push = (rect: { x: number; y: number; width: number; height: number } | null) => { if (rect) rects.push(rect); };
+    modules.filter((m) => isOnActivePage(m.pageId)).forEach((module) => {
+      const template = resolvedTemplateMap.get(module.id) || templateMap.get(module.templateId);
+      if (!template) return;
+      const radians = (module.rotation * Math.PI) / 180;
+      const width = Math.abs(Math.cos(radians)) * template.width + Math.abs(Math.sin(radians)) * template.height;
+      const height = Math.abs(Math.sin(radians)) * template.width + Math.abs(Math.cos(radians)) * template.height;
+      push({ x: module.x + (template.width - width) / 2, y: module.y + (template.height - height) / 2, width, height });
+    });
+    platforms.filter((p) => isOnActivePage(p.pageId)).forEach((platform) => push({ x: platform.x, y: platform.y, width: platform.width, height: platform.height }));
+    graphics.filter((g) => isOnActivePage(g.pageId)).forEach((graphic) => push({ x: graphic.x, y: graphic.y, width: graphic.width, height: graphic.height }));
+    labels.filter((l) => isOnActivePage(l.pageId)).forEach((label) => push({ x: label.x - 100, y: label.y - 48, width: 200, height: 96 }));
+    connections.filter((c) => isOnActivePage(c.pageId)).forEach((connection) => connection.controlPoints.forEach((point) => push({ x: point.x - 32, y: point.y - 32, width: 64, height: 64 })));
+    transferGroups.filter((g) => isOnActivePage(g.pageId)).forEach((group) => {
+      const groupBounds = getTransferGroupBounds(group);
+      if (groupBounds) push({ x: groupBounds.x, y: groupBounds.y, width: groupBounds.w, height: groupBounds.h });
+    });
+    if (includeBackground) {
+      backgroundImages.filter((b) => isOnActivePage(b.pageId)).forEach((image) => push({ x: image.x, y: image.y, width: image.naturalWidth * image.scale, height: image.naturalHeight * image.scale }));
+    }
+    if (!rects.length) return null;
+    const minX = Math.min(...rects.map((rect) => rect.x));
+    const minY = Math.min(...rects.map((rect) => rect.y));
+    const maxX = Math.max(...rects.map((rect) => rect.x + rect.width));
+    const maxY = Math.max(...rects.map((rect) => rect.y + rect.height));
+    return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+  }
+
+  // 无限流：画布随内容自动调整——元件放到画布外自动扩大（原有行为），
+  // 画布没有任何元件时自动缩回基准尺寸。手动尺寸模式不做任何自动调整。
   useEffect(() => {
     if (!activePage) return;
+    if (activePage.flowMode === "manual") return;
+    if (!activePageHasContent()) {
+      const baseW = activePage.baseWidth ?? activePage.width;
+      const baseH = activePage.baseHeight ?? activePage.height;
+      if (activePage.width !== baseW || activePage.height !== baseH) {
+        const shrunk = createCanvasPage({ ...activePage, width: baseW, height: baseH });
+        setPages((previous) => previous.map((page) => page.id === activePageId ? shrunk : page));
+        setHasUnsavedChanges(true);
+      }
+      return;
+    }
     const bounds = [
       ...modules.filter((module) => isOnActivePage(module.pageId)).map((module) => {
         const template = resolvedTemplateMap.get(module.id) || templateMap.get(module.templateId);
@@ -725,7 +858,7 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
     if (expanded === activePage) return;
     setPages((previous) => previous.map((page) => page.id === activePageId ? expanded : page));
     setHasUnsavedChanges(true);
-  }, [activePage, activePageId, connections, graphics, isOnActivePage, labels, modules, pageGridSize, platforms, resolvedTemplateMap, templateMap]);
+  }, [activePage, activePageId, connections, graphics, isOnActivePage, labels, modules, pageGridSize, platforms, resolvedTemplateMap, templateMap, activePageHasContent, transferGroups]);
 
   const selectedModules = useMemo(
     () => modules.filter((m) => isOnActivePage(m.pageId) && selectedIds.includes(m.id)),
@@ -764,10 +897,19 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
         ? effectiveConnectionZIndex(entry.item as ModuleConnection, modules)
         : entry.kind === "platform"
           ? effectivePlatformZIndex(entry.item as PlatformObject, modules, ownedPlatformIndex.get(entry.item.id) ?? 0)
+        : entry.kind === "label"
+          ? effectiveLabelZIndex(entry.item as LabelObject, modules)
         : entry.item.zIndex,
       creationIndex: entry.creationIndex,
+      // 层叠栈对象：模块轨道、连接线、属于模块的站台、物化站名标签。它们跨图层边界按
+      // 有效层级交错，保证整座车站（线路+站台+站名+连接）一起升降，不被图层边界拆开。
+      // 独立文字/图形/底图等非栈对象保持"图层优先"，备注始终浮在最上层可读。
+      stack: entry.kind === "module"
+        || entry.kind === "connection"
+        || (entry.kind === "platform" && !!(entry.item as PlatformObject).moduleId)
+        || (entry.kind === "label" && (entry.item as LabelObject).positionMode === "attached" && !!(entry.item as LabelObject).attachedToId),
     });
-    return items.sort((a, b) => compareRenderOrder(sortableItem(a), sortableItem(b), activeLayerRank, (item) => item.creationIndex));
+    return items.sort((a, b) => compareRenderOrder(sortableItem(a), sortableItem(b), activeLayerRank, (item) => item.creationIndex, (item) => item.stack));
   }, [connections, backgroundImages, modules, platforms, graphics, labels, transferGroups, activeLayerRank, isOnActivePage]);
 
   const suppressedTransferLabelIds = useMemo(
@@ -1043,8 +1185,8 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
     if (!templateId) return;
     const template = templateMap.get(templateId);
     if (!template) return;
-    const x = snapEnabled ? snapToGrid(worldX, pageGridSize) : Math.round(worldX);
-    const y = snapEnabled ? snapToGrid(worldY, pageGridSize) : Math.round(worldY);
+    const x = snapEnabled ? snapToGrid(worldX, snapGridSize) : Math.round(worldX);
+    const y = snapEnabled ? snapToGrid(worldY, snapGridSize) : Math.round(worldY);
     // If binding to a station, auto-assign its lineId
     const station = sourceStationId ? data?.stations.find((candidate) => candidate.id === sourceStationId) : undefined;
     const stationLineId = station?.lineId;
@@ -1069,10 +1211,22 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
     if (sourceStationId) {
       if (station) mod.customLabel = station.nameZh;
     }
-    // 初始化道岔参数默认值
+    // 初始化模板参数默认值，并按「默认放置」设置覆盖模板支持的参数键（站台长度/宽度、线路间距等）
     if (template.params && template.params.length > 0) {
       mod.customParams = Object.fromEntries(template.params.map(p => [p.key, p.default]));
+      const placementDefaults: Record<string, number> = {
+        spacing: defaultSpacing,
+        platformLength: defaultPlatformLength,
+        platformWidth: defaultPlatformWidth,
+      };
+      for (const key of Object.keys(mod.customParams)) {
+        const override = placementDefaults[key];
+        if (override != null && Number.isFinite(override) && override > 0) mod.customParams[key] = override;
+      }
     }
+    // 解析带自定义参数的模板几何：站台/标签位置跟随 customParams（线路间距、站台长度/宽度等），
+    // 与渲染端 buildResolvedTemplateMap 用同一工厂，保证物化站台与模块内轨道/端口一致。
+    const resolvedTemplate = mod.customParams && template.params?.length ? makeCustomizedTemplate(template, mod.customParams) : template;
     if (snapEnabled) {
       const aligned = alignModuleToExistingTracks(mod);
       mod.x = aligned.x;
@@ -1080,11 +1234,11 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
     }
     const moduleLocalPoint = (localX: number, localY: number) => {
       // 镜像在模块局部坐标中先作用，再旋转到世界坐标（与渲染/端口一致）。
-      const mirroredX = mod.mirrorX ? template.width - localX : localX;
-      const mirroredY = mod.mirrorY ? template.height - localY : localY;
+      const mirroredX = mod.mirrorX ? resolvedTemplate.width - localX : localX;
+      const mirroredY = mod.mirrorY ? resolvedTemplate.height - localY : localY;
       const radians = (mod.rotation * Math.PI) / 180;
-      const pivotX = mod.x + template.width / 2;
-      const pivotY = mod.y + template.height / 2;
+      const pivotX = mod.x + resolvedTemplate.width / 2;
+      const pivotY = mod.y + resolvedTemplate.height / 2;
       const dx = mod.x + mirroredX - pivotX;
       const dy = mod.y + mirroredY - pivotY;
       return { x: pivotX + dx * Math.cos(radians) - dy * Math.sin(radians), y: pivotY + dx * Math.sin(radians) + dy * Math.cos(radians) };
@@ -1092,14 +1246,14 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
     // 捕获历史快照（放置模块 + 可能的自动连接作为一个事务）
     history.captureSnapshot(`放置「${template.name}」`);
     setModules((prev) => [...prev, mod]);
-    const newPlatforms: PlatformObject[] = template.platforms.map((platform, index) => {
+    const newPlatforms: PlatformObject[] = resolvedTemplate.platforms.map((platform, index) => {
       const center = moduleLocalPoint(platform.x + platform.width / 2, platform.y + platform.height / 2);
       return { id: genId("platform"), moduleId: mod.id, sourceStationId: sourceStationId || undefined, sourceLineId: stationLineId, platformType: "island", attachedTrackIds: [], x: center.x - platform.width / 2, y: center.y - platform.height / 2, width: platform.width, height: platform.height, rotation: mod.rotation, fill: "#D7B06A", label: platform.label, layerId: defaultPlatformLayerId(template.id), zIndexMode: "auto", zIndex: mod.zIndex + index, pageId: activePageId, createdOrder: Date.now(), visible: true, locked: false };
     });
     setPlatforms((prev) => [...prev, ...newPlatforms]);
     if (station) {
-      const stationLabel = template.labels.find((label) => label.text === "站名");
-      const labelPoint = moduleLocalPoint(stationLabel?.x ?? template.width / 2, stationLabel?.y ?? -10);
+      const stationLabel = resolvedTemplate.labels.find((label) => label.text === "站名");
+      const labelPoint = moduleLocalPoint(stationLabel?.x ?? resolvedTemplate.width / 2, stationLabel?.y ?? -10);
       const labelX = labelPoint.x;
       const labelY = labelPoint.y;
       const stationLabels: LabelObject[] = [{
@@ -1112,9 +1266,9 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
       if (station.nameEn) {
         // 英文站名放在模板设计的 "Station" 标签位置（站台下方），而不是 stationLabel.y + 16。
         // 旧逻辑把英文名放在中文名下方 16px，恰好压在站台矩形上，导致"站点遮挡文字"。
-        const englishLabel = template.labels.find((label) => label.text === "Station");
+        const englishLabel = resolvedTemplate.labels.find((label) => label.text === "Station");
         const englishPoint = moduleLocalPoint(
-          englishLabel?.x ?? stationLabel?.x ?? template.width / 2,
+          englishLabel?.x ?? stationLabel?.x ?? resolvedTemplate.width / 2,
           englishLabel?.y ?? (stationLabel?.y ?? -10) + 16,
         );
         stationLabels.push({
@@ -1125,23 +1279,30 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
       const stationGraphics: AttachedGraphic[] = [];
       const iconAsset = findAssetByFilename(assets, station.icon);
       if (iconAsset?.dataUrl) {
-        const graphicCenter = moduleLocalPoint(template.width / 2, -26);
+        const graphicCenter = moduleLocalPoint(resolvedTemplate.width / 2, -26);
         const graphicX = graphicCenter.x - 16;
         const graphicY = graphicCenter.y - 16;
         stationGraphics.push({ id: genId("graphic"), assetId: iconAsset.id, attachedToId: mod.id, positionMode: "attached", offsetX: graphicX - mod.x, offsetY: graphicY - mod.y, x: graphicX, y: graphicY, width: 32, height: 32, rotation: mod.rotation, mirrorX: mod.mirrorX, mirrorY: mod.mirrorY, opacity: 1, layerId: "layer-icon", zIndex: graphics.length, pageId: activePageId, visible: true, locked: false, createdOrder: Date.now() });
       }
       // 新站名/图标与既有元素一起参与自动避让，避免图标遮挡站名（尤其换乘站），
       // 平台作为固定障碍物参与，避免站名/图标压到站台上（"站点遮挡文字"）。
-      const avoidance = resolveLabelIconOverlaps({
-        modules: [...modules, mod],
-        labels: [...labels, ...stationLabels],
-        graphics: [...graphics, ...stationGraphics],
-        platforms: [...platforms, ...newPlatforms],
-        activePageId,
-        ignoredLabelIds: duplicateTransferStationLabelIds([...labels, ...stationLabels], transferGroupsRef.current),
-      });
-      setLabels(avoidance.labels);
-      setGraphics(avoidance.graphics);
+      // 自动避让默认关闭时跳过求解，仅把新站名/图标原样并入（避免 45° 等斜向站名被反复推走）。
+      let placedLabels = [...labels, ...stationLabels];
+      let placedGraphics = [...graphics, ...stationGraphics];
+      if (autoAvoidance) {
+        const avoidance = resolveLabelIconOverlaps({
+          modules: [...modules, mod],
+          labels: placedLabels,
+          graphics: placedGraphics,
+          platforms: [...platforms, ...newPlatforms],
+          activePageId,
+          ignoredLabelIds: duplicateTransferStationLabelIds(placedLabels, transferGroupsRef.current),
+        });
+        placedLabels = avoidance.labels;
+        placedGraphics = avoidance.graphics;
+      }
+      setLabels(placedLabels);
+      setGraphics(placedGraphics);
     }
     setSelectedIds([mod.id]);
     setHasUnsavedChanges(true);
@@ -1519,31 +1680,22 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
       const previousTemplate = resolvedTemplateMap.get(current.id) || templateMap.get(current.templateId);
       const nextTemplate = resolveTemplatesFor(updatedModules).get(id) || templateMap.get(updatedModule.templateId);
       if (previousTemplate?.platforms.length && nextTemplate?.platforms.length) {
-        const radians = (updatedModule.rotation * Math.PI) / 180;
-        const pivot = { x: updatedModule.x + nextTemplate.width / 2, y: updatedModule.y + nextTemplate.height / 2 };
-        const rotateLocalCenter = (layout: { x: number; y: number; width: number; height: number }) => {
-          const x = updatedModule.x + layout.x + layout.width / 2;
-          const y = updatedModule.y + layout.y + layout.height / 2;
-          const dx = x - pivot.x;
-          const dy = y - pivot.y;
-          return { x: pivot.x + dx * Math.cos(radians) - dy * Math.sin(radians), y: pivot.y + dx * Math.sin(radians) + dy * Math.cos(radians) };
-        };
-        let platformIndex = 0;
-        nextPlatforms = nextPlatforms.map((platform) => {
-          if (platform.moduleId !== id) return platform;
-          const layout = nextTemplate.platforms[platformIndex++];
-          if (!layout) return platform;
-          const center = rotateLocalCenter(layout);
-          return {
-            ...platform,
-            x: center.x - layout.width / 2,
-            y: center.y - layout.height / 2,
-            width: layout.width,
-            height: layout.height,
-            rotation: updatedModule.rotation,
-          };
+        // 参数变化（如线路间距）：站台、站名、图标随新模板几何一起重排，否则轨道动了
+        // 而站台/站名停在原处，出现"线路拉开但站台没跟上"。
+        const relaid = relayoutModuleOwnedObjects({
+          module: updatedModule,
+          nextTemplate,
+          previousTemplate,
+          platforms: nextPlatforms,
+          labels: nextLabels,
+          graphics: nextGraphics,
+          nextId: genId,
         });
-        setPlatforms(nextPlatforms);
+        setPlatforms(relaid.platforms);
+        nextPlatforms = relaid.platforms;
+        nextLabels = relaid.labels;
+        nextGraphics = relaid.graphics;
+        labelsOrGraphicsChanged = true;
       }
     }
     if (patch.templateId && patch.templateId !== current.templateId) {
@@ -1576,11 +1728,17 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
       labelsOrGraphicsChanged = true;
     }
     if (labelsOrGraphicsChanged) {
-      // 模块几何变化后站名/图标可能相互遮挡（尤其换乘站），重新求解避让。
-      // 平台作为固定障碍物参与，避免站名/图标压到站台上。
-      const avoidance = resolveLabelIconOverlaps({ modules: updatedModules, labels: nextLabels, graphics: nextGraphics, platforms: nextPlatforms, activePageId, ignoredLabelIds: duplicateTransferStationLabelIds(nextLabels, transferGroupsRef.current) });
-      setLabels(avoidance.labels);
-      setGraphics(avoidance.graphics);
+      if (autoAvoidance) {
+        // 模块几何变化后站名/图标可能相互遮挡（尤其换乘站），重新求解避让。
+        // 平台作为固定障碍物参与，避免站名/图标压到站台上。
+        const avoidance = resolveLabelIconOverlaps({ modules: updatedModules, labels: nextLabels, graphics: nextGraphics, platforms: nextPlatforms, activePageId, ignoredLabelIds: duplicateTransferStationLabelIds(nextLabels, transferGroupsRef.current) });
+        setLabels(avoidance.labels);
+        setGraphics(avoidance.graphics);
+      } else {
+        // 自动避让关闭：保留重排后的站名/图标原位置，不再二次求解（避免 45° 等斜向站名被推走）。
+        setLabels(nextLabels);
+        setGraphics(nextGraphics);
+      }
     }
     // 模块 zIndex 变化时同步站台的相对层级；图层本身不再同步，因为轨道与站台
     // 分属不同的语义图层，强制同步会把站台重新塞回轨道图层。
@@ -1606,11 +1764,170 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
     setHasUnsavedChanges(true);
   }
 
+  /** 批量设置多个模块的公共模板参数：单一撤销步骤；只改声明了该 key 且未锁定的模块 */
+  function applyBatchParamUpdate(ids: string[], key: string, value: number) {
+    const changed = applyBatchParam(modules, templateMap, ids, key, value);
+    const unlockedIds = ids.filter((id) => {
+      const current = modules.find((m) => m.id === id);
+      if (!current) return false;
+      const next = changed.find((m) => m.id === id);
+      return next !== undefined && next !== current && !isLayerLocked(current.layerId);
+    });
+    if (!unlockedIds.length) return;
+    history.captureSnapshot("批量设置参数");
+    const updatedModules = modules.map((m) => {
+      if (!unlockedIds.includes(m.id)) return m;
+      const next = changed.find((c) => c.id === m.id);
+      return next || m;
+    });
+    setModules(updatedModules);
+    // 逐模块重排所属站台/站名/图标（与 updateModule 的 customParams 分支一致）。
+    let nextPlatforms = platforms;
+    let nextLabels = labels;
+    let nextGraphics = graphics;
+    for (const id of unlockedIds) {
+      const current = modules.find((m) => m.id === id)!;
+      const updatedModule = updatedModules.find((m) => m.id === id)!;
+      const previousTemplate = resolvedTemplateMap.get(current.id) || templateMap.get(current.templateId);
+      const nextTemplate = resolveTemplatesFor(updatedModules).get(id) || templateMap.get(updatedModule.templateId);
+      if (previousTemplate?.platforms.length && nextTemplate?.platforms.length) {
+        const relaid = relayoutModuleOwnedObjects({
+          module: updatedModule,
+          nextTemplate,
+          previousTemplate,
+          platforms: nextPlatforms,
+          labels: nextLabels,
+          graphics: nextGraphics,
+          nextId: genId,
+        });
+        nextPlatforms = relaid.platforms;
+        nextLabels = relaid.labels;
+        nextGraphics = relaid.graphics;
+      }
+    }
+    if (nextPlatforms !== platforms) setPlatforms(nextPlatforms);
+    if (autoAvoidance) {
+      const avoidance = resolveLabelIconOverlaps({
+        modules: updatedModules,
+        labels: nextLabels,
+        graphics: nextGraphics,
+        platforms: nextPlatforms,
+        activePageId,
+        ignoredLabelIds: duplicateTransferStationLabelIds(nextLabels, transferGroupsRef.current),
+      });
+      setLabels(avoidance.labels);
+      setGraphics(avoidance.graphics);
+    } else {
+      // 自动避让关闭：保留重排后的站名/图标原位置，不再二次求解。
+      setLabels(nextLabels);
+      setGraphics(nextGraphics);
+    }
+    setConnections((prev) => synchronizeConnectionTracks(prev, updatedModules, resolveTemplatesFor(updatedModules)));
+    setHasUnsavedChanges(true);
+  }
+
+  /** 复制选中模块（带参数与所属对象；两模块及以上含内部连接） */
+  function copySelection() {
+    const payload = buildCopyPayload({
+      selectedIds,
+      modules,
+      platforms,
+      labels,
+      graphics,
+      connections,
+      isOnActivePage,
+      isLayerLocked,
+    });
+    if (!payload || !payload.modules.length) {
+      setStatus("没有可复制的模块");
+      return;
+    }
+    setClipboard(payload);
+    setStatus(`已复制 ${payload.modules.length} 个模块${payload.connections.length ? `（含 ${payload.connections.length} 条连接）` : ""}`);
+  }
+
+  /** 将载荷粘贴到画布：整体平移 (dx,dy)，重新生成 id，选中新模块 */
+  function pastePayload(payload: ClipboardPayload, dx: number, dy: number, opName: string) {
+    if (!payload.modules.length) return;
+    const pasted = buildPasteData(payload, dx, dy, {
+      pageId: activePageId,
+      createdOrderBase: Date.now(),
+      zIndexBases: {
+        modules: modules.length,
+        platforms: platforms.length,
+        labels: labels.length,
+        graphics: graphics.length,
+        connections: connections.length,
+      },
+      genId,
+    });
+    history.captureSnapshot(opName);
+    const nextModules = [...modules, ...pasted.modules];
+    setModules(nextModules);
+    setPlatforms((prev) => [...prev, ...pasted.platforms]);
+    setLabels((prev) => [...prev, ...pasted.labels]);
+    setGraphics((prev) => [...prev, ...pasted.graphics]);
+    setConnections((prev) => synchronizeConnectionTracks(
+      [...prev, ...pasted.connections],
+      nextModules,
+      resolveTemplatesFor(nextModules),
+    ));
+    setSelectedIds(pasted.modules.map((m) => m.id));
+    setHasUnsavedChanges(true);
+    setStatus(`已${dx || dy ? "粘贴" : "原位复制"} ${pasted.modules.length} 个模块${pasted.connections.length ? `（含 ${pasted.connections.length} 条连接）` : ""}`);
+  }
+
+  function pasteClipboard() {
+    if (!clipboard) return;
+    pastePayload(clipboard, 24, 24, "粘贴元件");
+  }
+
+  /** 原位复制：不依赖异步 setClipboard，直接同步复制并粘贴到同一位置 */
+  function duplicateSelection() {
+    const payload = buildCopyPayload({
+      selectedIds,
+      modules,
+      platforms,
+      labels,
+      graphics,
+      connections,
+      isOnActivePage,
+      isLayerLocked,
+    });
+    if (!payload || !payload.modules.length) return;
+    pastePayload(payload, 0, 0, "原位复制");
+  }
+
   function updatePlatform(id: string, patch: Partial<PlatformObject>, operationName = "调整站台") {
     const current = platforms.find((platform) => platform.id === id);
     if (!current || isLayerLocked(current.layerId)) return;
     history.captureSnapshot(operationName);
-    setPlatforms((prev) => prev.map((platform) => platform.id === id ? { ...platform, ...patch } : platform));
+    // 站台 zIndex 变化时，把同一增量同步给所属模块（轨道/线路一起动）与手动分层的连接线，
+    // 避免"站台堆叠调层级只有站台动、线路不动"：线路与站台应保持相对层级一起升降。
+    let zSyncDelta = 0;
+    if (patch.zIndex !== undefined && current.moduleId) {
+      const owner = modules.find((module) => module.id === current.moduleId);
+      if (owner) {
+        // 自动模式站台本就在 module.z+0.00x：直接让模块对齐到新值，保持整数（避免
+        // ModuleInspector 显示 9.999 之类的小数）；手动模式则保持站台相对模块的偏移，
+        // 只把同一增量同步过去（线路与站台保持相对层级一起升降）。
+        const base = current.zIndexMode === "auto" ? owner.zIndex : current.zIndex;
+        zSyncDelta = patch.zIndex - base;
+      }
+    }
+    setPlatforms((prev) => prev.map((platform) => {
+      if (platform.id === id) return { ...platform, ...patch };
+      if (zSyncDelta && platform.moduleId === current.moduleId) return { ...platform, zIndex: platform.zIndex + zSyncDelta };
+      return platform;
+    }));
+    if (zSyncDelta && current.moduleId) {
+      setModules((prev) => prev.map((module) => module.id === current.moduleId ? { ...module, zIndex: module.zIndex + zSyncDelta } : module));
+      setConnections((prev) => prev.map((connection) => {
+        if (connection.zIndexMode !== "manual") return connection;
+        if (connection.fromModuleId !== current.moduleId && connection.toModuleId !== current.moduleId) return connection;
+        return { ...connection, zIndex: connection.zIndex + zSyncDelta };
+      }));
+    }
     setHasUnsavedChanges(true);
   }
 
@@ -1654,8 +1971,8 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
           id: genId("bgimg"),
           src,
           name: file.name,
-          x: snapToGrid(-viewport.panX / viewport.scale + 100, pageGridSize),
-          y: snapToGrid(-viewport.panY / viewport.scale + 60, pageGridSize),
+          x: snapToGrid(-viewport.panX / viewport.scale + 100, snapGridSize),
+          y: snapToGrid(-viewport.panY / viewport.scale + 60, snapGridSize),
           naturalWidth: img.naturalWidth,
           naturalHeight: img.naturalHeight,
           previewSrc: createBackgroundPreview(img),
@@ -1836,8 +2153,8 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
 
   /** 放置标签（画布点击时调用） */
   function placeLabel(worldX: number, worldY: number) {
-    const x = snapEnabled ? snapToGrid(worldX, pageGridSize) : Math.round(worldX);
-    const y = snapEnabled ? snapToGrid(worldY, pageGridSize) : Math.round(worldY);
+    const x = snapEnabled ? snapToGrid(worldX, snapGridSize) : Math.round(worldX);
+    const y = snapEnabled ? snapToGrid(worldY, snapGridSize) : Math.round(worldY);
     const label: LabelObject = {
       id: genId("label"),
       text: "新标签",
@@ -1896,8 +2213,8 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
     const pending = pendingElement;
     if (!pending || pending.kind !== "shape") return;
     const meta = SHAPE_META[pending.shapeType];
-    const x = snapEnabled ? snapToGrid(worldX, pageGridSize) : Math.round(worldX);
-    const y = snapEnabled ? snapToGrid(worldY, pageGridSize) : Math.round(worldY);
+    const x = snapEnabled ? snapToGrid(worldX, snapGridSize) : Math.round(worldX);
+    const y = snapEnabled ? snapToGrid(worldY, snapGridSize) : Math.round(worldY);
     const graphic: AttachedGraphic = {
       id: genId("graphic"),
       assetId: undefined,
@@ -1939,8 +2256,8 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
     if (!pending || pending.kind !== "number") return;
     const existing = labels.filter((label) => label.numeralType === pending.numeralType);
     const nextNum = existing.length ? Math.max(...existing.map((label) => parseInt(label.text, 10) || 0)) + 1 : 1;
-    const x = snapEnabled ? snapToGrid(worldX, pageGridSize) : Math.round(worldX);
-    const y = snapEnabled ? snapToGrid(worldY, pageGridSize) : Math.round(worldY);
+    const x = snapEnabled ? snapToGrid(worldX, snapGridSize) : Math.round(worldX);
+    const y = snapEnabled ? snapToGrid(worldY, snapGridSize) : Math.round(worldY);
     const label: LabelObject = {
       id: genId("label"),
       text: String(nextNum),
@@ -2214,8 +2531,8 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
     }
     const newCp: TrackControlPoint = {
       id: genId("cp"),
-      x: snapEnabled ? snapToGrid(bestProj.x, pageGridSize) : Math.round(bestProj.x),
-      y: snapEnabled ? snapToGrid(bestProj.y, pageGridSize) : Math.round(bestProj.y),
+      x: snapEnabled ? snapToGrid(bestProj.x, snapGridSize) : Math.round(bestProj.x),
+      y: snapEnabled ? snapToGrid(bestProj.y, snapGridSize) : Math.round(bestProj.y),
       curved: true,
       handleX: bestTangent.x * 18,
       handleY: bestTangent.y * 18,
@@ -2840,7 +3157,7 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
     if (platform.locked || isLayerLocked(platform.layerId)) return;
     setSelectedIds([platform.id]);
     history.captureSnapshot("调整站台尺寸");
-    dragRef.current = { type: "platformResize", platformId: platform.id, startSX: e.clientX, startSY: e.clientY, startMX: platform.x, startMY: platform.y, startPX: 0, startPY: 0, startWidth: platform.width, startHeight: platform.height, moved: false };
+    dragRef.current = { type: "platformResize", platformId: platform.id, anchor: platform.resizeAnchor ?? 0, startRotation: platform.rotation, startSX: e.clientX, startSY: e.clientY, startMX: platform.x, startMY: platform.y, startPX: 0, startPY: 0, startWidth: platform.width, startHeight: platform.height, moved: false };
   }
 
   function handleGraphicResizeMouseDown(e: React.MouseEvent, graphic: AttachedGraphic) {
@@ -2892,8 +3209,8 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
         let totalDx = world.x - startWorld.x;
         let totalDy = world.y - startWorld.y;
         if (snapEnabled) {
-          totalDx = snapToGrid(totalDx, pageGridSize);
-          totalDy = snapToGrid(totalDy, pageGridSize);
+          totalDx = snapToGrid(totalDx, snapGridSize);
+          totalDy = snapToGrid(totalDy, snapGridSize);
         }
         const lastDx = drag.lastMX ?? 0;
         const lastDy = drag.lastMY ?? 0;
@@ -2937,8 +3254,8 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
         let newX = drag.startMX + dx;
         let newY = drag.startMY + dy;
         if (snapEnabled) {
-          newX = snapToGrid(newX, pageGridSize);
-          newY = snapToGrid(newY, pageGridSize);
+          newX = snapToGrid(newX, snapGridSize);
+          newY = snapToGrid(newY, snapGridSize);
           const current = modulesRef.current.find((module) => module.id === drag.moduleId);
           if (current) {
             const aligned = alignModuleToExistingTracks({ ...current, x: newX, y: newY });
@@ -2976,8 +3293,8 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
         let nextX = drag.startMX + dx;
         let nextY = drag.startMY + dy;
         if (snapEnabled) {
-          nextX = snapToGrid(nextX, pageGridSize);
-          nextY = snapToGrid(nextY, pageGridSize);
+          nextX = snapToGrid(nextX, snapGridSize);
+          nextY = snapToGrid(nextY, snapGridSize);
         }
         const lastX = drag.lastMX ?? drag.startMX;
         const lastY = drag.lastMY ?? drag.startMY;
@@ -3013,8 +3330,8 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
         let newX = drag.startMX + dx;
         let newY = drag.startMY + dy;
         if (snapEnabled) {
-          newX = snapToGrid(newX, pageGridSize);
-          newY = snapToGrid(newY, pageGridSize);
+          newX = snapToGrid(newX, snapGridSize);
+          newY = snapToGrid(newY, snapGridSize);
         }
         setBackgroundImages((prev) => prev.map((b) => (b.id === drag.bgImageId ? { ...b, x: newX, y: newY } : b)));
       }
@@ -3027,8 +3344,8 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
         let newX = drag.startMX + dx;
         let newY = drag.startMY + dy;
         if (snapEnabled) {
-          newX = snapToGrid(newX, pageGridSize);
-          newY = snapToGrid(newY, pageGridSize);
+          newX = snapToGrid(newX, snapGridSize);
+          newY = snapToGrid(newY, snapGridSize);
         }
         setLabels((prev) => prev.map((label) => {
           if (label.id !== drag.labelId) return label;
@@ -3042,7 +3359,7 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
         let newX = drag.startMX + w.x - startW.x;
         let newY = drag.startMY + w.y - startW.y;
         if (Math.abs(newX - drag.startMX) > 1 || Math.abs(newY - drag.startMY) > 1) drag.moved = true;
-        if (snapEnabled) { newX = snapToGrid(newX, pageGridSize); newY = snapToGrid(newY, pageGridSize); }
+        if (snapEnabled) { newX = snapToGrid(newX, snapGridSize); newY = snapToGrid(newY, snapGridSize); }
         setPlatforms((prev) => prev.map((platform) => platform.id === drag.platformId ? { ...platform, x: newX, y: newY } : platform));
       }
       if (drag.type === "graphic" && drag.graphicId) {
@@ -3051,7 +3368,7 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
         let newX = drag.startMX + w.x - startW.x;
         let newY = drag.startMY + w.y - startW.y;
         if (Math.abs(newX - drag.startMX) > 1 || Math.abs(newY - drag.startMY) > 1) drag.moved = true;
-        if (snapEnabled) { newX = snapToGrid(newX, pageGridSize); newY = snapToGrid(newY, pageGridSize); }
+        if (snapEnabled) { newX = snapToGrid(newX, snapGridSize); newY = snapToGrid(newY, snapGridSize); }
         setGraphics((prev) => prev.map((graphic) => {
           if (graphic.id !== drag.graphicId) return graphic;
           const owner = graphic.positionMode === "attached" ? modulesRef.current.find((module) => module.id === graphic.attachedToId) : undefined;
@@ -3061,10 +3378,16 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
       if (drag.type === "platformResize" && drag.platformId) {
         const w = toWorld(e.clientX, e.clientY);
         const startW = toWorld(drag.startSX, drag.startSY);
-        const width = Math.max(10, (drag.startWidth || 10) + w.x - startW.x);
-        const height = Math.max(4, (drag.startHeight || 4) + w.y - startW.y);
-        if (width !== drag.startWidth || height !== drag.startHeight) drag.moved = true;
-        setPlatforms((prev) => prev.map((platform) => platform.id === drag.platformId ? { ...platform, width, height } : platform));
+        const result = computePlatformResize(
+          { x: drag.startMX, y: drag.startMY, width: drag.startWidth ?? MIN_PLATFORM_WIDTH, height: drag.startHeight ?? MIN_PLATFORM_HEIGHT, rotation: drag.startRotation ?? 0 },
+          (drag.anchor ?? 0) as CanvasAnchor,
+          w.x - startW.x,
+          w.y - startW.y,
+          MIN_PLATFORM_WIDTH,
+          MIN_PLATFORM_HEIGHT,
+        );
+        if (result.width !== drag.startWidth || result.height !== drag.startHeight) drag.moved = true;
+        setPlatforms((prev) => prev.map((platform) => platform.id === drag.platformId ? { ...platform, x: result.x, y: result.y, width: result.width, height: result.height } : platform));
       }
       if (drag.type === "graphicResize" && drag.graphicId) {
         const w = toWorld(e.clientX, e.clientY);
@@ -3087,7 +3410,7 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
         setManualCurveEditingId(drag.connId ?? null);
         let newX = drag.startMX + dx;
         let newY = drag.startMY + dy;
-        if (snapEnabled) { newX = snapToGrid(newX, pageGridSize); newY = snapToGrid(newY, pageGridSize); }
+        if (snapEnabled) { newX = snapToGrid(newX, snapGridSize); newY = snapToGrid(newY, snapGridSize); }
         setConnections((prev) => updateConnectionAndPairedRail(prev, drag.connId!, (c) => {
           const geometry = geometryForConnection(c, prev, modulesRef.current, resolveTemplatesFor(modulesRef.current));
           if (!geometry) return c;
@@ -3333,7 +3656,7 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
       window.removeEventListener("mousemove", handleMove);
       window.removeEventListener("mouseup", handleUp);
     };
-  }, [toWorld, snapEnabled, templateMap, pageGridSize]);
+  }, [toWorld, snapEnabled, templateMap, pageGridSize, snapStep]);
 
   /** 滚轮缩放 */
   function handleWheel(e: React.WheelEvent<SVGSVGElement>) {
@@ -3358,6 +3681,9 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
   useEffect(() => {
     saveProjectActionRef.current = handleSaveProject;
     deleteSelectedActionRef.current = deleteSelected;
+    copySelectionActionRef.current = copySelection;
+    pasteClipboardActionRef.current = pasteClipboard;
+    duplicateSelectionActionRef.current = duplicateSelection;
   });
 
   /** 键盘快捷键 */
@@ -3383,6 +3709,22 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
       if ((e.ctrlKey || e.metaKey) && (e.key === "s" || e.key === "S")) {
         e.preventDefault();
         saveProjectActionRef.current();
+        return;
+      }
+      // Ctrl+C 复制 / Ctrl+V 粘贴 / Ctrl+D 原位复制（与纯 c/v 工具键区分：带 ctrl 时优先）
+      if ((e.ctrlKey || e.metaKey) && (e.key === "c" || e.key === "C")) {
+        e.preventDefault();
+        copySelectionActionRef.current();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && (e.key === "v" || e.key === "V")) {
+        e.preventDefault();
+        pasteClipboardActionRef.current();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && (e.key === "d" || e.key === "D")) {
+        e.preventDefault();
+        duplicateSelectionActionRef.current();
         return;
       }
       if (e.key === "Delete" || e.key === "Backspace") {
@@ -3494,9 +3836,13 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
     try {
       setStatus("正在整理背景图并生成 PNG…");
       const bounds = getExportBounds();
-      const str = await svgToString(svg, bounds, exportIncludeBackground, exportTransparent);
       const w = Math.round(bounds.width * scale);
       const h = Math.round(bounds.height * scale);
+      if (w > MAX_EXPORT_DIMENSION || h > MAX_EXPORT_DIMENSION || w * h > MAX_EXPORT_PIXELS) {
+        setStatus(`导出被拦截：画布 ${w}×${h} 超出安全尺寸（最大 ${MAX_EXPORT_DIMENSION}px，约 ${Math.round(MAX_EXPORT_PIXELS / 1e6)} 兆像素）。请缩小画布或降低缩放倍率`);
+        return;
+      }
+      const str = await svgToString(svg, bounds, exportIncludeBackground, exportTransparent);
       const svgUrl = URL.createObjectURL(new Blob([str], { type: "image/svg+xml;charset=utf-8" }));
       const img = new Image();
       img.onload = () => {
@@ -3537,7 +3883,8 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
     const page = createCanvasPage({
       id: genId("page"), name: newCanvasDraft.name, width: newCanvasDraft.width, height: newCanvasDraft.height,
       backgroundColor: newCanvasDraft.backgroundColor, gridSize: newCanvasDraft.gridSize, showGrid: newCanvasDraft.showGrid,
-      orientation: newCanvasDraft.orientation, layerRootIds: layers.filter((layer) => layer.parentId === null).map((layer) => layer.id),
+      orientation: newCanvasDraft.orientation, flowMode: newCanvasDraft.flowMode, baseWidth: newCanvasDraft.width, baseHeight: newCanvasDraft.height,
+      layerRootIds: layers.filter((layer) => layer.parentId === null).map((layer) => layer.id),
     });
     setPages((prev) => [...prev, page]);
     setActivePageId(page.id);
@@ -3571,6 +3918,239 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
   }
   function fitCanvas() { const svg = svgRef.current; if (!svg) return; const scale = Math.min(svg.clientWidth / pageWidth, svg.clientHeight / pageHeight) * 0.9; setViewport({ scale, panX: (svg.clientWidth - pageWidth * scale) / 2, panY: (svg.clientHeight - pageHeight * scale) / 2 }); }
   function centerCanvas() { const svg = svgRef.current; if (!svg) return; setViewport((prev) => ({ ...prev, panX: (svg.clientWidth - pageWidth * prev.scale) / 2, panY: (svg.clientHeight - pageHeight * prev.scale) / 2 })); }
+
+  // ── 设置面板 · 画布调整 ──
+
+  /** 平移当前页全部元件（PS 式锚点缩放后重定原点）。附着对象与宿主一起平移，offset 保持不变。 */
+  function translatePageObjects(dx: number, dy: number) {
+    if (!dx && !dy) return;
+    const on = (object: { pageId?: string }) => isOnActivePage(object.pageId);
+    setModules((prev) => prev.map((m) => on(m) ? { ...m, x: m.x + dx, y: m.y + dy } : m));
+    setPlatforms((prev) => prev.map((p) => on(p) ? { ...p, x: p.x + dx, y: p.y + dy } : p));
+    setLabels((prev) => prev.map((l) => on(l) ? { ...l, x: l.x + dx, y: l.y + dy } : l));
+    setGraphics((prev) => prev.map((g) => on(g) ? { ...g, x: g.x + dx, y: g.y + dy } : g));
+    setBackgroundImages((prev) => prev.map((b) => on(b) ? { ...b, x: b.x + dx, y: b.y + dy } : b));
+    setConnections((prev) => prev.map((c) => on(c) ? {
+      ...c,
+      tracks: c.tracks.map((t) => ({
+        ...t,
+        x1: t.x1 + dx, y1: t.y1 + dy, x2: t.x2 + dx, y2: t.y2 + dy,
+        ...(typeof t.cx === "number" ? { cx: t.cx + dx } : {}),
+        ...(typeof t.cy === "number" ? { cy: t.cy + dy } : {}),
+        ...(typeof t.cx2 === "number" ? { cx2: t.cx2 + dx } : {}),
+        ...(typeof t.cy2 === "number" ? { cy2: t.cy2 + dy } : {}),
+      })),
+      controlPoints: c.controlPoints.map((point) => ({ ...point, x: point.x + dx, y: point.y + dy })),
+      crossingPoints: c.crossingPoints.map((point) => ({ ...point, x: point.x + dx, y: point.y + dy })),
+    } : c));
+  }
+
+  /** 删除指定对象；模块被删时联动删除其连接与附着的站台/文字/图标，并清理换乘组引用。 */
+  function removeObjectsByIds(ids: Set<string>) {
+    if (!ids.size) return;
+    const hasModules = modules.some((m) => ids.has(m.id));
+    setModules((prev) => prev.filter((m) => !ids.has(m.id)));
+    if (hasModules) setConnections((prev) => prev.filter((c) => !ids.has(c.fromModuleId) && !ids.has(c.toModuleId)));
+    setLabels((prev) => prev.filter((l) => !ids.has(l.id) && !ids.has(l.attachedToId || "")));
+    setBackgroundImages((prev) => prev.filter((b) => !ids.has(b.id)));
+    setPlatforms((prev) => prev.filter((p) => !ids.has(p.id) && !ids.has(p.moduleId || "")));
+    setGraphics((prev) => prev.filter((g) => !ids.has(g.id) && !ids.has(g.attachedToId || "")));
+    setTransferGroups((prev) => prev
+      .filter((g) => !ids.has(g.id))
+      .map((g) => g.moduleIds.some((mid) => ids.has(mid)) ? { ...g, moduleIds: g.moduleIds.filter((mid) => !ids.has(mid)) } : g));
+  }
+
+  /** 收集完全落在新画布矩形之外的元件（id + 可读名），供"放弃画布外元件"确认。 */
+  function collectOutsideObjectNames(rect: { x: number; y: number; width: number; height: number }): { id: string; name: string }[] {
+    const out: { id: string; name: string }[] = [];
+    const push = (id: string, bounds: { x: number; y: number; width: number; height: number } | null, name: string) => {
+      if (bounds && rectFullyOutside(bounds, rect)) out.push({ id, name });
+    };
+    modules.filter((m) => isOnActivePage(m.pageId)).forEach((module) => {
+      const template = resolvedTemplateMap.get(module.id) || templateMap.get(module.templateId);
+      if (!template) return;
+      const radians = (module.rotation * Math.PI) / 180;
+      const width = Math.abs(Math.cos(radians)) * template.width + Math.abs(Math.sin(radians)) * template.height;
+      const height = Math.abs(Math.sin(radians)) * template.width + Math.abs(Math.cos(radians)) * template.height;
+      push(module.id, { x: module.x + (template.width - width) / 2, y: module.y + (template.height - height) / 2, width, height }, module.name || `模块（${template.name}）`);
+    });
+    platforms.filter((p) => isOnActivePage(p.pageId)).forEach((platform) => push(platform.id, { x: platform.x, y: platform.y, width: platform.width, height: platform.height }, platform.label || "站台"));
+    graphics.filter((g) => isOnActivePage(g.pageId)).forEach((graphic) => push(graphic.id, { x: graphic.x, y: graphic.y, width: graphic.width, height: graphic.height }, graphic.assetId ? (assets.find((a) => a.id === graphic.assetId)?.name || "图标") : "图形"));
+    labels.filter((l) => isOnActivePage(l.pageId)).forEach((label) => push(label.id, { x: label.x - 100, y: label.y - 48, width: 200, height: 96 }, label.text || "文字"));
+    backgroundImages.filter((b) => isOnActivePage(b.pageId)).forEach((image) => push(image.id, { x: image.x, y: image.y, width: image.naturalWidth * image.scale, height: image.naturalHeight * image.scale }, image.name || "背景图"));
+    return out;
+  }
+
+  /** 应用一次画布尺寸变更：快照 → 平移重定原点 → 丢弃画布外元件 → 写回页面。 */
+  function commitCanvasResize(
+    transform: CanvasResizeTransform,
+    options: { discardIds?: Set<string>; backgroundColor?: string; gridSize?: number; showGrid?: boolean; orientation?: "landscape" | "portrait"; flowMode?: CanvasFlowMode },
+  ) {
+    const page = activePage;
+    if (!page) return;
+    const { offsetX, offsetY } = transform;
+    history.captureSnapshot("调整画布");
+    if (offsetX || offsetY) translatePageObjects(offsetX, offsetY);
+    if (options.discardIds?.size) removeObjectsByIds(options.discardIds);
+    const nextViewport = { ...viewport, panX: viewport.panX - offsetX * viewport.scale, panY: viewport.panY - offsetY * viewport.scale };
+    const nextFlowMode = options.flowMode ?? "manual";
+    const nextPage = createCanvasPage({
+      ...page,
+      width: transform.width,
+      height: transform.height,
+      backgroundColor: options.backgroundColor ?? page.backgroundColor,
+      gridSize: options.gridSize ?? page.gridSize,
+      showGrid: options.showGrid ?? page.showGrid,
+      orientation: options.orientation ?? page.orientation,
+      flowMode: nextFlowMode,
+      baseWidth: transform.width,
+      baseHeight: transform.height,
+      viewport: nextViewport,
+    });
+    setViewport(nextViewport);
+    setShowGrid(nextPage.showGrid);
+    setPages((previous) => previous.map((p) => p.id === activePageId ? nextPage : p));
+    setHasUnsavedChanges(true);
+    setStatus(nextFlowMode === "infinite"
+      ? `已启用无限流：画布自动适应内容（${transform.width} × ${transform.height}）`
+      : `已调整画布为 ${transform.width} × ${transform.height}`);
+    setCanvasDraft((d) => d ? { ...d, width: transform.width, height: transform.height, flowMode: nextFlowMode, preset: "custom" } : d);
+    setPendingCanvasDiscard(null);
+  }
+
+  /** 画布选项卡"应用"：无限流切换模式并立即贴合内容；手动大小计算缩放变换，存在画布外元件则先询问。 */
+  function applyCanvasDraft() {
+    if (!activePage || !canvasDraft) return;
+    if (canvasDraft.flowMode === "infinite") {
+      // 从手动大小切回无限流：立即把过大的画布缩回恰好包裹元件（留白、取整到网格）。
+      const bounds = computePageContentBounds(true);
+      if (bounds) {
+        const gridSize = canvasDraft.gridSize ?? activePage.gridSize;
+        const transform = computeCanvasFitTransform({ ...activePage, gridSize }, bounds, Math.max(120, gridSize * 4));
+        commitCanvasResize(transform, {
+          backgroundColor: canvasDraft.backgroundColor,
+          gridSize: canvasDraft.gridSize,
+          showGrid: canvasDraft.showGrid,
+          orientation: canvasDraft.orientation,
+          flowMode: "infinite",
+        });
+        return;
+      }
+      // 画布为空：直接启用无限流，交由自动收缩缩回基准尺寸。
+      history.captureSnapshot("启用无限流");
+      setPages((previous) => previous.map((p) => p.id === activePageId ? createCanvasPage({
+        ...p, flowMode: "infinite",
+        gridSize: canvasDraft.gridSize, showGrid: canvasDraft.showGrid, backgroundColor: canvasDraft.backgroundColor,
+      }) : p));
+      setShowGrid(canvasDraft.showGrid);
+      setHasUnsavedChanges(true);
+      setStatus("已启用无限流：画布将自动适应内容");
+      return;
+    }
+    const transform = computeCanvasResizeTransform(activePage, canvasDraft.width, canvasDraft.height, canvasDraft.anchor);
+    const outside = collectOutsideObjectNames(transform.rect);
+    if (outside.length) {
+      setPendingCanvasDiscard({
+        width: transform.width,
+        height: transform.height,
+        anchor: canvasDraft.anchor,
+        ids: outside.map((item) => item.id),
+        names: outside.map((item) => item.name),
+      });
+      return;
+    }
+    commitCanvasResize(transform, {
+      discardIds: new Set(),
+      backgroundColor: canvasDraft.backgroundColor,
+      gridSize: canvasDraft.gridSize,
+      showGrid: canvasDraft.showGrid,
+      orientation: canvasDraft.orientation,
+    });
+  }
+
+  /** 适应内容：把画布调整到恰好包裹所有元件 + 留白。 */
+  function fitCanvasToContent() {
+    if (!activePage || !canvasDraft) return;
+    const bounds = computePageContentBounds(true);
+    if (!bounds) {
+      setStatus("画布内没有元件，无法适应内容");
+      return;
+    }
+    const transform = computeCanvasFitTransform(activePage, bounds, Math.max(120, activePage.gridSize * 4));
+    commitCanvasResize(transform, {
+      backgroundColor: canvasDraft.backgroundColor,
+      gridSize: canvasDraft.gridSize,
+      showGrid: canvasDraft.showGrid,
+      orientation: canvasDraft.orientation,
+    });
+    setCanvasDraft((d) => d ? { ...d, width: transform.width, height: transform.height, anchor: 0, preset: "custom", flowMode: "manual" } : d);
+  }
+
+  /** 用户确认放弃画布外元件后执行缩小。 */
+  function confirmDiscardCanvasResize() {
+    const pending = pendingCanvasDiscard;
+    if (!pending || !activePage || !canvasDraft) return;
+    const transform = computeCanvasResizeTransform(activePage, pending.width, pending.height, pending.anchor);
+    commitCanvasResize(transform, {
+      discardIds: new Set(pending.ids),
+      backgroundColor: canvasDraft.backgroundColor,
+      gridSize: canvasDraft.gridSize,
+      showGrid: canvasDraft.showGrid,
+      orientation: canvasDraft.orientation,
+    });
+  }
+
+  function openSettings() {
+    lastCanvasDraftPageRef.current = null;
+    setSettingsOpen(true);
+    setSettingsTab("general");
+  }
+
+  /** 画布选项卡进入时初始化草稿；同页内自动增长不覆盖用户编辑。 */
+  useEffect(() => {
+    if (settingsTab === "canvas") lastCanvasDraftPageRef.current = null;
+  }, [settingsTab]);
+  useEffect(() => {
+    if (!settingsOpen || settingsTab !== "canvas" || !activePage) return;
+    if (lastCanvasDraftPageRef.current === activePage.id) return;
+    lastCanvasDraftPageRef.current = activePage.id;
+    setCanvasDraft({
+      flowMode: activePage.flowMode ?? "infinite",
+      width: activePage.width,
+      height: activePage.height,
+      orientation: activePage.orientation,
+      gridSize: activePage.gridSize,
+      showGrid: activePage.showGrid,
+      backgroundColor: activePage.backgroundColor,
+      anchor: 4,
+      preset: "custom",
+    });
+  }, [settingsOpen, settingsTab, activePage, activePageId]);
+
+  /** 新建画布对话框打开时，把手动大小数值重置为当前画布尺寸；同次打开内用户的输入不被覆盖。 */
+  useEffect(() => {
+    if (newCanvasOpen) newCanvasInitPageRef.current = null;
+  }, [newCanvasOpen]);
+  useEffect(() => {
+    if (!newCanvasOpen || !activePage) return;
+    if (newCanvasInitPageRef.current === activePage.id) return;
+    newCanvasInitPageRef.current = activePage.id;
+    setNewCanvasDraft((prev) => prev ? {
+      ...prev,
+      width: activePage.width,
+      height: activePage.height,
+      orientation: activePage.width >= activePage.height ? "landscape" : "portrait",
+    } : prev);
+  }, [newCanvasOpen, activePage, activePageId]);
+
+  function applyDraftPreset(presetId: string) {
+    setCanvasDraft((prev) => {
+      if (!prev) return prev;
+      const preset = CANVAS_PRESETS.find((item) => item.id === presetId);
+      if (!preset) return { ...prev, preset: "custom" };
+      return { ...prev, preset: preset.id, width: preset.width, height: preset.height, orientation: preset.width >= preset.height ? "landscape" : "portrait" };
+    });
+  }
 
   function applyCanvasPreset(presetId: string) {
     const preset = CANVAS_PRESETS.find((item) => item.id === presetId);
@@ -4246,6 +4826,8 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
     connections,
     layers,
     platforms,
+    labels,
+    graphics,
     selectedIds,
     history,
     selectedConnection,
@@ -4300,6 +4882,7 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
     handleReplaceBackgroundInput,
     deleteBgImage,
     updateModule,
+    applyBatchParamUpdate,
     deleteSelected,
     updatePlatform,
     deletePlatform,
@@ -4314,6 +4897,9 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
     addSelectedModulesToGroup,
     deleteTransferGroup,
   };
+
+  /** 多选 ≥2 个对象时右侧面板整体切换为「批量设置」 */
+  const isBatchPanel = selectedIds.length >= 2;
 
   return (
     <div className="wiring-editor-shell" onContextMenu={handleContextMenu}>
@@ -4351,12 +4937,16 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
           <div className="wiring-toolbar-spacer" />
 
           <div className="wiring-toolbar-group">
+            <button className="wiring-btn" onClick={openSettings} title="打开设置：常规选项与画布大小调整">⚙ 设置</button>
             <PopoverMenu label="导入" icon="📥" items={importMenuItems} />
             <PopoverMenu label="导出" icon="📤" items={exportMenuItems} />
             <PopoverMenu label="筛选" icon="🔽" badge={activeFilterCount > 0 ? activeFilterCount : undefined} items={filterMenuItems} minWidth={220} />
           </div>
 
           <div className="wiring-toolbar-group">
+            <button className="wiring-btn" onClick={copySelection} disabled={!selectedIds.length} title="复制选中模块（带参数与所属对象）(Ctrl+C)">📋 复制</button>
+            <button className="wiring-btn" onClick={pasteClipboard} disabled={!clipboard} title="粘贴复制的模块（偏移 24px）(Ctrl+V)">📌 粘贴</button>
+            <button className="wiring-btn" onClick={duplicateSelection} disabled={!selectedIds.length} title="原位复制选中模块（带参数与所属对象）(Ctrl+D)">⧉ 原位复制</button>
             <button className="wiring-btn danger" onClick={deleteSelected} disabled={!selectedIds.length}>🗑 删除</button>
           </div>
         </div>
@@ -4385,17 +4975,13 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
           </div>
 
           <div className="wiring-toolbar-group">
-            <label className="wiring-check"><input type="checkbox" checked={advancedMode} onChange={(e) => { const enabled = e.target.checked; setAdvancedMode(enabled); if (!enabled) { setPlacementRotation(0); setPlacementMirrorX(false); setPlacementMirrorY(false); } }} />高级模式</label>
             <label className="wiring-check" title="控制辅助小字与站台类型文字（岛式/侧式/终点/折返等）的全局显示；不会修改各组件自己的设置"><input type="checkbox" checked={showAuxLabels} onChange={(e) => setShowAuxLabels(e.target.checked)} />辅助标识</label>
           </div>
 
           <div className="wiring-toolbar-group">
             <label className="wiring-check"><input type="checkbox" checked={showGrid} onChange={(e) => setShowGrid(e.target.checked)} />网格</label>
             <label className="wiring-check"><input type="checkbox" checked={snapEnabled} onChange={(e) => setSnapEnabled(e.target.checked)} />吸附</label>
-            <label className="wiring-check"><input type="checkbox" checked={autoConnect} onChange={(e) => setAutoConnect(e.target.checked)} />自动连接</label>
-            <label className="wiring-check" title="站名/图标与站台重叠时自动推开；关闭后可手动点击“避让一次”"><input type="checkbox" checked={autoAvoidance} onChange={(e) => setAutoAvoidance(e.target.checked)} />自动避让</label>
             <label className="wiring-check" title="连接标准上、下行端口时，同时创建另一条正线连接"><input type="checkbox" checked={doubleTrackConnect} onChange={(e) => setDoubleTrackConnect(e.target.checked)} />双线连接</label>
-            <label className="wiring-check"><input type="checkbox" checked={continuousPlace} onChange={(e) => setContinuousPlace(e.target.checked)} title="连续放置模式：选择模板后可多次点击放置" />连续放置</label>
           </div>
 
           <div className="wiring-toolbar-group">
@@ -4441,20 +5027,132 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
           <section className="wiring-dialog" role="dialog" aria-modal="true" aria-labelledby="new-canvas-title" onMouseDown={(event) => event.stopPropagation()}>
             <header><h2 id="new-canvas-title">新建画布</h2><button className="wiring-btn icon-only" onClick={() => setNewCanvasOpen(false)} title="关闭">×</button></header>
             <div className="wiring-dialog-grid">
-              <label>预设<select defaultValue="hd" onChange={(event) => applyCanvasPreset(event.target.value)}><option value="custom">自定义</option>{CANVAS_PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}</select></label>
+              <label>画布模式<div className="wiring-radio-row">
+                <label className="wiring-radio"><input type="radio" name="new-canvas-flow" checked={newCanvasDraft.flowMode === "infinite"} onChange={() => setNewCanvasDraft((prev) => ({ ...prev, flowMode: "infinite" }))} />无限流<span className="wiring-radio-hint">画布自动适应内容</span></label>
+                <label className="wiring-radio"><input type="radio" name="new-canvas-flow" checked={newCanvasDraft.flowMode === "manual"} onChange={() => setNewCanvasDraft((prev) => ({ ...prev, flowMode: "manual" }))} />手动大小</label>
+              </div></label>
+              {newCanvasDraft.flowMode === "manual" && (
+                <>
+                  <label>预设<select defaultValue="hd" onChange={(event) => applyCanvasPreset(event.target.value)}><option value="custom">自定义</option>{CANVAS_PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}</select></label>
+                  <label>宽度<input type="number" min={320} value={newCanvasDraft.width} onChange={(event) => setNewCanvasDraft((prev) => ({ ...prev, width: Number(event.target.value) }))} /></label>
+                  <label>高度<input type="number" min={320} value={newCanvasDraft.height} onChange={(event) => setNewCanvasDraft((prev) => ({ ...prev, height: Number(event.target.value) }))} /></label>
+                  <label>方向<select value={newCanvasDraft.orientation} onChange={(event) => setNewCanvasDraft((prev) => {
+                    const orientation = event.target.value as "landscape" | "portrait";
+                    const shouldSwap = (orientation === "landscape" && prev.width < prev.height) || (orientation === "portrait" && prev.width > prev.height);
+                    return { ...prev, orientation, ...(shouldSwap ? { width: prev.height, height: prev.width } : {}) };
+                  })}><option value="landscape">横向</option><option value="portrait">纵向</option></select></label>
+                </>
+              )}
               <label>画布名称<input value={newCanvasDraft.name} onChange={(event) => setNewCanvasDraft((prev) => ({ ...prev, name: event.target.value }))} /></label>
-              <label>宽度<input type="number" min={320} value={newCanvasDraft.width} onChange={(event) => setNewCanvasDraft((prev) => ({ ...prev, width: Number(event.target.value) }))} /></label>
-              <label>高度<input type="number" min={320} value={newCanvasDraft.height} onChange={(event) => setNewCanvasDraft((prev) => ({ ...prev, height: Number(event.target.value) }))} /></label>
               <label>背景色<input type="color" value={newCanvasDraft.backgroundColor} onChange={(event) => setNewCanvasDraft((prev) => ({ ...prev, backgroundColor: event.target.value }))} /></label>
-              <label>方向<select value={newCanvasDraft.orientation} onChange={(event) => setNewCanvasDraft((prev) => {
-                const orientation = event.target.value as "landscape" | "portrait";
-                const shouldSwap = (orientation === "landscape" && prev.width < prev.height) || (orientation === "portrait" && prev.width > prev.height);
-                return { ...prev, orientation, ...(shouldSwap ? { width: prev.height, height: prev.width } : {}) };
-              })}><option value="landscape">横向</option><option value="portrait">纵向</option></select></label>
               <label>网格间距<input type="number" min={5} value={newCanvasDraft.gridSize} onChange={(event) => setNewCanvasDraft((prev) => ({ ...prev, gridSize: Number(event.target.value) }))} /></label>
               <label className="wiring-check"><input type="checkbox" checked={newCanvasDraft.showGrid} onChange={(event) => setNewCanvasDraft((prev) => ({ ...prev, showGrid: event.target.checked }))} />显示网格</label>
             </div>
             <footer><button className="wiring-btn" onClick={() => setNewCanvasOpen(false)}>取消</button><button className="wiring-btn primary" onClick={createNewCanvas}>创建画布</button></footer>
+          </section>
+        </div>
+      )}
+
+      {/* ── 设置弹窗：左栏分类 + 右栏细则 ── */}
+      {settingsOpen && (
+        <div className="wiring-dialog-backdrop" role="presentation" onMouseDown={() => setSettingsOpen(false)}>
+          <section className="wiring-dialog wiring-settings-modal" role="dialog" aria-modal="true" aria-labelledby="wiring-settings-title" onMouseDown={(event) => event.stopPropagation()}>
+            <header><h2 id="wiring-settings-title">设置</h2><button className="wiring-btn icon-only" onClick={() => setSettingsOpen(false)} title="关闭">×</button></header>
+            <div className="wiring-settings-body">
+              <nav className="wiring-settings-categories">
+                <button className={settingsTab === "general" ? "active" : ""} onClick={() => setSettingsTab("general")}>常规</button>
+                <button className={settingsTab === "defaults" ? "active" : ""} onClick={() => setSettingsTab("defaults")}>默认</button>
+                <button className={settingsTab === "canvas" ? "active" : ""} onClick={() => setSettingsTab("canvas")}>画布</button>
+              </nav>
+              <div className="wiring-settings-detail">
+                {settingsTab === "general" ? (
+                  <div className="wiring-settings-section">
+                    <h3>常规</h3>
+                    <label className="wiring-check"><input type="checkbox" checked={advancedMode} onChange={(e) => { const enabled = e.target.checked; setAdvancedMode(enabled); if (!enabled) { setPlacementRotation(0); setPlacementMirrorX(false); setPlacementMirrorY(false); } }} />高级模式</label>
+                    <label className="wiring-check"><input type="checkbox" checked={autoConnect} onChange={(e) => setAutoConnect(e.target.checked)} />自动连接</label>
+                    <label className="wiring-check" title="站名/图标与站台重叠时自动推开；关闭后可手动点击“避让一次”"><input type="checkbox" checked={autoAvoidance} onChange={(e) => setAutoAvoidance(e.target.checked)} />自动避让</label>
+                    <label className="wiring-check"><input type="checkbox" checked={continuousPlace} onChange={(e) => setContinuousPlace(e.target.checked)} title="连续放置模式：选择模板后可多次点击放置" />连续放置</label>
+                    <label className="wiring-check" title="开启时吸附步长跟随当前画布的「网格间距」；关闭后按下方数值单独设置吸附步长"><input type="checkbox" checked={snapStep === 0} onChange={(e) => setSnapStep(e.target.checked ? 0 : 20)} />吸附跟随网格</label>
+                    <label title={snapStep === 0 ? "吸附步长跟随画布网格间距，跟随网格时不可编辑；点击可查看解锁提示" : "独立于网格间距的吸附步长"}>吸附间距
+                      <span className={`wiring-snap-field${snapStep === 0 ? " locked" : ""}`} onClick={snapStep === 0 ? showSnapLockHint : undefined}><input type="number" min={1} max={200} value={snapStep === 0 ? pageGridSize : snapStep} disabled={snapStep === 0} onChange={(e) => setSnapStep(Math.max(1, Math.round(Number(e.target.value)) || 20))} /></span>
+                      {snapLockHint && <span className="wiring-snap-field-hint">吸附间距跟随网格，取消勾选「吸附跟随网格」即可解锁编辑</span>}
+                    </label>
+                  </div>
+                ) : settingsTab === "defaults" ? (
+                  <div className="wiring-settings-section">
+                    <h3>默认放置</h3>
+                    <p style={{ fontSize: 10, color: "var(--muted)", margin: "4px 0 10px" }}>新放置的元件使用以下默认值；已放置的元件不受影响，可在属性面板的「模板参数」中单独调整。</p>
+                    <label>默认站台长度<input type="number" min={4} max={400} value={defaultPlatformLength} onChange={(e) => setDefaultPlatformLength(Math.max(4, Math.round(Number(e.target.value)) || 160))} /></label>
+                    <label>默认站台宽度<input type="number" min={4} max={40} value={defaultPlatformWidth} onChange={(e) => setDefaultPlatformWidth(Math.max(4, Math.round(Number(e.target.value)) || 16))} /></label>
+                    <label>默认线路间距<input type="number" min={10} max={128} value={defaultSpacing} onChange={(e) => setDefaultSpacing(Math.max(10, Math.round(Number(e.target.value)) || 40))} /></label>
+                  </div>
+                ) : canvasDraft ? (
+                  <div className="wiring-settings-section">
+                    <h3>画布</h3>
+                    <label>画布模式<div className="wiring-radio-row">
+                      <label className="wiring-radio"><input type="radio" name="settings-canvas-flow" checked={canvasDraft.flowMode === "infinite"} onChange={() => setCanvasDraft((prev) => prev ? { ...prev, flowMode: "infinite" } : prev)} />无限流<span className="wiring-radio-hint">无元件时自动缩小，元件放到画布外自动扩大</span></label>
+                      <label className="wiring-radio"><input type="radio" name="settings-canvas-flow" checked={canvasDraft.flowMode === "manual"} onChange={() => setCanvasDraft((prev) => prev ? { ...prev, flowMode: "manual" } : prev)} />手动大小</label>
+                    </div></label>
+                    {canvasDraft.flowMode === "manual" && (
+                      <>
+                        <label>预设<select value={canvasDraft.preset} onChange={(event) => applyDraftPreset(event.target.value)}><option value="custom">自定义</option>{CANVAS_PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}</select></label>
+                        <label>宽度<input type="number" min={320} value={canvasDraft.width} onChange={(event) => setCanvasDraft((prev) => prev ? { ...prev, width: Number(event.target.value), preset: "custom" } : prev)} /></label>
+                        <label>高度<input type="number" min={320} value={canvasDraft.height} onChange={(event) => setCanvasDraft((prev) => prev ? { ...prev, height: Number(event.target.value), preset: "custom" } : prev)} /></label>
+                        <label>方向<select value={canvasDraft.orientation} onChange={(event) => setCanvasDraft((prev) => prev ? { ...prev, orientation: event.target.value as "landscape" | "portrait" } : prev)}><option value="landscape">横向</option><option value="portrait">纵向</option></select></label>
+                        <div className="wiring-anchor-field">
+                          <span>锚点方向</span>
+                          <div className="wiring-anchor-grid">
+                            {canvasAnchorArrowGrid(canvasDraft.anchor).map((arrow, index) => (
+                              <button
+                                key={index}
+                                type="button"
+                                className={canvasDraft.anchor === index ? "selected" : ""}
+                                onClick={() => setCanvasDraft((prev) => prev ? { ...prev, anchor: index as CanvasAnchor } : prev)}
+                                title={`锚点：${CANVAS_ANCHOR_NAMES[index]}（${canvasAnchorDescription(index as CanvasAnchor)}）`}
+                              >{arrow}</button>
+                            ))}
+                          </div>
+                          <p className="wiring-anchor-hint">{canvasAnchorDescription(canvasDraft.anchor)}</p>
+                        </div>
+                        <button className="wiring-btn" onClick={fitCanvasToContent} title="把画布调整到恰好包裹所有元件并留白">适应内容</button>
+                      </>
+                    )}
+                    <label>网格间距<input type="number" min={5} value={canvasDraft.gridSize} onChange={(event) => setCanvasDraft((prev) => prev ? { ...prev, gridSize: Number(event.target.value) } : prev)} /></label>
+                    <label className="wiring-check"><input type="checkbox" checked={canvasDraft.showGrid} onChange={(event) => setCanvasDraft((prev) => prev ? { ...prev, showGrid: event.target.checked } : prev)} />显示网格</label>
+                    <label>背景色<input type="color" value={canvasDraft.backgroundColor} onChange={(event) => setCanvasDraft((prev) => prev ? { ...prev, backgroundColor: event.target.value } : prev)} /></label>
+                    <div className="wiring-settings-actions"><button className="wiring-btn primary" onClick={applyCanvasDraft}>应用</button></div>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {/* ── 缩小画布：确认放弃画布外元件 ── */}
+      {pendingCanvasDiscard && (
+        <div className="wiring-dialog-backdrop" role="presentation" onMouseDown={() => setPendingCanvasDiscard(null)}>
+          <section className="wiring-dialog wiring-discard-modal" role="dialog" aria-modal="true" aria-labelledby="wiring-discard-title" onMouseDown={(event) => event.stopPropagation()}>
+            <header><h2 id="wiring-discard-title">缩小画布</h2><button className="wiring-btn icon-only" onClick={() => setPendingCanvasDiscard(null)} title="关闭">×</button></header>
+            <p>新画布大小为 <b>{pendingCanvasDiscard.width} × {pendingCanvasDiscard.height}</b>，以下 {pendingCanvasDiscard.names.length} 个元件将完全位于画布之外：</p>
+            <ul className="wiring-discard-list">
+              {pendingCanvasDiscard.names.slice(0, 20).map((name, index) => <li key={index}>{name}</li>)}
+              {pendingCanvasDiscard.names.length > 20 && <li>…等 {pendingCanvasDiscard.names.length} 个</li>}
+            </ul>
+            <p className="wiring-discard-hint">放弃后将无法直接恢复（可通过撤销找回），请谨慎操作。</p>
+            <footer><button className="wiring-btn" onClick={() => setPendingCanvasDiscard(null)}>取消</button><button className="wiring-btn danger" onClick={confirmDiscardCanvasResize}>放弃并调整</button></footer>
+          </section>
+        </div>
+      )}
+
+      {/* ── 撤销/重做涉及画布尺寸：确认弹窗 ── */}
+      {pendingHistoryApply && (
+        <div className="wiring-dialog-backdrop" role="presentation" onMouseDown={() => setPendingHistoryApply(null)}>
+          <section className="wiring-dialog" role="dialog" aria-modal="true" aria-labelledby="wiring-history-title" onMouseDown={(event) => event.stopPropagation()}>
+            <header><h2 id="wiring-history-title">{pendingHistoryApply.kind === "undo" ? "撤销" : "重做"}</h2><button className="wiring-btn icon-only" onClick={() => setPendingHistoryApply(null)} title="关闭">×</button></header>
+            <p>将{pendingHistoryApply.kind === "undo" ? "撤销" : "重做"}「{pendingHistoryApply.opName}」，画布尺寸会变为 <b>{pendingHistoryApply.tgtW} × {pendingHistoryApply.tgtH}</b>（当前 {pendingHistoryApply.curW} × {pendingHistoryApply.curH}）。</p>
+            <p className="wiring-discard-hint">画布外的元件可能被裁掉，是否继续？</p>
+            <footer><button className="wiring-btn" onClick={() => setPendingHistoryApply(null)}>取消</button><button className="wiring-btn primary" onClick={confirmHistoryApply}>继续</button></footer>
           </section>
         </div>
       )}
@@ -4858,11 +5556,12 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
         {/* ── 右侧属性面板 ── */}
         <aside className="wiring-right-panel">
           <div className="wiring-right-header">
-            <h3>{selectedMod ? selectedMod.name : selectedPlatform ? "站台" : selectedGraphic ? (selectedGraphic.shapeType ? (SHAPE_META[selectedGraphic.shapeType]?.label || "图形") : "图标") : selectedLabel ? (selectedLabel.numeralType === "track" ? `股道编号` : selectedLabel.numeralType === "switch" ? `道岔编号` : `文字标签`) : selectedConnection ? `轨道连接` : selectedBgImage ? `背景图：${selectedBgImage.name}` : selectedTransferGroup ? `换乘组合` : placementTargetName ? "放置属性" : "属性面板"}</h3>
-            <p>{selectedMod ? `${selectedTemplate?.name || ""} · ${selectedMod.id.slice(-6)}` : selectedPlatform ? `${selectedPlatform.platformType} · ${selectedPlatform.id.slice(-6)}` : selectedGraphic ? (selectedGraphic.shapeType ? `${SHAPE_META[selectedGraphic.shapeType]?.label || "图形"} · ${selectedGraphic.id.slice(-6)}` : `${assets.find((asset) => asset.id === selectedGraphic.assetId)?.name || "资源缺失"} · ${selectedGraphic.id.slice(-6)}`) : selectedLabel ? `${selectedLabel.text.slice(0, 12)}${selectedLabel.text.length > 12 ? "…" : ""} · ${selectedLabel.id.slice(-6)}` : selectedConnection ? `${selectedConnection.crossingType === "plain" ? "平面交叉" : selectedConnection.crossingType === "gap" ? "断开" : "桥梁跨越"} · ${selectedConnection.id.slice(-6)}` : selectedBgImage ? `${selectedBgImage.naturalWidth}×${selectedBgImage.naturalHeight}` : selectedTransferGroup ? `${selectedTransferGroup.moduleIds.length} 个模块` : placementTargetName ? `下一次放置：${placementTargetName}` : "设置下一次放置的默认属性"}</p>
+            <h3>{isBatchPanel ? "批量设置" : selectedMod ? selectedMod.name : selectedPlatform ? "站台" : selectedGraphic ? (selectedGraphic.shapeType ? (SHAPE_META[selectedGraphic.shapeType]?.label || "图形") : "图标") : selectedLabel ? (selectedLabel.numeralType === "track" ? `股道编号` : selectedLabel.numeralType === "switch" ? `道岔编号` : `文字标签`) : selectedConnection ? `轨道连接` : selectedBgImage ? `背景图：${selectedBgImage.name}` : selectedTransferGroup ? `换乘组合` : placementTargetName ? "放置属性" : "属性面板"}</h3>
+            <p>{isBatchPanel ? `已选择 ${selectedIds.length} 个对象` : selectedMod ? `${selectedTemplate?.name || ""} · ${selectedMod.id.slice(-6)}` : selectedPlatform ? `${selectedPlatform.platformType} · ${selectedPlatform.id.slice(-6)}` : selectedGraphic ? (selectedGraphic.shapeType ? `${SHAPE_META[selectedGraphic.shapeType]?.label || "图形"} · ${selectedGraphic.id.slice(-6)}` : `${assets.find((asset) => asset.id === selectedGraphic.assetId)?.name || "资源缺失"} · ${selectedGraphic.id.slice(-6)}`) : selectedLabel ? `${selectedLabel.text.slice(0, 12)}${selectedLabel.text.length > 12 ? "…" : ""} · ${selectedLabel.id.slice(-6)}` : selectedConnection ? `${selectedConnection.crossingType === "plain" ? "平面交叉" : selectedConnection.crossingType === "gap" ? "断开" : "桥梁跨越"} · ${selectedConnection.id.slice(-6)}` : selectedBgImage ? `${selectedBgImage.naturalWidth}×${selectedBgImage.naturalHeight}` : selectedTransferGroup ? `${selectedTransferGroup.moduleIds.length} 个模块` : placementTargetName ? `下一次放置：${placementTargetName}` : "设置下一次放置的默认属性"}</p>
           </div>
           <div className="wiring-right-content">
-            {selectedConnection && !selectedMod && !selectedLabel ? <ConnectionInspector ctx={inspectorCtx} />
+            {isBatchPanel ? <BatchInspector ctx={inspectorCtx} />
+              : selectedConnection && !selectedMod && !selectedLabel ? <ConnectionInspector ctx={inspectorCtx} />
               : selectedBgImage && !selectedMod ? <BackgroundInspector ctx={inspectorCtx} />
               : selectedMod && selectedTemplate ? <ModuleInspector ctx={inspectorCtx} />
               : selectedPlatform ? <PlatformInspector ctx={inspectorCtx} />
