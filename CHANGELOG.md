@@ -1,5 +1,11 @@
 # 更新日志 / Changelog
 
+## 0.2.1（2026-08-20）
+
+### 修复
+
+- 修复点击配线图「筛选」弹出菜单导致空白页的问题：PopoverMenu 曾在列表回调里调用 `useState`（section 折叠状态），弹层开合改变 React hook 数量触发 "Rendered more hooks" 崩溃；已把 section 抽成独立组件。
+
 ## 0.2.0（2026-08-20）
 
 ### 新增
