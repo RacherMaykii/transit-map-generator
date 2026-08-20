@@ -77,8 +77,10 @@ test("renders the project portal", async () => {
   assert.match(html, /关于 \/ 关于本项目/);
   assert.match(html, /注意事项与免责声明/);
   assert.match(html, /完全免费/);
-  // v{APP_VERSION} 是「字面文本 + 表达式」边界，React 会在其间插入 <!-- --> 注释
-  assert.match(html, /v(?:<!-- -->)?0\.1\.0/);
+  // v{APP_VERSION} 是「字面文本 + 表达式」边界，React 会在其间插入 <!-- --> 注释；
+  // 版本号跟随 package.json，避免每次升版本都要手改断言
+  const pkgVersion = JSON.parse(await readFile(new URL("package.json", root), "utf8")).version;
+  assert.match(html, new RegExp(`v(?:<!-- -->)?${String(pkgVersion).replace(/\./g, "\\.")}`));
   // 顶部 Beta 提示条（初始渲染可见）
   assert.match(html, /本软件为 Beta 版本/);
   assert.match(html, /查看详情/);

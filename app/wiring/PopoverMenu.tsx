@@ -65,6 +65,32 @@ export interface PopoverMenuProps {
 
 // ── 组件 ────────────────────────────────────────
 
+/**
+ * section 作为独立组件渲染，让 useState 拥有自己的 hook 上下文。
+ * 不能在父组件的 .map(renderItem) 回调里直接调 useState：弹层关闭时不渲染该项（0 个 hook）、
+ * 打开时渲染（1 个 hook），连续渲染间 hook 数量变化会触发 "Rendered more hooks than during
+ * the previous render" 崩溃，导致整个编辑器空白页（.verify/probe-filter.mjs 复现）。
+ */
+function PopoverSectionItem({ item, renderItem }: { item: PopoverSection; renderItem: (item: PopoverMenuItem) => React.ReactNode }) {
+  const [expanded, setExpanded] = useState(item.defaultExpanded ?? false);
+  return (
+    <div className="popover-section">
+      <button
+        className="popover-section-header"
+        onClick={() => setExpanded((prev) => !prev)}
+      >
+        <span className={`popover-section-arrow ${expanded ? "open" : ""}`}>▸</span>
+        <span>{item.label}</span>
+      </button>
+      {expanded && (
+        <div className="popover-section-body">
+          {item.items.map(renderItem)}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function PopoverMenu({
   label,
   icon,
@@ -173,25 +199,8 @@ export default function PopoverMenu({
           </div>
         );
 
-      case "section": {
-        const [expanded, setExpanded] = useState(item.defaultExpanded ?? false);
-        return (
-          <div key={item.id} className="popover-section">
-            <button
-              className="popover-section-header"
-              onClick={() => setExpanded((prev) => !prev)}
-            >
-              <span className={`popover-section-arrow ${expanded ? "open" : ""}`}>▸</span>
-              <span>{item.label}</span>
-            </button>
-            {expanded && (
-              <div className="popover-section-body">
-                {item.items.map(renderItem)}
-              </div>
-            )}
-          </div>
-        );
-      }
+      case "section":
+        return <PopoverSectionItem key={item.id} item={item} renderItem={renderItem} />;
 
       default:
         return null;
