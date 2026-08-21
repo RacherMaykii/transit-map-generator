@@ -49,7 +49,7 @@ import {
 } from "./templates/yard";
 import { makeCustomizedTemplate } from "./templates/customize";
 
-export { makeCustomizedTemplate } from "./templates/customize";
+export { buildDoubleForkGeometry, legacyForkAngleToOpening, makeCustomizedTemplate } from "./templates/customize";
 
 // ── 模板注册表 ────────────────────────────────
 

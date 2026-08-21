@@ -14,7 +14,7 @@ import {
   computeLabelLocalBox,
   computePlatformBbox,
 } from "../labelAvoidance";
-import { CANVAS_ANCHORS, effectiveLayerOpacity, readableLabelRotation } from "../canvasLogic";
+import { CANVAS_ANCHORS, effectiveGraphicRadius, effectiveLayerOpacity, readableLabelRotation } from "../canvasLogic";
 import {
   buildPairedOffsetPathD,
   endpointsForConnection,
@@ -134,7 +134,9 @@ export interface RenderItemContext {
   handlePlatformMouseDown: (e: ReactMouseEvent, platform: PlatformObject) => void;
   handlePlatformResizeMouseDown: (e: ReactMouseEvent, platform: PlatformObject) => void;
   handleGraphicMouseDown: (e: ReactMouseEvent, graphic: AttachedGraphic) => void;
-  handleGraphicResizeMouseDown: (e: ReactMouseEvent, graphic: AttachedGraphic) => void;
+  /** 图形缩放：handleIndex 为九宫格手柄索引（0..8，4=中心），图标/信号机传 8（右下）。 */
+  handleGraphicResizeMouseDown: (e: ReactMouseEvent, graphic: AttachedGraphic, handleIndex: number) => void;
+  handleGraphicRadiusMouseDown: (e: ReactMouseEvent, graphic: AttachedGraphic) => void;
   updateGraphic: (id: string, patch: Partial<AttachedGraphic>, operationName?: string) => void;
   handleTransferGroupMouseDown: (e: ReactMouseEvent, group: TransferGroup) => void;
   handleTransferGroupDoubleClick: (e: ReactMouseEvent, group: TransferGroup) => void;
@@ -416,7 +418,7 @@ export interface RenderItemContext {
       const modTrackStyle = modColorSpec ? { "--track-stroke": modColorSpec.css } as CSSProperties : undefined;
       const moduleTrackColors = ctx.colorSpecs.trackColorSpecs.get(mod.id);
       const moduleTemplatePlatformSpecs = ctx.colorSpecs.templatePlatformColorSpecs.get(mod.id);
-      return <g key={`module-${mod.id}`} transform={`translate(${mod.x},${mod.y}) rotate(${mod.rotation} ${template.width / 2} ${template.height / 2})${moduleMirrorTransform(template.width, template.height, mod.mirrorX, mod.mirrorY)}`} className={`module-group ${isSelected ? "selected" : ""} ${sourceDeleted ? "source-deleted" : ""} ${mod.locked || ctx.isLayerLocked(mod.layerId) ? "locked" : ""}`} onMouseDown={(event) => ctx.handleModuleMouseDown(event, mod)} opacity={layerOpacity * filterOpacity}>
+      return <g key={`module-${mod.id}`} transform={`translate(${mod.x},${mod.y}) rotate(${mod.rotation} ${template.width / 2} ${template.height / 2})${moduleMirrorTransform(template.width, template.height, mod.mirrorX, mod.mirrorY)}`} className={`module-group ${isSelected ? "selected" : ""} ${sourceDeleted ? "source-deleted" : ""} ${mod.locked || ctx.isLayerLocked(mod.layerId) ? "locked" : ""}`} onMouseDown={(event) => ctx.handleModuleMouseDown(event, mod)} opacity={layerOpacity * filterOpacity * (mod.opacity ?? 1)}>
         {template.tracks.map((track, index) => {
           const perTrackColor = moduleTrackColors?.[index];
           const trackStyle = perTrackColor ? { "--track-stroke": perTrackColor } as CSSProperties : modTrackStyle;
@@ -491,7 +493,7 @@ export interface RenderItemContext {
       const effectiveText = label.language === "zh" && ownerMod?.customLabel ? ownerMod.customLabel : label.text;
       // 编号标注：text 存纯数字，渲染时加前缀（股道编号加"道"，道岔编号加"#"）
       const displayText = label.numeralType === "track" ? `${effectiveText}道` : label.numeralType === "switch" ? `#${effectiveText}` : effectiveText;
-      return <g key={`label-${label.id}`} transform={`translate(${label.x},${label.y}) rotate(${label.rotation})`} opacity={layerOpacity * filterOpacity}>
+      return <g key={`label-${label.id}`} transform={`translate(${label.x},${label.y}) rotate(${label.rotation})`} opacity={layerOpacity * filterOpacity * (label.opacity ?? 1)}>
         {label.backgroundEnabled && <rect className="label-background" x={localLabelBox.x - backgroundPadding} y={localLabelBox.y - backgroundPadding} width={localLabelBox.w + backgroundPadding * 2} height={localLabelBox.h + backgroundPadding * 2} rx={Math.min(4, backgroundPadding)} fill={label.backgroundColor || "#ffffff"} pointerEvents="none" />}
         <text data-numeral-type={label.numeralType ?? undefined} className={`independent-label ${isSelected ? "selected" : ""} ${label.locked || ctx.isLayerLocked(label.layerId) ? "locked" : ""}`} textAnchor={anchor.textAnchor} dominantBaseline={anchor.dominantBaseline} fontSize={label.fontSize} fontWeight={label.fontWeight} fill={labelFill} paintOrder={label.backgroundMask ? "stroke fill" : "normal"} stroke={label.backgroundMask ? (label.outlineColor || "#ffffff") : "none"} strokeWidth={label.backgroundMask ? label.maskStrokeWidth : 0} strokeLinejoin="round" onMouseDown={(event) => ctx.handleLabelMouseDown(event, label)} onDoubleClick={(event) => ctx.handleLabelDoubleClick(event, label)} style={{ cursor: label.locked || ctx.isLayerLocked(label.layerId) ? "default" : "move", userSelect: "none" }}>{displayText}</text>
         {isSelected && <circle className="label-anchor" cx={0} cy={0} r={2} fill="var(--accent)" stroke="white" strokeWidth={1} pointerEvents="none" />}
@@ -549,11 +551,30 @@ export interface RenderItemContext {
       return <g key={`graphic-${graphic.id}`} transform={`translate(${graphic.x},${graphic.y}) rotate(${graphic.rotation} ${graphic.width / 2} ${graphic.height / 2})${moduleMirrorTransform(graphic.width, graphic.height, graphic.mirrorX, graphic.mirrorY)}`} opacity={layerOpacity * filterOpacity * graphic.opacity} onMouseDown={(event) => ctx.handleGraphicMouseDown(event, graphic)} style={{ cursor: graphic.locked ? "default" : "move" }}>
         {graphic.shapeType ? (
           <g className="shape-graphic" data-shape-type={graphic.shapeType}>
-            <ShapeGraphic shapeType={graphic.shapeType} width={graphic.width} height={graphic.height} fill={graphic.fill} stroke={graphic.stroke} />
+            <ShapeGraphic shapeType={graphic.shapeType} width={graphic.width} height={graphic.height} fill={graphic.fill} stroke={graphic.stroke} radius={graphic.radius} strokeWidth={graphic.strokeWidth} />
           </g>
         ) : asset?.dataUrl ? <image href={asset.dataUrl} width={graphic.width} height={graphic.height} preserveAspectRatio="xMidYMid meet" /> : <rect width={graphic.width} height={graphic.height} fill="#f8d7da" stroke="#b42318" strokeDasharray="4 2" />}
         {isSelected && <rect className="selection-box" x={-4} y={-4} width={graphic.width + 8} height={graphic.height + 8} rx={4} />}
-        {isSelected && !graphic.locked && !ctx.isLayerLocked(graphic.layerId) && <rect className="object-resize-handle" x={graphic.width - 3} y={graphic.height - 3} width={6} height={6} onMouseDown={(event) => ctx.handleGraphicResizeMouseDown(event, graphic)} />}
+        {isSelected && !graphic.locked && !ctx.isLayerLocked(graphic.layerId) && (() => {
+          const isShape = !!graphic.shapeType && !graphic.shapeType.startsWith("signal-");
+          if (!isShape) {
+            // 图片图标 / 信号机：保持右下单手柄、等比缩放（锚点=左上，与旧行为一致）
+            return <rect className="object-resize-handle" x={graphic.width - 3} y={graphic.height - 3} width={6} height={6} onMouseDown={(event) => ctx.handleGraphicResizeMouseDown(event, graphic, 8)} />;
+          }
+          const CURSOR: Record<number, string> = { 0: "nwse", 1: "ns", 2: "nesw", 3: "ew", 5: "ew", 6: "nesw", 7: "ns", 8: "nwse" };
+          const handles = [0, 1, 2, 3, 5, 6, 7, 8].map((i) => {
+            const a = CANVAS_ANCHORS[i];
+            return (
+              <rect key={i} className={`graphic-resize-handle ${CURSOR[i]}`} x={a.fx * graphic.width - 3} y={a.fy * graphic.height - 3} width={6} height={6} onMouseDown={(event) => ctx.handleGraphicResizeMouseDown(event, graphic, i)} />
+            );
+          });
+          const effRadius = effectiveGraphicRadius(graphic.shapeType, graphic.width, graphic.height, graphic.radius);
+          // 圆角手柄位于本地顶边 (radius, 0)，后渲染置顶；r=0 时隐藏以免遮挡左上角缩放手柄
+          const radiusHandle = graphic.shapeType === "roundRect" && effRadius > 0 ? (
+            <rect className="graphic-radius-handle" x={effRadius - 3} y={-3} width={6} height={6} onMouseDown={(event) => ctx.handleGraphicRadiusMouseDown(event, graphic)} />
+          ) : null;
+          return <g>{handles}{radiusHandle}</g>;
+        })()}
         {/* 单独锁定的图形：在画布上直接显示解锁徽标（复用背景图解锁模式） */}
         {isSelected && graphic.locked && (
           <g

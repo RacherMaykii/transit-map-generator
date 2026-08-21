@@ -2,6 +2,7 @@
 
 import { type AttachedGraphic } from "../types";
 import { MirrorToggle } from "../ui/svgElements";
+import { effectiveGraphicRadius } from "../canvasLogic";
 import { type InspectorProps } from "./inspectorProps";
 
 export function GraphicInspector({ ctx }: InspectorProps) {
@@ -31,6 +32,10 @@ export function GraphicInspector({ ctx }: InspectorProps) {
           <h5>填充与描边</h5>
           <div className="wiring-prop-row"><label>填充</label><input type="color" value={selectedGraphic.fill || "#cce6f5"} onChange={(e) => updateGraphic(selectedGraphic.id, { fill: e.target.value })} /></div>
           <div className="wiring-prop-row"><label>描边</label><input type="color" value={selectedGraphic.stroke || "#202124"} onChange={(e) => updateGraphic(selectedGraphic.id, { stroke: e.target.value })} /></div>
+          <div className="wiring-prop-row"><label>描边粗细</label><input type="range" min={0.5} max={10} step={0.5} value={selectedGraphic.strokeWidth ?? 1.5} onChange={(e) => updateGraphic(selectedGraphic.id, { strokeWidth: Number(e.target.value) })} /></div>
+          {selectedGraphic.shapeType === "roundRect" && (
+            <div className="wiring-prop-row"><label>圆角</label><input type="range" min={0} max={Math.min(selectedGraphic.width, selectedGraphic.height) / 2} step={1} value={effectiveGraphicRadius(selectedGraphic.shapeType, selectedGraphic.width, selectedGraphic.height, selectedGraphic.radius)} onChange={(e) => updateGraphic(selectedGraphic.id, { radius: Number(e.target.value) })} /></div>
+          )}
         </div>
       )}
       <div className="wiring-prop-actions"><button onClick={() => updateGraphic(selectedGraphic.id, { locked: !selectedGraphic.locked })}>{selectedGraphic.locked ? "解锁" : "锁定"}</button><button className="danger" onClick={deleteSelected}>{selectedGraphic.shapeType ? "删除图形" : "删除图标"}</button></div>

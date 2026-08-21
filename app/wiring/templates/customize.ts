@@ -7,6 +7,160 @@ import { DOWN_MAIN_Y, UP_MAIN_Y, type ModulePort, type ModuleTemplate, type Temp
 
 // ── 动态模板工厂 ──────────────────────────────
 
+export type DoubleForkKind = "up" | "dn" | "y";
+
+/** 旧工程的角度参数换算为同等纵向开口幅度。 */
+export function legacyForkAngleToOpening(angle: number, length: number): number {
+  if (!Number.isFinite(angle) || !Number.isFinite(length) || length <= 0) return 0;
+  return Math.max(0, Math.round((length / 2) * Math.tan((angle * Math.PI) / 180)));
+}
+
+interface ParallelForkPair {
+  upperTrack: TemplateTrack;
+  lowerTrack: TemplateTrack;
+  upperPort: { x: number; y: number; direction: number };
+  lowerPort: { x: number; y: number; direction: number };
+}
+
+/**
+ * 构造一对保持真实间距的斜向双线。
+ *
+ * 过去两条斜轨共用同一个分叉 x，并在终点保持竖直间距 spacing；斜率越大，
+ * 两轨的法向距离会缩成 spacing*cos(angle)，视觉上像线路宽度被压窄。这里先
+ * 生成支线中心线，再沿法向各偏移 spacing/2。两条轨道因此始终平行且法向距离
+ * 恒为 spacing；它们与原水平正线的交点自然成为两个不同的动态分叉点。
+ */
+function buildParallelForkPair(
+  width: number,
+  divX: number,
+  inUp: number,
+  inDn: number,
+  signedOpening: number,
+  spacing: number,
+  alignEnds: boolean,
+): ParallelForkPair {
+  const centerY = (inUp + inDn) / 2;
+  const halfSpacing = spacing / 2;
+
+  // 对齐模式按画布纵向线距排布整对支线：两轨共用分叉 X 与输出 X，
+  // 起点、终点的垂直距离都严格等于 spacing。该模式允许整对支线移动，
+  // 避免用末端折线补齐后造成出口间距大于设置值。
+  if (alignEnds) {
+    const upperEnd = { x: width, y: centerY + signedOpening - halfSpacing };
+    const lowerEnd = { x: width, y: centerY + signedOpening + halfSpacing };
+    const direction = (Math.round(Math.atan2(signedOpening, width - divX) * 180 / Math.PI) % 360 + 360) % 360;
+    return {
+      upperTrack: { x1: divX, y1: inUp, x2: upperEnd.x, y2: upperEnd.y, type: "branch" },
+      lowerTrack: { x1: divX, y1: inDn, x2: lowerEnd.x, y2: lowerEnd.y, type: "branch" },
+      upperPort: { ...upperEnd, direction },
+      lowerPort: { ...lowerEnd, direction },
+    };
+  }
+
+  // 右端口沿斜线法向错开。迭代收回中心线终点，保证最外侧端口不超过 width。
+  let centerEndX = width;
+  for (let index = 0; index < 6; index += 1) {
+    const dx = Math.max(1, centerEndX - divX);
+    const length = Math.hypot(dx, signedOpening);
+    const normalX = -signedOpening / length;
+    centerEndX = width - Math.abs(normalX) * halfSpacing;
+  }
+
+  const dx = Math.max(1, centerEndX - divX);
+  const length = Math.hypot(dx, signedOpening);
+  const tangentX = dx / length;
+  const tangentY = signedOpening / length;
+  const normalX = -tangentY;
+  const normalY = tangentX;
+  const upperLinePoint = { x: divX - normalX * halfSpacing, y: centerY - normalY * halfSpacing };
+  const lowerLinePoint = { x: divX + normalX * halfSpacing, y: centerY + normalY * halfSpacing };
+  const branchXAtY = (linePoint: { x: number; y: number }, targetY: number) => {
+    if (Math.abs(tangentY) < 1e-6) return divX;
+    return linePoint.x + ((targetY - linePoint.y) * tangentX) / tangentY;
+  };
+  const upperStartX = branchXAtY(upperLinePoint, inUp);
+  const lowerStartX = branchXAtY(lowerLinePoint, inDn);
+  const naturalUpperEnd = { x: centerEndX - normalX * halfSpacing, y: centerY + signedOpening - normalY * halfSpacing };
+  const naturalLowerEnd = { x: centerEndX + normalX * halfSpacing, y: centerY + signedOpening + normalY * halfSpacing };
+  const direction = (Math.round(Math.atan2(tangentY, tangentX) * 180 / Math.PI) % 360 + 360) % 360;
+
+  return {
+    upperTrack: { x1: upperStartX, y1: inUp, x2: naturalUpperEnd.x, y2: naturalUpperEnd.y, type: "branch" },
+    lowerTrack: { x1: lowerStartX, y1: inDn, x2: naturalLowerEnd.x, y2: naturalLowerEnd.y, type: "branch" },
+    upperPort: { ...naturalUpperEnd, direction },
+    lowerPort: { ...naturalLowerEnd, direction },
+  };
+}
+
+/** 双线分叉的单一几何入口，静态模板与参数化模板共用。 */
+export function buildDoubleForkGeometry(
+  forkKind: DoubleForkKind,
+  width: number,
+  spacing: number,
+  requestedOpening: number,
+  alignEnds = false,
+): Pick<ModuleTemplate, "width" | "height" | "ports" | "tracks" | "labels"> {
+  const opening = Math.max(requestedOpening, forkKind === "y" ? spacing / 2 : spacing);
+  const inUp = forkKind === "y" ? 12 + spacing : forkKind === "up" ? 12 + spacing + 24 : 56 - spacing / 2;
+  const inDn = inUp + spacing;
+  const divX = Math.round(width / 2);
+  const upperPair = forkKind === "up" || forkKind === "y"
+    ? buildParallelForkPair(width, divX, inUp, inDn, -opening, spacing, alignEnds)
+    : null;
+  const lowerPair = forkKind === "dn" || forkKind === "y"
+    ? buildParallelForkPair(width, divX, inUp, inDn, opening, spacing, alignEnds)
+    : null;
+
+  let ports: ModulePort[];
+  let tracks: TemplateTrack[];
+  let labels: TemplateLabel[];
+  if (forkKind === "y") {
+    const upper = upperPair!;
+    const lower = lowerPair!;
+    const mainEndX = Math.max(upper.upperTrack.x1, upper.lowerTrack.x1, lower.upperTrack.x1, lower.lowerTrack.x1);
+    ports = [
+      { id: "L_up1", name: "左·上行", side: "left", role: "up_main", x: 0, y: inUp, direction: 180 },
+      { id: "L_dn1", name: "左·下行", side: "left", role: "down_main", x: 0, y: inDn, direction: 180 },
+      { id: "R_up1", name: "右·上支上行", side: "right", role: "up_main", ...upper.upperPort },
+      { id: "R_dn1", name: "右·上支下行", side: "right", role: "down_main", ...upper.lowerPort },
+      { id: "R_up2", name: "右·下支上行", side: "right", role: "up_main", ...lower.upperPort },
+      { id: "R_dn2", name: "右·下支下行", side: "right", role: "down_main", ...lower.lowerPort },
+    ];
+    tracks = [
+      { x1: 0, y1: inUp, x2: mainEndX, y2: inUp, type: "main" },
+      { x1: 0, y1: inDn, x2: mainEndX, y2: inDn, type: "main" },
+      upper.upperTrack,
+      upper.lowerTrack,
+      lower.upperTrack,
+      lower.lowerTrack,
+    ];
+    labels = [{ x: 40, y: 36, text: "Y形分叉", fontSize: 9, anchor: "middle", fill: "#6b7b85" }];
+  } else {
+    const pair = (forkKind === "up" ? upperPair : lowerPair)!;
+    ports = [
+      { id: "L_up1", name: "左·上行", side: "left", role: "up_main", x: 0, y: inUp, direction: 180 },
+      { id: "L_dn1", name: "左·下行", side: "left", role: "down_main", x: 0, y: inDn, direction: 180 },
+      { id: "R_up1", name: "右·直股上行", side: "right", role: "up_main", x: width, y: inUp, direction: 0 },
+      { id: "R_dn1", name: "右·直股下行", side: "right", role: "down_main", x: width, y: inDn, direction: 0 },
+      { id: "R_up2", name: "右·支线上行", side: "right", role: "up_main", ...pair.upperPort },
+      { id: "R_dn2", name: "右·支线下行", side: "right", role: "down_main", ...pair.lowerPort },
+    ];
+    tracks = [
+      { x1: 0, y1: inUp, x2: width, y2: inUp, type: "main" },
+      { x1: 0, y1: inDn, x2: width, y2: inDn, type: "main" },
+      pair.upperTrack,
+      pair.lowerTrack,
+    ];
+    labels = [forkKind === "up"
+      ? { x: 40, y: 30, text: "上分叉", fontSize: 9, anchor: "middle", fill: "#6b7b85" }
+      : { x: 40, y: 26, text: "下分叉", fontSize: 9, anchor: "middle", fill: "#6b7b85" }];
+  }
+
+  const ys = [...tracks.flatMap((track) => [track.y1, track.y2]), ...ports.map((port) => port.y)];
+  const minHeight = forkKind === "up" ? 128 : 144;
+  return { width, height: Math.max(minHeight, Math.max(...ys) + 12), ports, tracks, labels };
+}
+
 /**
  * 根据自定义参数生成模板变体。
  * 用于道岔等可调参数的模板 —— 根据 length、branchOffset、spacing 等
@@ -20,13 +174,16 @@ export function makeCustomizedTemplate(
   const hasLength = base.params?.some(pp => pp.key === "length");
   const hasSpacing = base.params?.some(pp => pp.key === "spacing");
   const hasBranchOffset = base.params?.some(pp => pp.key === "branchOffset");
-  const hasAngle = base.params?.some(pp => pp.key === "angle");
   const hasPlatformLength = base.params?.some(pp => pp.key === "platformLength");
   const hasPlatformWidth = base.params?.some(pp => pp.key === "platformWidth");
 
   const length = hasLength ? p("length") : base.width;
   const spacing = hasSpacing ? p("spacing") : (DOWN_MAIN_Y - UP_MAIN_Y);
-  const branchOffset = hasBranchOffset ? p("branchOffset") : 24;
+  const legacyAngle = customParams.angle;
+  const branchOffset = hasBranchOffset
+    ? customParams.branchOffset ?? (Number.isFinite(legacyAngle) ? legacyForkAngleToOpening(legacyAngle, length) : p("branchOffset"))
+    : 24;
+  const alignBranchEnds = customParams.alignBranchEnds === 1;
   const platformLength = hasPlatformLength ? p("platformLength") : (base.platforms[0]?.width ?? 0);
   const platformWidth = hasPlatformWidth ? p("platformWidth") : (base.platforms[0]?.height ?? 0);
   const upY = 56 - spacing / 2;
@@ -39,7 +196,7 @@ export function makeCustomizedTemplate(
   let platforms: TemplatePlatform[] = base.platforms;
   let width: number;
   let height: number;
-  // 分叉：开合角度只移动支线端口，直股/输入固定。为保持输入位置不变，分叉的几何
+  // 分叉：开口幅度只移动支线端口，直股/输入固定。为保持输入位置不变，分叉的几何
   // 自适应不做整体下移（除非内容顶出模板上沿），只按支线实际纵向范围扩高。
   let isFork = false;
 
@@ -347,77 +504,14 @@ export function makeCustomizedTemplate(
     case "double_fork_up":
     case "double_fork_dn":
     case "double_fork_y": {
-      width = length;
       isFork = true;
       const forkKind = base.id === "double_fork_up" ? "up" : base.id === "double_fork_dn" ? "dn" : "y";
-      // 开合角度 angle（度）→ 斜段纵向落差 k（支线对在输出端相对直股对的张开量）。
-      // 与道岔的「开口幅度」一致：分叉点固定在中点、直股/输入端口位置不动，只移动
-      // 支线输出端口；开大时支线超出原边界、模板随之变高。默认角（上 26.2 / 下 23.3 /
-      // Y 17.1）复现静态几何，故默认保持可对齐（输入端口 y 与角度无关）。
-      const angle = hasAngle ? p("angle") : forkKind === "up" ? 26.2 : forkKind === "dn" ? 23.3 : 17.1;
-      // 输入/直股锚点：不随开合角度移动（保证吸附对齐）。上分叉默认组间隙 24、
-      // 下分叉取标准位、Y 形居中，使默认几何与静态基准一致。
-      const inUp = forkKind === "y" ? 12 + spacing : forkKind === "up" ? 12 + spacing + 24 : 56 - spacing / 2;
-      const inDn = inUp + spacing;
-      // 斜段纵向落差 k = 开合角度对应的张开量；不得小于线间距（上/下分叉的支线对整组
-      // 在直股对上方/下方，两组之间不交叉、不重叠）。Y 形两分支之间留 ≥ spacing/2，
-      // 使上下两支刚好相触为最紧状态，避免两支互相穿越。
-      const k = Math.max(
-        Math.round((width / 2) * Math.tan((angle * Math.PI) / 180)),
-        forkKind === "y" ? spacing / 2 : spacing,
-      );
-      // 分叉点固定在中点。
-      const divX = Math.round(width / 2);
-      // 端口方向取斜段真实角度（k 可能被线间距下限夹住，方向必须与渲染斜轨一致）
-      const angleRise = (Math.round(Math.atan2(-k, width - divX) * 180 / Math.PI) % 360 + 360) % 360;
-      const angleFall = (Math.round(Math.atan2(k, width - divX) * 180 / Math.PI) % 360 + 360) % 360;
-      if (forkKind === "y") {
-        // Y 形：双线一进二出。上支整体上移 k、下支整体下移 k，各成一对双线斜出。
-        // 高度同时容纳上支顶部与下支底部（开大时两端一起变高）。
-        height = Math.max(inDn + k + 12, inUp - k + 12);
-        ports = [
-          { id: "L_up1", name: "左·上行", side: "left", role: "up_main", x: 0, y: inUp, direction: 180 },
-          { id: "L_dn1", name: "左·下行", side: "left", role: "down_main", x: 0, y: inDn, direction: 180 },
-          { id: "R_up1", name: "右·上支上行", side: "right", role: "up_main", x: width, y: inUp - k, direction: angleRise },
-          { id: "R_dn1", name: "右·上支下行", side: "right", role: "down_main", x: width, y: inDn - k, direction: angleRise },
-          { id: "R_up2", name: "右·下支上行", side: "right", role: "up_main", x: width, y: inUp + k, direction: angleFall },
-          { id: "R_dn2", name: "右·下支下行", side: "right", role: "down_main", x: width, y: inDn + k, direction: angleFall },
-        ];
-        tracks = [
-          { x1: 0, y1: inUp, x2: divX, y2: inUp, type: "main" },
-          { x1: 0, y1: inDn, x2: divX, y2: inDn, type: "main" },
-          { x1: divX, y1: inUp, x2: width, y2: inUp - k, type: "branch" },
-          { x1: divX, y1: inDn, x2: width, y2: inDn - k, type: "branch" },
-          { x1: divX, y1: inUp, x2: width, y2: inUp + k, type: "branch" },
-          { x1: divX, y1: inDn, x2: width, y2: inDn + k, type: "branch" },
-        ];
-        labels = [{ x: 40, y: 36, text: "Y形分叉", fontSize: 9, anchor: "middle", fill: "#6b7b85" }];
-      } else {
-        // 直股双线照常水平直行（输入锚点固定）；支线双线整体平移 k 与直股分开。
-        height = forkKind === "up" ? inDn + 12 : inDn + k + 12;
-        const branchUpY = forkKind === "up" ? inUp - k : inUp + k;
-        const branchDnY = forkKind === "up" ? inDn - k : inDn + k;
-        const angle = forkKind === "up" ? angleRise : angleFall;
-        ports = [
-          { id: "L_up1", name: "左·上行", side: "left", role: "up_main", x: 0, y: inUp, direction: 180 },
-          { id: "L_dn1", name: "左·下行", side: "left", role: "down_main", x: 0, y: inDn, direction: 180 },
-          { id: "R_up1", name: "右·直股上行", side: "right", role: "up_main", x: width, y: inUp, direction: 0 },
-          { id: "R_dn1", name: "右·直股下行", side: "right", role: "down_main", x: width, y: inDn, direction: 0 },
-          { id: "R_up2", name: "右·支线上行", side: "right", role: "up_main", x: width, y: branchUpY, direction: angle },
-          { id: "R_dn2", name: "右·支线下行", side: "right", role: "down_main", x: width, y: branchDnY, direction: angle },
-        ];
-        tracks = [
-          { x1: 0, y1: inUp, x2: width, y2: inUp, type: "main" },
-          { x1: 0, y1: inDn, x2: width, y2: inDn, type: "main" },
-          { x1: divX, y1: inUp, x2: width, y2: branchUpY, type: "branch" },
-          { x1: divX, y1: inDn, x2: width, y2: branchDnY, type: "branch" },
-        ];
-        labels = [
-          forkKind === "up"
-            ? { x: 40, y: 30, text: "上分叉", fontSize: 9, anchor: "middle", fill: "#6b7b85" }
-            : { x: 40, y: 26, text: "下分叉", fontSize: 9, anchor: "middle", fill: "#6b7b85" },
-        ];
-      }
+      const geometry = buildDoubleForkGeometry(forkKind, length, spacing, branchOffset, alignBranchEnds);
+      width = geometry.width;
+      height = geometry.height;
+      ports = geometry.ports;
+      tracks = geometry.tracks;
+      labels = geometry.labels;
       break;
     }
     // ── 兜底：返回原模板 ──────────────────────
@@ -437,7 +531,7 @@ export function makeCustomizedTemplate(
   const TOP_MARGIN = 12;
   const BOTTOM_MARGIN = 12;
   if (isFork) {
-    // 分叉：输入/直股位置由开合角度以外的参数决定，角度开大时只让支线外移、模板变高。
+    // 分叉：输入/直股位置由开口幅度以外的参数决定，开口增大时只让支线外移、模板变高。
     // 不做整体下移（否则输入会随角度移动，破坏吸附对齐），仅当支线真的顶出模板
     // 上沿（y<0，极端角度×大线距）才整体下移兜底；下沿用扩高保证可见。
     height = Math.max(height, maxY + BOTTOM_MARGIN);

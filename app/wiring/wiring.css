@@ -7,37 +7,56 @@
 
 /* ── 顶部工具栏 ── */
 .wiring-toolbar {
-  flex: 0 0 auto; display: flex; flex-direction: column; gap: 6px;
-  padding: 8px 18px; border-bottom: 1px solid var(--border); background: white;
-  box-shadow: 0 2px 8px rgba(20, 49, 63, .04);
+  flex: 0 0 auto; display: flex; flex-direction: column; gap: 7px;
+  padding: 8px 14px; border-bottom: 1px solid var(--border); background: rgba(255, 255, 255, .98);
+  box-shadow: 0 3px 12px rgba(20, 49, 63, .055);
   z-index: 10;
 }
-.wiring-toolbar-row { display: flex; align-items: center; gap: 6px; }
-.wiring-toolbar-group { display: flex; align-items: center; gap: 4px; }
-.wiring-toolbar-group + .wiring-toolbar-group { margin-left: 4px; padding-left: 8px; border-left: 1px solid var(--border); }
+.wiring-toolbar-row { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.wiring-toolbar-primary-row { min-height: 38px; }
+.wiring-toolbar-secondary-row { min-height: 34px; padding-top: 6px; border-top: 1px solid #edf2f4; }
+.wiring-toolbar-group { display: flex; align-items: center; gap: 5px; min-width: 0; }
+.wiring-toolbar-group + .wiring-toolbar-group { margin-left: 1px; padding-left: 8px; border-left: 1px solid var(--border); }
+.wiring-toolbar-group-label {
+  flex: 0 0 auto; color: #85959d; font-size: 9px; font-weight: 800; letter-spacing: .08em;
+  writing-mode: vertical-rl; text-orientation: upright; line-height: 1;
+}
 .wiring-toolbar-hidden-inputs { display: none; }
-.wiring-toolbar .brand-mark { width: 32px; height: 32px; border-radius: 9px; }
-.wiring-toolbar-title { display: flex; flex-direction: column; gap: 1px; margin-right: 8px; }
-.wiring-toolbar-title h1 { margin: 0; font-size: 15px; letter-spacing: -.01em; }
+.wiring-toolbar .brand-mark { width: 34px; height: 34px; border-radius: 10px; box-shadow: 0 3px 8px rgba(8, 127, 164, .12); }
+.wiring-toolbar-title { display: flex; flex-direction: column; gap: 1px; margin-right: 4px; min-width: 72px; }
+.wiring-toolbar-title h1 { margin: 0; font-size: 15px; letter-spacing: -.02em; line-height: 1.1; }
 .wiring-toolbar-title p { margin: 0; color: var(--muted); font-size: 10px; }
+.wiring-toolbar-brand { flex: 0 0 auto; }
+.wiring-toolbar-project { flex: 0 1 auto; }
+.wiring-toolbar-edit { flex: 0 1 auto; }
+.wiring-toolbar-file { flex: 0 0 auto; }
 
 .wiring-btn {
-  min-height: 34px; padding: 0 11px; display: inline-flex; align-items: center; gap: 5px;
+  min-height: 34px; padding: 0 10px; display: inline-flex; align-items: center; justify-content: center; gap: 5px;
   border-radius: 8px; background: white; border: 1px solid var(--border);
   font-size: 12px; font-weight: 700; color: var(--ink); cursor: pointer; white-space: nowrap;
-  transition: border-color .15s ease, background .15s ease, color .15s ease;
+  transition: border-color .15s ease, background .15s ease, color .15s ease, box-shadow .15s ease, transform .15s ease;
 }
-.wiring-btn:hover { border-color: var(--accent); background: #f5fcfe; }
+.wiring-btn:hover:not(:disabled) { border-color: var(--accent); background: #f5fcfe; box-shadow: 0 2px 7px rgba(8, 127, 164, .08); }
+.wiring-btn:active:not(:disabled) { transform: translateY(1px); }
 .wiring-btn.active { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-strong); box-shadow: inset 0 0 0 1px var(--accent); }
 .wiring-btn.primary { background: var(--accent); color: white; border-color: var(--accent); box-shadow: 0 3px 10px rgba(8, 127, 164, .18); }
 .wiring-btn.primary:hover { background: var(--accent-strong); }
 .wiring-btn.danger { color: #a63838; border-color: #f0c6c6; background: #fff5f5; }
 .wiring-btn.icon-only { width: 34px; padding: 0; justify-content: center; font-size: 16px; }
-.wiring-btn:disabled { opacity: .4; cursor: not-allowed; }
+.wiring-btn:disabled { opacity: .34; cursor: not-allowed; filter: saturate(.55); }
+.wiring-btn-icon { display: inline-grid; min-width: 15px; place-items: center; color: currentColor; font-size: 14px; font-weight: 800; line-height: 1; }
+.wiring-btn-label { min-width: 0; }
+.wiring-one-to-one { font-size: 9px; letter-spacing: -.06em; }
+.wiring-command-btn { min-width: 34px; }
 .wiring-btn-sep { width: 1px; height: 22px; background: var(--border); margin: 0 3px; }
-.wiring-tutorial-btn {
+.wiring-save-btn { position: relative; min-width: 72px; }
+.wiring-save-indicator { width: 7px; height: 7px; border-radius: 50%; background: rgba(255, 255, 255, .78); box-shadow: 0 0 0 2px rgba(255, 255, 255, .18); }
+.wiring-save-btn.dirty .wiring-save-indicator { background: #ffd467; }
+.wiring-btn.wiring-tutorial-btn {
   font-weight: 800; font-size: 15px; color: var(--accent); border-color: var(--accent);
-  border-radius: 50%; width: 30px; height: 30px; min-height: 30px; padding: 0;
+  border-radius: 50%; width: 30px; min-width: 30px; height: 30px; min-height: 30px; padding: 0;
+  display: inline-grid; place-items: center; line-height: 1; aspect-ratio: 1;
 }
 .wiring-tutorial-btn:hover {
   background: var(--accent); color: white;
@@ -88,17 +107,41 @@
 .wiring-first-use-warning span { color: #d9272e; }
 .wiring-first-use-body ul { margin: 0; padding-left: 20px; line-height: 1.8; }
 
-.wiring-toolbar-spacer { flex: 1; }
+.wiring-toolbar-spacer { flex: 1 1 20px; min-width: 4px; }
 .wiring-toolbar-info { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); }
 .wiring-toolbar-info select { min-height: 30px; font-size: 12px; border-radius: 7px; }
-.wiring-page-select, .wiring-export-select { max-width: 132px; min-height: 30px; padding: 0 7px; border: 1px solid var(--border); border-radius: 7px; background: white; color: var(--ink); font-size: 11px; }
+.wiring-page-select, .wiring-export-select { width: 112px; max-width: 132px; min-height: 32px; padding: 0 24px 0 8px; border: 1px solid var(--border); border-radius: 7px; background: white; color: var(--ink); font-size: 11px; font-weight: 650; }
 
-.wiring-segmented { display: inline-flex; padding: 3px; border: 1px solid var(--border); background: #edf2f4; border-radius: 8px; }
-.wiring-segmented button { min-height: 28px; padding: 0 10px; background: transparent; border-radius: 6px; font-size: 12px; font-weight: 700; color: var(--muted); cursor: pointer; border: 0; }
-.wiring-segmented button.active { background: white; color: var(--accent-strong); box-shadow: 0 1px 4px rgba(20, 49, 63, .12); }
+.wiring-segmented { display: inline-flex; padding: 3px; border: 1px solid var(--border); background: #edf2f4; border-radius: 9px; }
+.wiring-segmented button { min-height: 28px; padding: 0 9px; display: inline-flex; align-items: center; gap: 4px; background: transparent; border-radius: 6px; font-size: 12px; font-weight: 700; color: var(--muted); cursor: pointer; border: 0; }
+.wiring-segmented button > span { min-width: 13px; font-size: 11px; font-weight: 800; }
+.wiring-segmented button:hover { color: var(--ink); background: rgba(255, 255, 255, .55); }
+.wiring-segmented button.active { background: white; color: var(--accent-strong); box-shadow: 0 1px 5px rgba(20, 49, 63, .14); }
+.wiring-toolbar-context { padding: 3px 5px !important; border: 1px solid #e4ebee !important; border-radius: 9px; background: #f8fafb; }
+.wiring-context-btn { min-height: 28px; padding-inline: 8px; background: transparent; border-color: transparent; box-shadow: none; }
+.wiring-transfer-icon { position: relative; width: 20px; height: 15px; display: inline-block; flex: 0 0 auto; }
+.wiring-transfer-icon i { position: absolute; top: 3px; width: 8px; height: 8px; border: 2px solid currentColor; border-radius: 50%; background: white; z-index: 1; }
+.wiring-transfer-icon i:first-child { left: 0; }
+.wiring-transfer-icon i:nth-child(2) { right: 0; }
+.wiring-transfer-icon b { position: absolute; left: 6px; right: 6px; top: 7px; height: 2px; border-radius: 99px; background: currentColor; }
+.wiring-context-btn:disabled .wiring-transfer-icon i { background: #f8fafb; }
+.wiring-toolbar-assists { padding: 3px 5px !important; border: 1px solid #e4ebee !important; border-radius: 9px; background: #f8fafb; }
+.wiring-toolbar-view .wiring-btn { min-height: 30px; }
+.wiring-view-btn { align-items: center; }
+.wiring-view-btn .wiring-btn-icon {
+  width: 16px; min-width: 16px; height: 16px;
+  display: inline-grid; place-items: center; align-self: center; line-height: 1;
+}
+.wiring-view-btn .wiring-view-icon svg {
+  display: block; width: 16px; height: 16px; overflow: visible;
+  fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round;
+}
+.wiring-view-btn .wiring-one-to-one { padding-top: 0; font-size: 9px; line-height: 16px; }
 
 .wiring-check { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); white-space: nowrap; cursor: pointer; }
 .wiring-check input { accent-color: var(--accent); width: 14px; height: 14px; }
+.wiring-toolbar-toggle { min-height: 28px; padding: 0 6px; border-radius: 6px; }
+.wiring-toolbar-toggle:hover { background: white; color: var(--ink); }
 
 .wiring-placement-rotation { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; }
 .wiring-placement-rotation-panel { display: flex; flex-direction: column; align-items: center; padding-top: 8px; }
@@ -394,16 +437,52 @@
 .wiring-prop-row > input[type="number"] { font-family: Consolas, monospace; }
 .wiring-param-slider { grid-template-columns: 64px 1fr 48px; gap: 8px; align-items: center; }
 .wiring-param-slider input[type="range"] { width: 100%; accent-color: var(--accent, #087FA4); }
+.wiring-param-toggle { justify-content: space-between; align-items: center; gap: 12px; padding: 8px 0; }
+.wiring-param-toggle > span { display: grid; gap: 2px; }
+.wiring-param-toggle small { color: var(--muted); font-size: 10px; font-weight: 400; line-height: 1.35; }
 .wiring-param-value { font-size: 11px; color: var(--muted); text-align: right; min-width: 40px; }
 
 /* ── 框选批量设置面板 ── */
-.wiring-batch-stats { margin: 0 0 10px; font-size: 12px; font-weight: 700; color: var(--ink); }
-.wiring-batch-hint { margin: 0; padding: 8px 10px; font-size: 11px; color: var(--muted); background: #f3f6f8; border: 1px dashed #cfd9de; border-radius: 7px; line-height: 1.5; }
-.wiring-batch-category-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
-.wiring-batch-category-chips button { position: relative; padding: 6px 10px; border: 1px solid var(--border); border-radius: 99px; font-size: 12px; font-weight: 700; color: var(--ink); background: white; cursor: pointer; }
-.wiring-batch-category-chips button:hover { border-color: var(--accent, #087FA4); color: var(--accent, #087FA4); }
-.wiring-batch-category-chips button.active { background: var(--accent, #087FA4); border-color: var(--accent, #087FA4); color: #fff; }
-.wiring-batch-category-chips button small { margin-left: 4px; font-size: 10px; font-weight: 800; color: inherit; opacity: .75; }
+.wiring-batch-panel { display: grid; gap: 11px; padding-bottom: 8px; }
+.wiring-batch-summary { overflow: hidden; border: 1px solid #dbe7eb; border-radius: 10px; background: white; }
+.wiring-batch-summary > div { display: flex; align-items: baseline; gap: 7px; padding: 11px 12px 8px; background: linear-gradient(135deg, #f1fafc 0%, #fff 100%); }
+.wiring-batch-summary > div b { color: var(--accent-strong); font-size: 22px; line-height: 1; }
+.wiring-batch-summary > div span { color: var(--ink); font-size: 11px; font-weight: 800; }
+.wiring-batch-summary ul { display: flex; flex-wrap: wrap; gap: 5px; margin: 0; padding: 0 10px 10px; list-style: none; }
+.wiring-batch-summary li { padding: 3px 6px; border-radius: 5px; background: #f0f4f6; color: #667982; font-size: 9px; }
+.wiring-batch-summary li b { color: var(--ink); font-size: 10px; }
+.wiring-batch-scope, .wiring-batch-parameters { overflow: hidden; border: 1px solid #dbe5e9; border-radius: 10px; background: white; }
+.wiring-batch-scope > header, .wiring-batch-parameters > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 10px; border-bottom: 1px solid #edf2f4; background: #f8fafb; }
+.wiring-batch-scope > header div, .wiring-batch-parameters > header div { min-width: 0; display: grid; gap: 2px; }
+.wiring-batch-scope > header b, .wiring-batch-parameters > header b { color: var(--ink); font-size: 11px; }
+.wiring-batch-scope > header span, .wiring-batch-parameters > header span { color: var(--muted); font-size: 8px; line-height: 1.45; }
+.wiring-batch-parameters > header em { flex: 0 0 auto; padding: 3px 6px; border-radius: 99px; background: var(--accent-soft); color: var(--accent-strong); font-size: 8px; font-style: normal; font-weight: 800; }
+.wiring-batch-category-chips { display: grid; gap: 5px; padding: 8px; }
+.wiring-batch-category-chips button { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 32px; padding: 5px 7px 5px 9px; border: 1px solid transparent; border-radius: 7px; font-size: 10px; font-weight: 750; color: var(--ink); background: transparent; cursor: pointer; text-align: left; }
+.wiring-batch-category-chips button:hover { border-color: #d8e5e9; background: #f8fbfc; }
+.wiring-batch-category-chips button.active { border-color: #8fd4e6; background: #eef9fc; color: var(--accent-strong); box-shadow: inset 3px 0 0 var(--accent); }
+.wiring-batch-category-chips button small { min-width: 20px; height: 20px; display: grid; place-items: center; border-radius: 99px; background: #e9eff1; color: #657881; font-size: 8px; font-weight: 850; }
+.wiring-batch-category-chips button.active small { background: white; color: var(--accent-strong); }
+.wiring-batch-object-note { margin: 0; padding: 8px 9px; border-left: 3px solid #e2a91b; border-radius: 0 7px 7px 0; background: #fffaf0; color: #765f27; font-size: 9px; line-height: 1.55; }
+.wiring-batch-param-row { display: grid; gap: 6px; padding: 10px; border-bottom: 1px solid #edf2f4; }
+.wiring-batch-param-row:last-child { border-bottom: 0; }
+.wiring-batch-param-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.wiring-batch-param-heading label { color: var(--ink); font-size: 10px; font-weight: 800; }
+.wiring-batch-param-heading span { padding: 2px 6px; border-radius: 4px; background: #edf3f5; color: #546a74; font-size: 9px; font-weight: 800; }
+.wiring-batch-param-control { display: grid; grid-template-columns: minmax(0, 1fr) 58px; gap: 7px; align-items: center; }
+.wiring-batch-param-control input[type="range"] { width: 100%; accent-color: var(--accent); }
+.wiring-batch-param-select { width: 100%; min-height: 34px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 7px; background: #fff; color: var(--ink); }
+.wiring-batch-param-number { width: 58px; min-height: 28px; padding: 0 5px; border: 1px solid var(--border); border-radius: 6px; background: white; color: var(--ink); font-size: 10px; text-align: right; }
+.wiring-batch-param-number:focus { outline: 2px solid rgba(8,127,164,.14); border-color: var(--accent); }
+.wiring-batch-param-row > small { color: #8a9aa2; font-size: 8px; }
+.wiring-batch-empty { display: flex; align-items: flex-start; gap: 8px; padding: 10px; border: 1px dashed #cbd9de; border-radius: 9px; background: #f7fafb; }
+.wiring-batch-empty > span { width: 20px; height: 20px; display: grid; flex: 0 0 auto; place-items: center; border-radius: 50%; background: #e6f5f9; color: var(--accent); font-size: 9px; font-weight: 900; }
+.wiring-batch-empty > div { display: grid; gap: 2px; }
+.wiring-batch-empty b { color: var(--ink); font-size: 10px; }
+.wiring-batch-empty p { margin: 0; color: var(--muted); font-size: 9px; line-height: 1.5; }
+.wiring-batch-empty.compact { padding: 8px; }
+.wiring-batch-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding-top: 3px; }
+.wiring-batch-actions .wiring-btn { width: 100%; min-height: 31px; }
 .wiring-prop-color { display: flex; align-items: center; gap: 6px; }
 .wiring-prop-color input[type="color"] { width: 34px; height: 32px; padding: 3px; border: 1px solid var(--border); border-radius: 7px; background: white; }
 .wiring-prop-color input[type="text"] { flex: 1; min-height: 32px; padding: 0 8px; border: 1px solid var(--border); border-radius: 7px; font-family: Consolas, monospace; font-size: 11px; }
@@ -509,6 +588,14 @@
 .wiring-svg .independent-platform.selected { stroke: var(--accent); stroke-width: 2; }
 .wiring-svg .object-resize-handle { fill: #087fa4; stroke: #fff; stroke-width: 1; cursor: nwse-resize; }
 .wiring-svg .object-resize-handle:hover { fill: #055d7b; }
+.wiring-svg .graphic-resize-handle { fill: #087fa4; stroke: #fff; stroke-width: 1; }
+.wiring-svg .graphic-resize-handle.nwse { cursor: nwse-resize; }
+.wiring-svg .graphic-resize-handle.nesw { cursor: nesw-resize; }
+.wiring-svg .graphic-resize-handle.ns { cursor: ns-resize; }
+.wiring-svg .graphic-resize-handle.ew { cursor: ew-resize; }
+.wiring-svg .graphic-resize-handle:hover { fill: #055d7b; }
+.wiring-svg .graphic-radius-handle { fill: #7b2dbf; stroke: #fff; stroke-width: 1; cursor: ew-resize; }
+.wiring-svg .graphic-radius-handle:hover { fill: #5b1d8f; }
 .wiring-pending-tray,.wiring-change-panel { border: 1px solid var(--border); background: #f7fbfc; padding: 8px; margin: 0 0 10px; border-radius: 6px; display: grid; gap: 6px; font-size: 12px; }
 .wiring-pending-tray > span { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 5px; align-items: center; padding-top: 6px; border-top: 1px solid #e3eaed; }
 .wiring-pending-tray > span > span { grid-column: 1 / -1; min-width: 0; display: grid; gap: 2px; }
@@ -518,6 +605,20 @@
 .wiring-change-row { padding: 5px 0; border-top: 1px solid #e3eaed; flex-wrap: wrap; }
 .wiring-change-row.error { color: #a23333; }.wiring-change-row.warning { color: #8b6514; }
 .wiring-change-row button { font-size: 11px; border: 1px solid var(--border); background: white; border-radius: 3px; padding: 2px 5px; }
+.wiring-physical-mapping-panel { padding: 0; overflow: hidden; }
+.wiring-physical-mapping-toggle {
+  width: 100%; min-height: 34px; padding: 7px 9px; display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto; align-items: center; gap: 5px;
+  border: 0; background: transparent; color: var(--ink); text-align: left; cursor: pointer;
+}
+.wiring-physical-mapping-toggle:hover { background: #edf8fb; }
+.wiring-physical-mapping-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.wiring-physical-mapping-toggle b { font-size: 11px; }
+.wiring-physical-mapping-toggle small { color: var(--muted); font-size: 10px; font-weight: 700; }
+.wiring-physical-mapping-arrow { display: grid; place-items: center; color: var(--accent-strong); line-height: 1; transition: transform .15s ease; }
+.wiring-physical-mapping-panel.open .wiring-physical-mapping-arrow { transform: rotate(90deg); }
+.wiring-physical-mapping-list { padding: 0 9px 4px; border-top: 1px solid #e3eaed; }
+.wiring-physical-mapping-list .wiring-change-row:first-child { border-top: 0; }
 .wiring-change-notes { flex: 1 0 100%; margin: 2px 0 0; color: #8b6514; font-size: 11px; }
 .wiring-svg .label-anchor { pointer-events: none; }
 
@@ -570,40 +671,165 @@
 
 /* ── 响应式 ── */
 @media (max-width: 1280px) {
-  .wiring-body { grid-template-columns: 220px 1fr 240px; }
+  .wiring-body { grid-template-columns: 220px minmax(0, 1fr) 280px; }
+  .wiring-toolbar-title p { display: none; }
+  .wiring-toolbar-title { min-width: 56px; }
+  .wiring-toolbar-edit .wiring-btn-label,
+  .wiring-toolbar-view .wiring-btn-label { display: none; }
+  .wiring-toolbar-edit .wiring-command-btn,
+  .wiring-toolbar-view .wiring-view-btn { width: 34px; padding-inline: 0; }
 }
 @media (max-width: 1024px) {
-  .wiring-body { grid-template-columns: 200px 1fr 220px; }
-  .wiring-toolbar { padding: 8px 12px; gap: 4px; }
-  .wiring-toolbar-group + .wiring-toolbar-group { padding-left: 4px; margin-left: 2px; }
+  .wiring-body { grid-template-columns: 190px minmax(0, 1fr) 280px; }
+  .wiring-toolbar { padding: 7px 10px; gap: 5px; }
+  .wiring-toolbar-group + .wiring-toolbar-group { padding-left: 5px; margin-left: 0; }
+  .wiring-toolbar-brand .wiring-toolbar-title,
+  .wiring-toolbar-group-label { display: none; }
+  .wiring-toolbar-project > .wiring-btn .wiring-btn-label,
+  .wiring-compact-label .wiring-btn-label,
+  .wiring-toolbar-file .popover-trigger > span:nth-child(2) { display: none; }
+  .wiring-toolbar-project > .wiring-btn,
+  .wiring-compact-label,
+  .wiring-toolbar-file .popover-trigger { width: 34px; padding-inline: 0; }
+  .wiring-page-select { width: 96px; }
+  .wiring-segmented button { padding-inline: 7px; }
+  .wiring-right-content { padding-inline: 12px; }
+  .wiring-prop-row { grid-template-columns: 1fr; gap: 4px; }
 }
 @media (max-width: 860px) {
   .wiring-body { grid-template-columns: 1fr; }
   .wiring-left-panel, .wiring-right-panel { display: none; }
-  .wiring-toolbar { display: grid; grid-template-columns: minmax(0, 1fr); max-height: 228px; overflow-y: auto; align-items: stretch; padding: 7px 8px; }
-  .wiring-toolbar-group { width: 100%; max-width: 100%; overflow-x: auto; overflow-y: hidden; flex-wrap: nowrap; padding-bottom: 2px; scrollbar-width: thin; }
+  .wiring-toolbar { max-height: none; overflow: visible; align-items: stretch; padding: 7px 8px; }
+  .wiring-toolbar-row { flex-wrap: wrap; gap: 5px; }
   .wiring-toolbar-group + .wiring-toolbar-group { margin-left: 0; padding-left: 0; border-left: 0; }
   .wiring-toolbar-spacer { display: none; }
+  .wiring-toolbar-brand { display: none; }
+  .wiring-toolbar-project { order: 1; }
+  .wiring-toolbar-edit { order: 3; width: 100%; padding-top: 5px !important; border-top: 1px solid #edf2f4 !important; }
+  .wiring-toolbar-file { order: 2; margin-left: auto !important; }
+  .wiring-toolbar-tools { width: 100%; }
+  .wiring-toolbar-context { order: 2; }
+  .wiring-toolbar-assists { order: 3; margin-left: auto !important; }
+  .wiring-toolbar-view { order: 4; }
   .wiring-toolbar-info { flex-basis: auto; }
 }
 
-/* ── 设置弹窗（左栏分类 + 右栏细则）── */
-.wiring-settings-modal { width: min(680px, 100%); height: min(560px, calc(100vh - 36px)); display: flex; flex-direction: column; overflow: hidden; }
-.wiring-settings-body { display: grid; grid-template-columns: 132px 1fr; min-height: 0; flex: 1 1 auto; overflow: hidden; }
-.wiring-settings-categories { border-right: 1px solid var(--border); background: #f7fafb; padding: 10px; display: grid; gap: 4px; align-content: start; overflow-y: auto; min-height: 0; }
-.wiring-settings-categories button { padding: 9px 12px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); font-size: 13px; font-weight: 700; text-align: left; cursor: pointer; }
-.wiring-settings-categories button:hover { background: #eef4f5; color: var(--ink); }
-.wiring-settings-categories button.active { background: var(--accent, #087FA4); color: white; }
-.wiring-settings-detail { padding: 16px; overflow-y: auto; min-height: 0; }
+/* ── 设置弹窗：偏好分类 + 设置卡片 ── */
+.wiring-settings-modal {
+  width: min(820px, 100%); height: min(650px, calc(100vh - 36px)); display: flex; flex-direction: column;
+  overflow: hidden; border-radius: 15px; box-shadow: 0 24px 72px rgba(18, 38, 48, .28);
+}
+.wiring-settings-header { flex: 0 0 auto; padding: 17px 20px !important; background: linear-gradient(135deg, #fff 0%, #f4fbfd 100%); }
+.wiring-settings-title { display: grid; gap: 2px; }
+.wiring-settings-title > span { color: var(--accent); font-size: 9px; font-weight: 900; letter-spacing: .13em; }
+.wiring-settings-title h2 { font-size: 20px; letter-spacing: -.03em; }
+.wiring-settings-title p { margin: 2px 0 0; color: var(--muted); font-size: 11px; font-weight: 500; }
+.wiring-settings-body { display: grid; grid-template-columns: 178px minmax(0, 1fr); min-height: 0; flex: 1 1 auto; overflow: hidden; }
+.wiring-settings-categories {
+  border-right: 1px solid var(--border); background: #f3f7f8; padding: 14px 12px;
+  display: grid; gap: 7px; align-content: start; overflow-y: auto; min-height: 0;
+}
+.wiring-settings-categories button {
+  position: relative; min-height: 58px; padding: 9px 10px 9px 42px; border: 1px solid transparent; border-radius: 10px;
+  background: transparent; color: var(--ink); font-size: 13px; font-weight: 800; text-align: left; cursor: pointer;
+  transition: background .15s, border-color .15s, box-shadow .15s;
+}
+.wiring-settings-categories button::before {
+  content: attr(data-icon); position: absolute; left: 9px; top: 10px; width: 25px; height: 25px; display: grid; place-items: center;
+  border-radius: 7px; background: #e2ecef; color: #617780; font-size: 13px; font-weight: 900;
+}
+.wiring-settings-categories button::after {
+  content: attr(data-description); display: block; margin-top: 3px; color: #8a9aa2; font-size: 9px; font-weight: 550; line-height: 1.35;
+}
+.wiring-settings-categories button:hover { border-color: #d9e6ea; background: rgba(255, 255, 255, .72); }
+.wiring-settings-categories button.active { border-color: #8fd4e6; background: white; color: var(--accent-strong); box-shadow: 0 4px 13px rgba(31, 94, 116, .1); }
+.wiring-settings-categories button.active::before { background: var(--accent-soft); color: var(--accent-strong); }
+.wiring-settings-categories button.active::after { color: #64818c; }
+.wiring-settings-detail { min-height: 0; padding: 18px 20px 22px; overflow-y: auto; background: #fbfcfd; scrollbar-gutter: stable; }
 .wiring-settings-detail::-webkit-scrollbar { width: 7px; }
 .wiring-settings-detail::-webkit-scrollbar-thumb { background: #c0ccd1; border-radius: 99px; }
+.wiring-settings-save-note {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 15px; padding: 8px 10px; border: 1px solid #d8e8ed;
+  border-radius: 8px; background: #f1f9fb; color: #58717c; font-size: 10px; line-height: 1.45;
+}
+.wiring-settings-save-note > span { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: #3bb178; box-shadow: 0 0 0 4px rgba(59,177,120,.12); }
+.wiring-settings-save-note.draft { border-color: #efdca7; background: #fffaf0; color: #806828; }
+.wiring-settings-save-note.draft > span { background: #e3a717; box-shadow: 0 0 0 4px rgba(227,167,23,.12); }
 .wiring-settings-section { display: grid; gap: 12px; align-content: start; }
-.wiring-settings-section h3 { margin: 0 0 2px; font-size: 12px; font-weight: 800; color: var(--muted); letter-spacing: .06em; text-transform: uppercase; }
-.wiring-settings-section > label { display: grid; gap: 5px; color: var(--muted); font-size: 11px; font-weight: 700; }
-.wiring-settings-section > .wiring-check { display: flex; align-items: center; gap: 7px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 7px; background: white; }
-.wiring-settings-section input[type="number"], .wiring-settings-section select { min-height: 32px; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; background: white; color: var(--ink); font-size: 12px; }
-.wiring-settings-section input[type="color"] { width: 100%; max-width: 120px; padding: 3px; border: 1px solid var(--border); border-radius: 6px; background: white; }
-.wiring-settings-actions { display: flex; justify-content: flex-end; padding-top: 6px; border-top: 1px solid var(--border); margin-top: 6px; }
+.wiring-settings-section-heading { display: grid; gap: 2px; margin-bottom: 1px; }
+.wiring-settings-section-heading > span { color: var(--accent); font-size: 9px; font-weight: 900; letter-spacing: .12em; }
+.wiring-settings-section-heading h3 { margin: 0; color: var(--ink); font-size: 19px; font-weight: 850; letter-spacing: -.025em; }
+.wiring-settings-section-heading p { margin: 2px 0 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
+.wiring-settings-card { overflow: hidden; border: 1px solid #dde7eb; border-radius: 11px; background: white; box-shadow: 0 2px 8px rgba(20,49,63,.035); }
+.wiring-settings-card > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 13px; border-bottom: 1px solid #edf2f4; background: #f9fbfc; }
+.wiring-settings-card > header h4 { margin: 0; color: var(--ink); font-size: 12px; font-weight: 850; }
+.wiring-settings-card > header p { margin: 2px 0 0; color: var(--muted); font-size: 9px; line-height: 1.45; }
+.wiring-setting-toggle { display: flex !important; min-height: 51px; justify-content: space-between; gap: 14px !important; padding: 9px 13px; border-bottom: 1px solid #edf2f4; color: var(--ink); white-space: normal; }
+.wiring-setting-toggle:last-child { border-bottom: 0; }
+.wiring-setting-toggle:hover { background: #fbfdfe; }
+.wiring-setting-copy { min-width: 0; display: grid; gap: 2px; }
+.wiring-setting-copy b { color: var(--ink); font-size: 11px; }
+.wiring-setting-copy small { color: var(--muted); font-size: 9px; font-weight: 500; line-height: 1.45; }
+.wiring-setting-toggle > input[type="checkbox"] {
+  appearance: none; width: 36px; height: 20px; flex: 0 0 auto; margin: 0; border-radius: 99px; background: #cad5da;
+  box-shadow: inset 0 0 0 1px rgba(37,56,66,.08); cursor: pointer; transition: background .16s;
+}
+.wiring-setting-toggle > input[type="checkbox"]::before { content: ""; display: block; width: 16px; height: 16px; margin: 2px; border-radius: 50%; background: white; box-shadow: 0 1px 4px rgba(18,38,48,.25); transition: transform .16s; }
+.wiring-setting-toggle > input[type="checkbox"]:checked { background: var(--accent); }
+.wiring-setting-toggle > input[type="checkbox"]:checked::before { transform: translateX(16px); }
+.wiring-settings-field { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: 56px; padding: 9px 13px; }
+.wiring-settings-field > span:first-child { display: grid; gap: 2px; }
+.wiring-settings-field b { color: var(--ink); font-size: 11px; }
+.wiring-settings-field small { color: var(--muted); font-size: 9px; font-weight: 500; }
+.wiring-settings-field-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; padding: 13px; }
+.wiring-settings-number-field { display: grid; gap: 7px; color: var(--muted); font-size: 10px; font-weight: 750; }
+.wiring-settings-number-field > span { display: flex; justify-content: space-between; gap: 6px; align-items: baseline; }
+.wiring-settings-number-field small { color: #96a4aa; font-size: 8px; font-weight: 550; }
+.wiring-settings-section input[type="number"], .wiring-settings-section select { min-height: 34px; padding: 0 9px; border: 1px solid var(--border); border-radius: 7px; background: white; color: var(--ink); font-size: 11px; }
+.wiring-settings-section input[type="number"]:focus, .wiring-settings-section select:focus { outline: 2px solid rgba(8,127,164,.16); border-color: var(--accent); }
+.wiring-settings-section input[type="color"] { width: 58px; height: 34px; padding: 3px; border: 1px solid var(--border); border-radius: 7px; background: white; }
+.wiring-settings-color-field { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 62px; padding: 9px 11px; border: 1px solid var(--border); border-radius: 8px; color: var(--ink); font-size: 10px; font-weight: 750; }
+.wiring-settings-color-field > span { display: grid; gap: 3px; }
+.wiring-settings-color-field small { color: var(--muted); font-size: 8px; font-weight: 550; }
+.wiring-settings-defaults-body { display: grid; gap: 8px; padding: 13px; }
+.wiring-settings-override-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 13px; }
+.wiring-settings-override-field { display: grid; gap: 10px; min-width: 0; padding: 11px; border: 1px solid #dce7eb; border-radius: 9px; background: #fff; transition: border-color .16s ease, background .16s ease; }
+.wiring-settings-override-field.follows-template { border-color: #cce5ec; background: #f6fbfd; }
+.wiring-settings-override-heading { display: grid; gap: 8px; }
+.wiring-settings-override-heading > span { display: grid; gap: 3px; min-width: 0; }
+.wiring-settings-override-heading b { color: var(--ink); font-size: 11px; }
+.wiring-settings-override-heading small { color: var(--muted); font-size: 8.5px; font-weight: 550; line-height: 1.45; }
+.wiring-settings-mode-switch { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; padding: 3px; border-radius: 8px; background: #eaf0f3; }
+.wiring-settings-mode-switch button { min-height: 27px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: #71838b; font-size: 9px; font-weight: 800; cursor: pointer; }
+.wiring-settings-mode-switch button:hover { color: var(--accent-strong); }
+.wiring-settings-mode-switch button.active { background: #fff; color: var(--accent-strong); box-shadow: 0 2px 7px rgba(25, 76, 94, .11); }
+.wiring-settings-override-field .wiring-settings-number-field input:disabled { border-color: #dfe7ea; background: #edf2f4; color: #9ba8ad; cursor: not-allowed; }
+.wiring-settings-card-toggle { border-top: 1px solid #edf2f4; }
+.wiring-settings-color-controls { display: flex !important; flex-direction: row; align-items: center; gap: 8px; }
+.wiring-settings-color-controls input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent, #087FA4); cursor: pointer; }
+.wiring-settings-color-controls input[type="color"]:disabled { opacity: .5; cursor: not-allowed; }
+.wiring-settings-opacity-field { display: grid; gap: 7px; color: var(--muted); font-size: 10px; font-weight: 750; }
+.wiring-settings-opacity-field > span { display: flex; justify-content: space-between; gap: 6px; align-items: baseline; }
+.wiring-settings-opacity-field small { color: #96a4aa; font-size: 8px; font-weight: 550; }
+.wiring-settings-opacity-field > div { display: flex; align-items: center; gap: 8px; }
+.wiring-settings-opacity-field b { color: var(--ink); font-size: 11px; min-width: 34px; text-align: right; font-variant-numeric: tabular-nums; }
+.wiring-settings-section input[type="range"] { flex: 1; accent-color: var(--accent, #087FA4); cursor: pointer; }
+.wiring-settings-empty-guide { display: flex; align-items: flex-start; gap: 9px; padding: 10px 12px; border: 1px dashed #cbdde3; border-radius: 9px; background: #f7fbfc; color: var(--muted); }
+.wiring-settings-empty-guide > span { width: 19px; height: 19px; display: grid; flex: 0 0 auto; place-items: center; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-size: 10px; font-weight: 900; }
+.wiring-settings-empty-guide p { margin: 1px 0 0; font-size: 10px; line-height: 1.55; }
+.wiring-canvas-mode-options { padding: 12px; gap: 10px; }
+.wiring-canvas-mode-options .wiring-radio { flex: 1 1 180px; min-height: 55px; padding: 9px 11px; border: 1px solid var(--border); border-radius: 9px; background: white; }
+.wiring-canvas-mode-options .wiring-radio:has(input:checked) { border-color: var(--accent); background: #f2fbfd; box-shadow: inset 0 0 0 1px rgba(8,127,164,.13); }
+.wiring-canvas-mode-options .wiring-radio > span { display: grid; gap: 2px; }
+.wiring-canvas-mode-options .wiring-radio b { color: var(--ink); font-size: 11px; }
+.wiring-canvas-mode-options .wiring-radio small { color: var(--muted); font-size: 9px; font-weight: 500; }
+.wiring-canvas-size-layout { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 14px; padding-right: 13px; }
+.wiring-canvas-size-layout .wiring-settings-field-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.wiring-canvas-size-layout .wiring-anchor-field { padding-top: 13px; }
+.wiring-canvas-appearance-grid { grid-template-columns: minmax(0, 1fr) minmax(210px, 1.2fr) minmax(0, 1fr); align-items: stretch; }
+.wiring-canvas-appearance-grid .wiring-setting-toggle { min-height: 62px; border: 1px solid var(--border); border-radius: 8px; }
+.wiring-settings-actions { position: sticky; bottom: -22px; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 4px -20px -22px; padding: 12px 20px; border-top: 1px solid var(--border); background: rgba(255,255,255,.96); backdrop-filter: blur(8px); }
+.wiring-settings-actions > span { color: var(--muted); font-size: 9px; }
 /* 吸附间距：跟随网格时锁定——输入框置灰 + 全区域可点击显示解锁提示 */
 .wiring-settings-section .wiring-snap-field { position: relative; display: inline-flex; }
 .wiring-settings-section .wiring-snap-field.locked input[type="number"] { background: #eef1f3; color: #9aa6ad; cursor: not-allowed; border-color: #d9e0e4; }
@@ -616,6 +842,21 @@
 .wiring-radio { display: inline-flex !important; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--ink); cursor: pointer; flex-direction: row !important; }
 .wiring-radio input { accent-color: var(--accent, #087FA4); width: 14px; height: 14px; }
 .wiring-radio-hint { color: var(--muted); font-size: 10px; font-weight: 500; }
+
+@media (max-width: 720px) {
+  .wiring-settings-modal { height: calc(100vh - 20px); height: calc(100dvh - 20px); border-radius: 12px; }
+  .wiring-settings-header { padding: 13px 14px !important; }
+  .wiring-settings-title p { display: none; }
+  .wiring-settings-body { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
+  .wiring-settings-categories { grid-template-columns: repeat(3, 1fr); padding: 8px; border-right: 0; border-bottom: 1px solid var(--border); overflow: visible; }
+  .wiring-settings-categories button { min-height: 38px; padding: 7px; text-align: center; }
+  .wiring-settings-categories button::before, .wiring-settings-categories button::after { display: none; }
+  .wiring-settings-detail { padding: 12px; }
+  .wiring-settings-field-grid, .wiring-settings-override-grid, .wiring-canvas-appearance-grid { grid-template-columns: 1fr; }
+  .wiring-canvas-size-layout { grid-template-columns: 1fr; padding-right: 0; }
+  .wiring-canvas-size-layout .wiring-anchor-field { padding: 0 13px 13px; }
+  .wiring-settings-actions { bottom: -12px; margin: 4px -12px -12px; padding: 10px 12px; }
+}
 
 /* PS 式九宫格锚点方向 */
 .wiring-anchor-field { display: grid; gap: 6px; }

@@ -166,27 +166,42 @@ export function ModuleInspector({ ctx }: InspectorProps) {
       {selectedTemplate.params && selectedTemplate.params.length > 0 && (
         <div className="wiring-prop-group">
           <h5>模板参数</h5>
-          {selectedTemplate.params.map((param) => (
-            <div key={param.key} className="wiring-prop-row wiring-param-slider">
-              <label>{param.label}</label>
-              <input
-                type="range"
-                min={param.min}
-                max={param.max}
-                step={param.step || 1}
-                value={selectedMod.customParams?.[param.key] ?? param.default}
-                onChange={(e) => {
-                  const val = parseInt(e.target.value);
-                  updateModule(selectedMod.id, {
-                    customParams: { ...(selectedMod.customParams || {}), [param.key]: val },
-                  });
-                }}
-              />
-              <span className="wiring-param-value">
-                {selectedMod.customParams?.[param.key] ?? param.default}{param.unit || ""}
-              </span>
-            </div>
-          ))}
+          {selectedTemplate.params.map((param) => {
+            const value = selectedMod.customParams?.[param.key] ?? param.default;
+            if (param.kind === "boolean") {
+              return (
+                <label key={param.key} className="wiring-check wiring-param-toggle">
+                  <span>{param.label}<small>开启后延长斜轨，使同组输出端点平齐。</small></span>
+                  <input
+                    type="checkbox"
+                    checked={value === 1}
+                    onChange={(event) => updateModule(selectedMod.id, {
+                      customParams: { ...(selectedMod.customParams || {}), [param.key]: event.target.checked ? 1 : 0 },
+                    }, event.target.checked ? "开启端点补齐" : "关闭端点补齐")}
+                  />
+                </label>
+              );
+            }
+            return (
+              <div key={param.key} className="wiring-prop-row wiring-param-slider">
+                <label>{param.label}</label>
+                <input
+                  type="range"
+                  min={param.min}
+                  max={param.max}
+                  step={param.step || 1}
+                  value={value}
+                  onChange={(e) => {
+                    const val = parseInt(e.target.value);
+                    updateModule(selectedMod.id, {
+                      customParams: { ...(selectedMod.customParams || {}), [param.key]: val },
+                    });
+                  }}
+                />
+                <span className="wiring-param-value">{value}{param.unit || ""}</span>
+              </div>
+            );
+          })}
         </div>
       )}
 

@@ -10,9 +10,39 @@ const avoidance = await server.ssrLoadModule("/app/wiring/labelAvoidance.ts");
 const primitives = await server.ssrLoadModule("/app/wiring/ui/primitives.ts");
 const batch = await server.ssrLoadModule("/app/wiring/batch.ts");
 const clipboard = await server.ssrLoadModule("/app/wiring/clipboard.ts");
+const defaultPlacement = await server.ssrLoadModule("/app/wiring/defaultPlacement.ts");
 after(() => server.close());
 
 const TEMPLATES = new Map(templatesMod.MODULE_TEMPLATES.map((template) => [template.id, template]));
+
+test("默认放置跟随模板，统一设置只覆盖支持的参数并按各模板范围限制", () => {
+  const values = { spacing: 40, platformLength: 160, platformWidth: 16, length: 140, branchOffset: 240, alignBranchEnds: false };
+  const crossPlatform = TEMPLATES.get("cross_platform");
+  const preTurnback = TEMPLATES.get("pre_turnback");
+  const leftTurnout = TEMPLATES.get("left_turnout");
+  assert.ok(crossPlatform && preTurnback && leftTurnout);
+
+  const followedCross = defaultPlacement.buildPlacementCustomParams(crossPlatform, defaultPlacement.DEFAULT_OVERRIDE_MODES, values);
+  const followedTurnback = defaultPlacement.buildPlacementCustomParams(preTurnback, defaultPlacement.DEFAULT_OVERRIDE_MODES, values);
+  assert.equal(followedCross.spacing, 32);
+  assert.equal(followedTurnback.platformLength, 80);
+
+  const uniform = { ...defaultPlacement.DEFAULT_OVERRIDE_MODES, spacing: "uniform", platformLength: "uniform", length: "uniform", branchOffset: "uniform" };
+  assert.equal(defaultPlacement.buildPlacementCustomParams(crossPlatform, uniform, values).spacing, 40);
+  assert.equal(defaultPlacement.buildPlacementCustomParams(preTurnback, uniform, values).platformLength, 160);
+  const turnoutParams = defaultPlacement.buildPlacementCustomParams(leftTurnout, uniform, values);
+  assert.equal(turnoutParams.length, 140);
+  assert.equal(turnoutParams.branchOffset, 48); // 统一值 240 按普通单开模板上限限制
+});
+
+test("双线分岔端点补齐默认只写入支持该参数的模板", () => {
+  const values = { spacing: 40, platformLength: 160, platformWidth: 16, length: 100, branchOffset: 24, alignBranchEnds: true };
+  const fork = TEMPLATES.get("double_fork_up");
+  const section = TEMPLATES.get("double_track");
+  assert.ok(fork && section);
+  assert.equal(defaultPlacement.buildPlacementCustomParams(fork, defaultPlacement.DEFAULT_OVERRIDE_MODES, values).alignBranchEnds, 1);
+  assert.equal("alignBranchEnds" in defaultPlacement.buildPlacementCustomParams(section, defaultPlacement.DEFAULT_OVERRIDE_MODES, values), false);
+});
 
 test("new canvas pages preserve required dimensions and canvas settings", () => {
   const page = canvas.createCanvasPage({ id: "p2", name: "施工图", width: 2560, height: 1440, gridSize: 32, showGrid: false });
@@ -514,81 +544,115 @@ test("fork customized templates match static base at default params", () => {
   }
 });
 
-test("fork 开合角度参数存在，默认角复现静态分叉点 divX=130", () => {
-  const expected = {
-    double_fork_up: 26.2,
-    double_fork_dn: 23.3,
-    double_fork_y: 17.1,
-  };
-  for (const [id, angle] of Object.entries(expected)) {
+test("fork 统一使用像素开口幅度，不再暴露角度参数", () => {
+  const expected = { double_fork_up: 64, double_fork_dn: 56, double_fork_y: 40 };
+  for (const [id, opening] of Object.entries(expected)) {
     const base = TEMPLATES.get(id);
-    const param = base.params.find((p) => p.key === "angle");
-    assert.ok(param, `${id} 有开合角度参数`);
-    assert.equal(param.label, "开合角度");
-    assert.equal(param.default, angle, `${id} 默认开合角度 = ${angle}°（该角使 divX=宽/2，保持可对齐）`);
-    const tpl = templatesMod.makeCustomizedTemplate(base, Object.fromEntries(base.params.map((p) => [p.key, p.default])));
-    const branchX1 = [...new Set(tpl.tracks.filter((t) => t.type === "branch").map((t) => t.x1))];
-    assert.deepEqual(branchX1, [130], `${id} 默认角下分叉点 divX=130（=宽/2，与静态基准一致）`);
+    const param = base.params.find((p) => p.key === "branchOffset");
+    assert.ok(param, `${id} 有开口幅度参数`);
+    assert.equal(param.label, "开口幅度");
+    assert.equal(param.unit, "px");
+    assert.equal(param.default, opening, `${id} 默认开口幅度 = ${opening}px`);
+    const alignParam = base.params.find((p) => p.key === "alignBranchEnds");
+    assert.equal(alignParam?.kind, "boolean", `${id} 提供端点补齐开关`);
+    assert.equal(alignParam?.default, 0, `${id} 旧工程默认保留自然端点`);
+    assert.equal(base.params.some((p) => p.key === "angle"), false, `${id} 不再出现角度参数`);
   }
+  assert.equal(templatesMod.legacyForkAngleToOpening(26.2, 260), 64, "旧上分叉角度换算为等效 64px");
+  assert.equal(templatesMod.legacyForkAngleToOpening(23.3, 260), 56, "旧下分叉角度换算为等效 56px");
+  assert.equal(templatesMod.legacyForkAngleToOpening(17.1, 260), 40, "旧 Y 形角度换算为等效 40px");
 });
 
-test("fork 开合角度移动支线端口，直股/输入端口固定（对齐不受影响）", () => {
+test("fork 对齐模式重排整对支线，端点平齐且垂直线距严格等于设置值", () => {
   for (const id of ["double_fork_up", "double_fork_dn", "double_fork_y"]) {
     const base = TEMPLATES.get(id);
     const defaults = Object.fromEntries(base.params.map((p) => [p.key, p.default]));
-    // 上/下分叉：支线 = R_up2/R_dn2；Y 形：上下两支都是支线
+    const natural = templatesMod.makeCustomizedTemplate(base, defaults);
+    const aligned = templatesMod.makeCustomizedTemplate(base, { ...defaults, alignBranchEnds: 1 });
+    const branchTracks = aligned.tracks.filter((track) => track.type === "branch");
+    const naturalPairs = natural.tracks.filter((track) => track.type === "branch");
+
+    assert.ok(naturalPairs.some((track, index) => index % 2 === 0 && track.x2 !== naturalPairs[index + 1]?.x2), `${id} 自然端点存在错位`);
+    for (let index = 0; index < branchTracks.length; index += 2) {
+      const first = branchTracks[index];
+      const second = branchTracks[index + 1];
+      assert.equal(first.x1, second.x1, `${id} 同组分叉点 X 对齐`);
+      assert.equal(first.x2, second.x2, `${id} 同组端点 X 平齐`);
+      assert.equal(second.y1 - first.y1, defaults.spacing, `${id} 分叉起点垂直线距为 ${defaults.spacing}px`);
+      assert.equal(second.y2 - first.y2, defaults.spacing, `${id} 输出端点垂直线距为 ${defaults.spacing}px`);
+      const cross = (first.x2 - first.x1) * (second.y2 - second.y1) - (first.y2 - first.y1) * (second.x2 - second.x1);
+      assert.ok(Math.abs(cross) < 1e-6, `${id} 补齐后同组斜轨仍平行`);
+      for (const track of [first, second]) {
+        const port = aligned.ports.find((candidate) => candidate.x === track.x2 && candidate.y === track.y2);
+        assert.ok(port, `${id} 补齐后的斜轨终点仍有连接端口`);
+      }
+    }
+  }
+});
+
+test("fork 开口幅度移动支线端口，直股与输入端口保持固定", () => {
+  for (const id of ["double_fork_up", "double_fork_dn", "double_fork_y"]) {
+    const base = TEMPLATES.get(id);
+    const defaults = Object.fromEntries(base.params.map((p) => [p.key, p.default]));
     const branchIds = id === "double_fork_y" ? ["R_up1", "R_dn1", "R_up2", "R_dn2"] : ["R_up2", "R_dn2"];
     const fixedIds = id === "double_fork_y" ? ["L_up1", "L_dn1"] : ["L_up1", "L_dn1", "R_up1", "R_dn1"];
     const defTpl = templatesMod.makeCustomizedTemplate(base, defaults);
-    // 各分叉角度需高于本类型张开量下限（k≥spacing 或 k≥spacing/2）才会真正移动支线
-    const angles = id === "double_fork_up" ? [20, 26.2, 30] : id === "double_fork_dn" ? [18, 23.3, 45] : [10, 17.1, 21];
+    const openings = id === "double_fork_up" ? [48, 64, 76] : id === "double_fork_dn" ? [48, 80, 120] : [24, 40, 52];
     let lastBranchY = null;
-    for (const angle of angles) {
-      const tpl = templatesMod.makeCustomizedTemplate(base, { ...defaults, angle });
-      // 直股/输入端口位置不随开合角度移动（吸附对齐不受影响）
+    for (const branchOffset of openings) {
+      const tpl = templatesMod.makeCustomizedTemplate(base, { ...defaults, branchOffset });
       for (const pid of fixedIds) {
         assert.equal(
           tpl.ports.find((p) => p.id === pid).y,
           defTpl.ports.find((p) => p.id === pid).y,
-          `${id} 输入/直股端口 ${pid} 不随角度移动`,
+          `${id} 输入/直股端口 ${pid} 不随开口幅度移动`,
         );
       }
-      // 支线端口随角度张开
       const branchY = tpl.ports.filter((p) => branchIds.includes(p.id)).map((p) => p.y);
-      if (lastBranchY) assert.notDeepEqual(branchY, lastBranchY, `${id} 角度改变时支线端口移动`);
+      if (lastBranchY) assert.notDeepEqual(branchY, lastBranchY, `${id} 开口幅度改变时支线端口移动`);
       lastBranchY = branchY;
     }
   }
 });
 
-test("fork 开合角度张开支线：方向与斜轨斜率一致、模板随支线扩高", () => {
+test("fork 动态分叉点保持双线真实间距，方向与斜轨一致", () => {
+  const lineDistance = (first, second) => {
+    const dx = first.x2 - first.x1;
+    const dy = first.y2 - first.y1;
+    return Math.abs(dx * (second.y1 - first.y1) - dy * (second.x1 - first.x1)) / Math.hypot(dx, dy);
+  };
   for (const id of ["double_fork_up", "double_fork_dn", "double_fork_y"]) {
     const base = TEMPLATES.get(id);
     const defaults = Object.fromEntries(base.params.map((p) => [p.key, p.default]));
-    // 18° 起避免下分叉完全闭合（k=spacing 时支线端口与直股端口重合）的退化角
-    const angles = id === "double_fork_up" ? [20, 26.2, 30] : id === "double_fork_dn" ? [18, 23.3, 45] : [12, 17.1, 21];
+    const openings = id === "double_fork_up" ? [48, 64, 76] : id === "double_fork_dn" ? [48, 80, 120] : [24, 40, 52];
     const heights = [];
-    for (const angle of angles) {
-      const tpl = templatesMod.makeCustomizedTemplate(base, { ...defaults, angle });
+    for (const branchOffset of openings) {
+      const tpl = templatesMod.makeCustomizedTemplate(base, { ...defaults, branchOffset });
       heights.push(tpl.height);
-      // 端口方向与相接斜轨斜率一致（连接切线不脱节）
-      for (const track of tpl.tracks.filter((t) => t.type === "branch")) {
+      const branchTracks = tpl.tracks.filter((t) => t.type === "branch");
+      for (const track of branchTracks) {
         const travel = Math.round(Math.atan2(track.y2 - track.y1, track.x2 - track.x1) * 180 / Math.PI);
         const normTravel = ((travel % 360) + 360) % 360;
         const atEnd = tpl.ports.find((p) => p.x === track.x2 && p.y === track.y2);
-        assert.equal(atEnd.direction, normTravel, `${id} angle=${angle}° 端口 ${atEnd.id} 方向与相接斜轨斜率一致`);
+        assert.equal(atEnd.direction, normTravel, `${id} opening=${branchOffset}px 端口 ${atEnd.id} 方向与相接斜轨斜率一致`);
       }
-      // 支线可贴近上沿（y≥0，分叉不做整体下移），下沿用扩高保证
+      for (let index = 0; index < branchTracks.length; index += 2) {
+        const first = branchTracks[index];
+        const second = branchTracks[index + 1];
+        const cross = (first.x2 - first.x1) * (second.y2 - second.y1) - (first.y2 - first.y1) * (second.x2 - second.x1);
+        assert.ok(Math.abs(cross) < 1e-6, `${id} opening=${branchOffset}px 同组双线保持平行`);
+        assert.ok(Math.abs(lineDistance(first, second) - defaults.spacing) < 1e-6, `${id} opening=${branchOffset}px 法向间距保持 ${defaults.spacing}px`);
+        assert.notEqual(first.x1, second.x1, `${id} opening=${branchOffset}px 使用动态错开的分叉点`);
+      }
       const ys = [...tpl.tracks.flatMap((t) => [t.y1, t.y2]), ...tpl.ports.map((p) => p.y)];
-      assert.ok(Math.min(...ys) >= 0, `${id} angle=${angle}° 轨道不越顶，minY=${Math.min(...ys)}`);
-      assert.ok(Math.max(...ys) <= tpl.height - 12, `${id} angle=${angle}° 轨道不越底，maxY=${Math.max(...ys)} <= ${tpl.height - 12}`);
+      assert.ok(Math.min(...ys) >= 0, `${id} opening=${branchOffset}px 轨道不越顶，minY=${Math.min(...ys)}`);
+      assert.ok(Math.max(...ys) <= tpl.height - 12, `${id} opening=${branchOffset}px 轨道不越底`);
     }
-    // 角度越大模板只升不降（上分叉支线顶到上沿后高度不变，下分叉/Y 形随支线外扩变高）
-    assert.ok(heights[1] >= heights[0], `${id} 角度增大模板不降低`);
+    assert.ok(heights[1] >= heights[0], `${id} 开口增大模板不降低`);
   }
 });
 
-test("fork customized templates keep diagonal angles and stay in bounds", () => {
+test("fork customized templates keep diagonal geometry in bounds", () => {
   for (const id of ["double_fork_up", "double_fork_dn", "double_fork_y"]) {
     const base = TEMPLATES.get(id);
     const hasOffset = base.params?.some((p) => p.key === "branchOffset");
@@ -604,56 +668,49 @@ test("fork customized templates keep diagonal angles and stay in bounds", () => 
 });
 
 test("double-track forks fully separate the two output pairs", () => {
-  // 用户要求：一条双线分成两条完整的双线，两组输出之间留出明确间隙。
-  // 分开后的组间距（相邻输出对之间）必须等于进入轨道的线间距 spacing。
   const ys = (tpl, ids) => ids.map((id) => tpl.ports.find((p) => p.id === id).y);
+  const pairDistance = (tpl, ids) => {
+    const [first, second] = ids.map((id) => tpl.ports.find((p) => p.id === id));
+    return Math.hypot(second.x - first.x, second.y - first.y);
+  };
 
-  // Y 形：四条输出线均匀排布，间距 = spacing；上支对上支、下支对下支相邻组间距 = spacing
   const yBase = TEMPLATES.get("double_fork_y");
   const y = templatesMod.makeCustomizedTemplate(yBase, { length: 260, spacing: 40 });
   const yUpper = ys(y, ["R_up1", "R_dn1"]);
   const yLower = ys(y, ["R_up2", "R_dn2"]);
-  assert.deepEqual(yUpper, [12, 52], "Y形 上支双线端口位置");
-  assert.deepEqual(yLower, [92, 132], "Y形 下支双线端口位置");
-  // 组间距（下支上行 92 - 上支下行 52）= spacing = 40
-  assert.equal(yLower[0] - yUpper[1], 40, "Y形 两组输出间距 = 进入轨道线间距");
+  assert.ok(yUpper[1] < yLower[0], "Y形上下两组输出不交叠");
+  assert.ok(Math.abs(pairDistance(y, ["R_up1", "R_dn1"]) - 40) < 1e-6, "Y形上支端口欧氏间距保持 40px");
+  assert.ok(Math.abs(pairDistance(y, ["R_up2", "R_dn2"]) - 40) < 1e-6, "Y形下支端口欧氏间距保持 40px");
 
-  // 上分叉：默认角 26.2° 下支线对（12/52）完全高出直股对（76/116），输入固定
   const upBase = TEMPLATES.get("double_fork_up");
   const up = templatesMod.makeCustomizedTemplate(upBase, { length: 260, spacing: 40 });
   const upBranch = ys(up, ["R_up2", "R_dn2"]);
   const upStraight = ys(up, ["R_up1", "R_dn1"]);
-  assert.deepEqual(upBranch, [12, 52], "上分叉 支线对端口位置");
   assert.deepEqual(upStraight, [76, 116], "上分叉 直股对端口位置");
-  assert.equal(upStraight[0] - upBranch[1], 24, "上分叉 支线与直股组间距 = 24（默认角 26.2°）");
+  assert.ok(upBranch[1] < upStraight[0], "上分叉支线对完全位于直股上方");
+  assert.ok(Math.abs(pairDistance(up, ["R_up2", "R_dn2"]) - 40) < 1e-6, "上分叉支线端口保持 40px 间距");
   assert.equal(up.ports.find((port) => port.id === "L_up1").y, 76, "上分叉 输入不随角度移动");
-  // 开大角度 → 支线向上张开，直股/输入位置不变，模板高度不变（支线仍在模板上沿内）
-  const upWide = templatesMod.makeCustomizedTemplate(upBase, { length: 260, spacing: 40, angle: 30 });
+  const upWide = templatesMod.makeCustomizedTemplate(upBase, { length: 260, spacing: 40, branchOffset: 76 });
   const upWideBranch = ys(upWide, ["R_up2", "R_dn2"]);
-  assert.ok(upWideBranch[0] < upBranch[0], "上分叉 开大角度支线上移张开");
-  assert.deepEqual(ys(upWide, ["R_up1", "R_dn1"]), [76, 116], "上分叉 开大角度直股不动");
-  assert.equal(upWide.height, up.height, "上分叉 开大角度模板高度不变");
+  assert.ok(upWideBranch[0] < upBranch[0], "上分叉增大开口后支线上移");
+  assert.deepEqual(ys(upWide, ["R_up1", "R_dn1"]), [76, 116], "上分叉增大开口后直股不动");
 
-  // 下分叉：支线对完全低于直股对，输入保持标准 36/76
   const dnBase = TEMPLATES.get("double_fork_dn");
   const dn = templatesMod.makeCustomizedTemplate(dnBase, { length: 260, spacing: 40 });
   const dnBranch = ys(dn, ["R_up2", "R_dn2"]);
   const dnStraight = ys(dn, ["R_up1", "R_dn1"]);
   assert.deepEqual(dnStraight, [36, 76], "下分叉 直股对保持标准 36/76");
-  assert.deepEqual(dnBranch, [92, 132], "下分叉 支线对默认位置");
-  assert.equal(dnBranch[0] - dnStraight[1], 16, "下分叉 支线与直股组间距 = 16（默认角 23.3°）");
+  assert.ok(dnBranch[0] > dnStraight[1], "下分叉支线对完全位于直股下方");
+  assert.ok(Math.abs(pairDistance(dn, ["R_up2", "R_dn2"]) - 40) < 1e-6, "下分叉支线端口保持 40px 间距");
   assert.equal(dn.ports.find((port) => port.id === "L_up1").y, 36, "下分叉 输入保持标准对齐");
-  // 开大角度 → 支线向下张开、模板变高，输入不动
-  const dnWide = templatesMod.makeCustomizedTemplate(dnBase, { length: 260, spacing: 40, angle: 45 });
-  assert.ok(dnWide.height > dn.height, "下分叉 开大角度模板变高");
-  assert.deepEqual(ys(dnWide, ["R_up1", "R_dn1"]), [36, 76], "下分叉 开大角度直股不动");
+  const dnWide = templatesMod.makeCustomizedTemplate(dnBase, { length: 260, spacing: 40, branchOffset: 120 });
+  assert.ok(dnWide.height > dn.height, "下分叉增大开口后模板变高");
+  assert.deepEqual(ys(dnWide, ["R_up1", "R_dn1"]), [36, 76], "下分叉增大开口后直股不动");
 
-  // Y 形：开大角度上下两支同时张开、模板变高，输入不动
-  const yWide = templatesMod.makeCustomizedTemplate(yBase, { length: 260, spacing: 40, angle: 21 });
-  assert.ok(yWide.height > y.height, "Y形 开大角度模板变高");
-  assert.deepEqual(ys(yWide, ["L_up1", "L_dn1"]), [52, 92], "Y形 开大角度输入不动");
+  const yWide = templatesMod.makeCustomizedTemplate(yBase, { length: 260, spacing: 40, branchOffset: 52 });
+  assert.ok(yWide.height >= y.height, "Y形增大开口后模板不缩小");
+  assert.deepEqual(ys(yWide, ["L_up1", "L_dn1"]), [52, 92], "Y形增大开口后输入不动");
 
-  // 分叉比普通组件更长（默认 260）
   for (const id of ["double_fork_up", "double_fork_dn", "double_fork_y"]) {
     const base = TEMPLATES.get(id);
     const def = base.params.find((p) => p.key === "length").default;
@@ -1429,6 +1486,137 @@ test("platformAnchorDescription 描述站台锚点调整方向", () => {
   assert.equal(canvas.platformAnchorDescription(0), "以「左上」为锚点：长度向右、厚度向下调整");
   assert.equal(canvas.platformAnchorDescription(5), "以「右」为锚点：长度向左、厚度向上下调整");
   assert.equal(canvas.platformAnchorDescription(4), "以「中心」为锚点：长度向左右、厚度向上下调整");
+});
+
+// ── 矢量图形控制点（基础元素：尺寸 / 长宽比 / 圆角 / 镜像锚点） ──
+const GRAPHIC = { x: 100, y: 200, width: 100, height: 60, rotation: 0 };
+
+test("graphicResizeAnchor 无镜像时取手柄对侧锚点", () => {
+  assert.equal(canvas.graphicResizeAnchor(8), 0, "右下手柄 → 左上锚点");
+  assert.equal(canvas.graphicResizeAnchor(0), 8, "左上手柄 → 右下锚点");
+  assert.equal(canvas.graphicResizeAnchor(3), 5, "左中手柄 → 右中锚点");
+  assert.equal(canvas.graphicResizeAnchor(4), 4, "中心手柄不动");
+});
+
+test("graphicResizeAnchor 镜像时取手柄视觉对侧的镜像锚点", () => {
+  assert.equal(canvas.graphicResizeAnchor(8, true), 2, "mirrorX：右下手柄视觉在左下 → 右上锚点");
+  assert.equal(canvas.graphicResizeAnchor(0, true), 6, "mirrorX：左上手柄视觉在右上 → 左下锚点");
+  assert.equal(canvas.graphicResizeAnchor(3, true), 3, "mirrorX：左中手柄仍为左中锚点");
+  assert.equal(canvas.graphicResizeAnchor(8, undefined, true), 6, "mirrorY：右下手柄视觉在右上 → 左下锚点");
+  assert.equal(canvas.graphicResizeAnchor(8, true, true), 8, "双镜像：右下手柄仍为右下锚点");
+});
+
+test("computeGraphicResize 自由模式：锚点不动、自由长宽比", () => {
+  const r = canvas.computeGraphicResize(GRAPHIC, 0, 30, 10, "free");
+  assertResize(r, { x: 100, y: 200, width: 130, height: 70 });
+  near(r.x, 100); near(r.y, 200); // 左上锚点保持
+});
+
+test("computeGraphicResize 等比模式：Shift 拖角点保持长宽比", () => {
+  const r = canvas.computeGraphicResize(GRAPHIC, 0, 30, 10, "aspect");
+  assertResize(r, { x: 100, y: 200, width: 130, height: 78 });
+  near(r.width / r.height, GRAPHIC.width / GRAPHIC.height);
+});
+
+test("computeGraphicResize 边手柄只沿所在轴：左右只改宽度", () => {
+  // 右中手柄 → 左中锚点（fx=0, fy=0.5）：忽略纵向位移，宽 +20、高不变
+  assertResize(canvas.computeGraphicResize(GRAPHIC, 3, 20, 10, "free"), { x: 100, y: 200, width: 120, height: 60 });
+  // 等比模式下同样只沿轴（边手柄不应用等比）
+  assertResize(canvas.computeGraphicResize(GRAPHIC, 3, 20, 10, "aspect"), { x: 100, y: 200, width: 120, height: 60 });
+});
+
+test("computeGraphicResize 边手柄只沿所在轴：上下只改高度", () => {
+  // 上中手柄 → 下中锚点（fx=0.5, fy=1）：忽略横向位移，向上拖 10 → 高 +10、宽不变
+  assertResize(canvas.computeGraphicResize(GRAPHIC, 7, 20, -10, "free"), { x: 100, y: 190, width: 100, height: 70 });
+});
+
+test("computeGraphicResize 边手柄旋转感知：世界位移按本地轴投影", () => {
+  const rotated = { x: 100, y: 200, width: 100, height: 60, rotation: 90 };
+  // 旋转 90° 时沿世界 x 拖 = 本地 y 方向，上下边手柄仍只改高度
+  assertResize(canvas.computeGraphicResize(rotated, 7, 10, 0, "free"), { x: 105, y: 195, width: 100, height: 70 });
+});
+
+test("computeGraphicResize 最小钳制且锚点不动", () => {
+  assertResize(canvas.computeGraphicResize(GRAPHIC, 0, -300, 0, "free"), { x: 100, y: 200, width: 4, height: 60 });
+});
+
+test("computeGraphicResize 旋转感知：世界位移先转本地再解算", () => {
+  const rotated = { x: 100, y: 200, width: 100, height: 60, rotation: 90 };
+  assertResize(canvas.computeGraphicResize(rotated, 0, 30, 10, "free"), { x: 110, y: 220, width: 110, height: 30 });
+});
+
+test("computeGraphicResize 镜像锚点：视觉对角点保持不动", () => {
+  const mirrored = { x: 100, y: 100, width: 80, height: 60, rotation: 0 };
+  const r = canvas.computeGraphicResize(mirrored, canvas.graphicResizeAnchor(8, true), 30, 10, "free");
+  assertResize(r, { x: 130, y: 100, width: 50, height: 70 });
+  near(r.x + r.width, 180); near(r.y, 100); // 视觉右上角（基础本地左上角）固定在世界 (180,100)
+});
+
+const RAD = { rotation: 0, mirrorX: false, mirrorY: false, width: 100, height: 60 };
+
+test("computeGraphicRadiusDrag 沿局部 x 增加圆角并钳制", () => {
+  near(canvas.computeGraphicRadiusDrag(RAD, 10, 5, 0), 15);
+  near(canvas.computeGraphicRadiusDrag(RAD, 10, -20, 0), 0);
+  near(canvas.computeGraphicRadiusDrag(RAD, 10, 100, 0), 30); // min(100,60)/2 钳制
+});
+
+test("computeGraphicRadiusDrag mirrorX 时局部 x 取反", () => {
+  near(canvas.computeGraphicRadiusDrag({ ...RAD, mirrorX: true }, 10, 5, 0), 5);
+});
+
+test("computeGraphicRadiusDrag 旋转感知：世界位移先转本地", () => {
+  // 旋转 90° 时世界向下拖等于本地 +x
+  near(canvas.computeGraphicRadiusDrag({ ...RAD, rotation: 90 }, 10, 0, 5), 15);
+});
+
+test("computeGraphicRadiusDrag mirrorY 不影响圆角（圆角只看局部 x）", () => {
+  near(canvas.computeGraphicRadiusDrag({ ...RAD, mirrorY: true }, 10, 5, 0), 15);
+  near(canvas.computeGraphicRadiusDrag({ ...RAD, rotation: 90, mirrorY: true }, 10, 0, 5), 15);
+});
+
+test("defaultGraphicRadius 圆角矩形用旧公式，其余形状为 0", () => {
+  near(canvas.defaultGraphicRadius("roundRect", 80, 60), 12); // min(14, min(w,h)*0.2)
+  near(canvas.defaultGraphicRadius("roundRect", 300, 300), 14); // 14 封顶
+  near(canvas.defaultGraphicRadius("triangle", 80, 60), 0);
+});
+
+test("effectiveGraphicRadius 默认 / 显式 / 钳制 / 非圆角恒 0", () => {
+  near(canvas.effectiveGraphicRadius("roundRect", 80, 60), 12);
+  near(canvas.effectiveGraphicRadius("roundRect", 80, 60, 5), 5);
+  near(canvas.effectiveGraphicRadius("roundRect", 20, 60, 50), 10); // 钳到 min/2
+  near(canvas.effectiveGraphicRadius("roundRect", 80, 60, -3), 0); // 负值归 0
+  near(canvas.effectiveGraphicRadius("rect", 80, 60), 0); // 矩形恒 0
+  near(canvas.effectiveGraphicRadius("rect", 80, 60, 20), 0); // 显式也不生效
+});
+
+test("resolveShapeAppearance 形状外观默认：填充/描边空串回退形状自带，strokeWidth 恒应用", () => {
+  const meta = { defaultFill: "#cce6f5", defaultStroke: "#202124" };
+  // 空串 → 跟随形状自带
+  assert.deepStrictEqual(canvas.resolveShapeAppearance("rect", { fill: "", stroke: "", strokeWidth: 1.5, radius: null, shapeOpacity: 1, objectOpacity: 1 }, meta), { fill: "#cce6f5", stroke: "#202124", strokeWidth: 1.5, radius: undefined, opacity: 1 });
+  // 显式色 → 覆盖自带
+  assert.deepStrictEqual(canvas.resolveShapeAppearance("rect", { fill: "#ff0000", stroke: "#00ff00", strokeWidth: 4, radius: 0, shapeOpacity: 1, objectOpacity: 1 }, meta), { fill: "#ff0000", stroke: "#00ff00", strokeWidth: 4, radius: undefined, opacity: 1 });
+});
+
+test("resolveShapeAppearance 圆角仅 roundRect 应用；null=跟随公式且 0=显式直角", () => {
+  const meta = { defaultFill: "#d7f0d7", defaultStroke: "#202124" };
+  const base = { fill: "", stroke: "", strokeWidth: 1.5, shapeOpacity: 1, objectOpacity: 1 };
+  assert.deepStrictEqual(canvas.resolveShapeAppearance("roundRect", { ...base, radius: 20 }, meta), { fill: "#d7f0d7", stroke: "#202124", strokeWidth: 1.5, radius: 20, opacity: 1 });
+  assert.deepStrictEqual(canvas.resolveShapeAppearance("roundRect", { ...base, radius: null }, meta), { fill: "#d7f0d7", stroke: "#202124", strokeWidth: 1.5, radius: undefined, opacity: 1 });
+  assert.deepStrictEqual(canvas.resolveShapeAppearance("roundRect", { ...base, radius: 0 }, meta), { fill: "#d7f0d7", stroke: "#202124", strokeWidth: 1.5, radius: 0, opacity: 1 });
+  assert.deepStrictEqual(canvas.resolveShapeAppearance("rect", { ...base, radius: 20 }, meta), { fill: "#d7f0d7", stroke: "#202124", strokeWidth: 1.5, radius: undefined, opacity: 1 }); // 矩形忽略
+});
+
+test("resolveShapeAppearance 信号机不应用外观默认，opacity 用 objectOpacity", () => {
+  const base = { fill: "#ff0000", stroke: "#00ff00", strokeWidth: 4, radius: 20, shapeOpacity: 0.5, objectOpacity: 0.8 };
+  assert.deepStrictEqual(canvas.resolveShapeAppearance("signal-in", base, { defaultFill: "#cce6f5", defaultStroke: "#202124" }), { opacity: 0.8 });
+  assert.deepStrictEqual(canvas.resolveShapeAppearance("signal-out", { ...base, objectOpacity: 1 }, { defaultFill: "#cce6f5", defaultStroke: "#202124" }), { opacity: 1 });
+});
+
+test("resolveShapeAppearance 形状不透明度与全部对象不透明度分离", () => {
+  const meta = { defaultFill: "#cce6f5", defaultStroke: "#202124" };
+  const base = { fill: "", stroke: "", strokeWidth: 1.5, radius: 0 };
+  assert.deepStrictEqual(canvas.resolveShapeAppearance("diamond", { ...base, shapeOpacity: 0.6, objectOpacity: 0.9 }, meta), { fill: "#cce6f5", stroke: "#202124", strokeWidth: 1.5, radius: undefined, opacity: 0.6 });
+  assert.deepStrictEqual(canvas.resolveShapeAppearance("signal-shunt", { ...base, shapeOpacity: 0.6, objectOpacity: 0.9 }, meta), { opacity: 0.9 });
 });
 
 // ── 框选批量设置（batch.ts）──

@@ -9,7 +9,7 @@ after(() => server.close());
 
 function emptyProject(overrides = {}) {
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
     projectInfo: { name: "空工程", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" },
     pages: [], layers: [], modules: [], connections: [], backgroundImages: [], labels: [], servicePatterns: [],
     transferGroups: [], platforms: [], graphics: [], assets: [], sourceLines: [], sourceStationsOnLine: [],
@@ -49,10 +49,15 @@ test("empty detection replaces only empty shells and preserves real diagrams", (
 
 test("bundled Void City sample contains the supplied diagram and public background", async () => {
   const sample = JSON.parse(await readFile(new URL("../public/sample-projects/default/wiring.json", import.meta.url), "utf8"));
+  assert.equal(sample.schemaVersion, 6);
   assert.equal(sample.projectInfo.name, "虚空城示例配线图");
   assert.equal(sample.modules.length, 143);
   assert.equal(sample.connections.length, 268);
   assert.equal(sample.labels.length, 189);
   assert.equal(sample.platforms.length, 121);
   assert.equal(sample.backgroundImages[0].src, "sample-projects/default/assets/void-city-map.png");
+  const doubleForkModules = sample.modules.filter((module) => ["double_fork_up", "double_fork_dn", "double_fork_y"].includes(module.templateId));
+  assert.ok(doubleForkModules.length > 0);
+  assert.ok(doubleForkModules.every((module) => module.customParams?.angle === undefined));
+  assert.ok(doubleForkModules.every((module) => Number.isFinite(module.customParams?.branchOffset)));
 });

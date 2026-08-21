@@ -61,11 +61,11 @@ await evalJs(`(() => {
 })()`);
 await waitFor("document.querySelector('.wiring-settings-modal') !== null", 8000);
 const categories = await evalJs(`[...document.querySelectorAll('.wiring-settings-categories button')].map(b => b.textContent.trim())`);
-check("设置弹窗左栏有 常规/画布 分类", categories.join(",") === "常规,画布", `categories=[${categories}]`);
+check("设置弹窗左栏有 常规/默认/画布 分类", categories.join(",") === "常规,默认,画布", `categories=[${categories}]`);
 
 const generalChecks = await evalJs(`[...document.querySelectorAll('.wiring-settings-detail label.wiring-check')].map(l => l.textContent.trim())`);
 check("常规选项卡含高级模式/自动连接/自动避让/连续放置",
-  ["高级模式", "自动连接", "自动避让", "连续放置"].every(t => generalChecks.includes(t)),
+  ["高级模式", "自动连接", "自动避让", "连续放置"].every(t => generalChecks.some(label => label.includes(t))),
   `checks=[${generalChecks}]`);
 
 // 常规选项卡切换「自动连接」→ 偏好写回 localStorage

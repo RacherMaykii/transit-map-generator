@@ -5,6 +5,7 @@
 import { useEffect, useState } from "react";
 import type { GraphicShapeType, ModuleTemplate } from "../types";
 import { templateTrackPathD } from "./primitives";
+import { effectiveGraphicRadius } from "../canvasLogic";
 import type { ProjectRepository } from "../../projects/repositories";
 
 function ProjectStationIcon({
@@ -125,7 +126,7 @@ const SIGNAL_LAMPS: Partial<Record<GraphicShapeType, string[]>> = {
 };
 
 /** 在画布上渲染一个矢量形状 / 信号机（SVG 主体，不含外层变换）。 */
-function ShapeGraphic({ shapeType, width, height, fill, stroke }: { shapeType: GraphicShapeType; width: number; height: number; fill?: string; stroke?: string }) {
+function ShapeGraphic({ shapeType, width, height, fill, stroke, radius, strokeWidth }: { shapeType: GraphicShapeType; width: number; height: number; fill?: string; stroke?: string; radius?: number; strokeWidth?: number }) {
   if (shapeType.startsWith("signal-")) {
     // 高柱信号机：竖柱 + 深色灯头 + 固定灯位
     const lamps = SIGNAL_LAMPS[shapeType] || [];
@@ -148,18 +149,20 @@ function ShapeGraphic({ shapeType, width, height, fill, stroke }: { shapeType: G
   }
   const f = fill || "#cce6f5";
   const s = stroke || "#202124";
-  const rx = shapeType === "roundRect" ? Math.min(14, Math.min(width, height) * 0.2) : 0;
+  const sw = strokeWidth ?? 1.5;
+  // effectiveGraphicRadius 对非圆角矩形恒返回 0
+  const rx = effectiveGraphicRadius(shapeType, width, height, radius);
   switch (shapeType) {
     case "rect":
-      return <rect width={width} height={height} fill={f} stroke={s} strokeWidth={1.5} rx={rx} />;
+      return <rect width={width} height={height} fill={f} stroke={s} strokeWidth={sw} rx={rx} />;
     case "roundRect":
-      return <rect width={width} height={height} fill={f} stroke={s} strokeWidth={1.5} rx={rx} />;
+      return <rect width={width} height={height} fill={f} stroke={s} strokeWidth={sw} rx={rx} />;
     case "triangle":
-      return <polygon points={`${width / 2},0 ${width},${height} 0,${height}`} fill={f} stroke={s} strokeWidth={1.5} strokeLinejoin="round" />;
+      return <polygon points={`${width / 2},0 ${width},${height} 0,${height}`} fill={f} stroke={s} strokeWidth={sw} strokeLinejoin="round" />;
     case "circle":
-      return <circle cx={width / 2} cy={height / 2} r={Math.min(width, height) / 2} fill={f} stroke={s} strokeWidth={1.5} />;
+      return <circle cx={width / 2} cy={height / 2} r={Math.min(width, height) / 2} fill={f} stroke={s} strokeWidth={sw} />;
     case "diamond":
-      return <polygon points={`${width / 2},0 ${width},${height / 2} ${width / 2},${height} 0,${height / 2}`} fill={f} stroke={s} strokeWidth={1.5} strokeLinejoin="round" />;
+      return <polygon points={`${width / 2},0 ${width},${height / 2} ${width / 2},${height} 0,${height / 2}`} fill={f} stroke={s} strokeWidth={sw} strokeLinejoin="round" />;
     default:
       return null;
   }

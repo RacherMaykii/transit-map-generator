@@ -39,11 +39,13 @@ export type TemplateCategory = "section" | "turnout" | "yard";
 export interface TemplateParam {
   key: string;
   label: string;
+  /** 数值参数使用滑块；布尔参数以 0/1 存储并显示为开关。 */
+  kind?: "number" | "boolean";
   min: number;
   max: number;
   default: number;
   step?: number;
-  unit?: string; // "px" | "°"
+  unit?: string; // "px"
 }
 
 /** 轨道交叉类型 */
@@ -178,6 +180,8 @@ export interface DiagramModule {
   trackColor?: string;
   /** 模块内嵌站名标签的着色方式：default=默认深灰 / line=跟随线路颜色 */
   labelColorMode?: "default" | "line";
+  /** 模块整体不透明度（渲染乘入组 opacity）；缺省 1 */
+  opacity?: number;
 }
 
 /** 模块间的连接 */
@@ -301,6 +305,10 @@ export interface AttachedGraphic {
   fill?: string;
   /** 形状描边色（图片图形不使用） */
   stroke?: string;
+  /** 形状描边粗细（矢量形状使用；信号机与图片图形不使用）。缺省按 1.5 渲染。 */
+  strokeWidth?: number;
+  /** 圆角矩形圆角半径（仅 roundRect 使用）。缺省按默认公式渲染。 */
+  radius?: number;
   attachedToId?: string;
   positionMode: "attached" | "independent";
   x: number;
@@ -375,6 +383,8 @@ export interface LabelObject {
   colorMode?: "default" | "line";
   /** 独立文字跟随的线路；不要求附着到站台模块。 */
   sourceLineId?: string;
+  /** 文字不透明度（渲染乘入组 opacity）；缺省 1 */
+  opacity?: number;
 }
 
 /** 标签锚点 → SVG text-anchor / dominantBaseline 映射 */

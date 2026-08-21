@@ -681,10 +681,11 @@ test("wiring editor wires v2 source state through history, persistence, and plac
 });
 
 test("wiring editor exposes RAF-backed resize handles and the complete default layer tree", async () => {
-  const [app, types, css] = await Promise.all([
+  const [app, types, css, canvasLogic] = await Promise.all([
     readFile(new URL("app/wiring/WiringDiagramApp.tsx", root), "utf8"),
     readFile(new URL("app/wiring/types.ts", root), "utf8"),
     readFile(new URL("app/wiring/wiring.css", root), "utf8"),
+    readFile(new URL("app/wiring/canvasLogic.ts", root), "utf8"),
   ]);
   assert.match(app, /platformResize/);
   assert.match(app, /graphicResize/);
@@ -693,7 +694,7 @@ test("wiring editor exposes RAF-backed resize handles and the complete default l
   assert.match(app, /requestAnimationFrame/);
   assert.match(app, /computePlatformResize\b/);
   assert.match(app, /MIN_PLATFORM_WIDTH/);
-  assert.match(app, /Math\.max\(4,/);
+  assert.match(canvasLogic, /Math\.max\(minWidth,/);
   assert.match(css, /object-resize-handle/);
   for (const id of ["layer-background", "layer-bg-reference", "layer-track-depot-access", "layer-platform-normal", "layer-platform-special", "layer-text-yard", "layer-text-line", "layer-text-note", "layer-icon-transfer", "layer-icon-facility", "layer-annotation-service", "layer-annotation-custom", "layer-aux-grid", "layer-aux-snap", "layer-aux-control"]) assert.match(types, new RegExp(id));
   for (const name of ["底图", "参考图", "出入段线", "普通站台", "特殊站台", "场段名称", "线路说明", "站点图标", "换乘图标", "特殊设施图标", "换乘通道", "运行关系", "自定义标注", "吸附线", "控制点"]) assert.match(types, new RegExp(name));
@@ -855,7 +856,7 @@ test("wiring editor supports configurable turnout parameters and double-branch t
   // makeCustomizedTemplate factory lives in templates/customize.ts
   // (re-exported by the templates.ts barrel).
   assert.match(customize, /export function makeCustomizedTemplate/);
-  assert.match(templates, /export \{ makeCustomizedTemplate \} from "\.\/templates\/customize"/);
+  assert.match(templates, /export \{ [^}]*\bmakeCustomizedTemplate\b[^}]*\} from "\.\/templates\/customize"/);
 
   // double_branch template defined (turnout.ts)
   assert.match(turnout, /id: "double_branch"/);
@@ -976,9 +977,11 @@ test("unified transfer button, discardSnapshot, and tutorial cleanup", async () 
   ]);
 
   // ── 1. Toolbar has visible transfer button with disabled logic ──
-  // The button renders "换乘" text inside a <button> tag with disabled prop
-  assert.match(app, /button[\s\S]*?>\s*换乘\s*</);
-  assert.match(app, /disabled=\{modules\.filter/);
+  // The compact toolbar may wrap the label in icon/text spans; semantics stay stable.
+  assert.match(app, /创建换乘/);
+  assert.match(app, /wiring-transfer-icon/);
+  assert.match(app, /const selectedModuleCount = modules\.filter/);
+  assert.match(app, /disabled=\{selectedModuleCount < 2\}/);
   assert.match(app, /请至少选择两个站台/);
   assert.match(app, /将选中的站台创建为换乘组/);
 
@@ -1029,6 +1032,23 @@ test("unified transfer button, discardSnapshot, and tutorial cleanup", async () 
   assert.match(tutorial, /bubbleRef/);
   assert.match(tutorial, /getBoundingClientRect/);
   assert.match(tutorial, /useLayoutEffect/);
+});
+
+test("wiring station mapping suggestions collapse and toolbar icon geometry stay explicit", async () => {
+  const [app, css] = await Promise.all([
+    readFile(new URL("app/wiring/WiringDiagramApp.tsx", root), "utf8"),
+    readFile(new URL("app/wiring/wiring.css", root), "utf8"),
+  ]);
+
+  assert.match(app, /physicalMappings: false/);
+  assert.match(app, /className="wiring-physical-mapping-toggle"/);
+  assert.match(app, /aria-expanded=\{Boolean\(expandedSections\.physicalMappings\)\}/);
+  assert.match(app, /expandedSections\.physicalMappings &&/);
+  assert.match(css, /\.wiring-physical-mapping-panel\.open \.wiring-physical-mapping-arrow/);
+
+  assert.match(app, /className="wiring-btn-icon wiring-view-icon"/);
+  assert.match(css, /\.wiring-view-btn \.wiring-btn-icon[\s\S]*?height: 16px/);
+  assert.match(css, /\.wiring-btn\.wiring-tutorial-btn[\s\S]*?width: 30px[\s\S]*?height: 30px/);
 });
 
 test("project deletion uses a highest-level three-editor confirmation", async () => {
@@ -1085,8 +1105,8 @@ test("auto-avoidance is a persistent toggle with a manual one-shot when off", as
   // The auto-run effect is gated on the toggle, so off = dragging keeps overlaps
   assert.match(app, /if \(!autoAvoidance\) return;/);
 
-  // When off, a manual one-shot button replaces the always-on behavior
-  assert.match(app, /\{!autoAvoidance &&/);
+  // The manual one-shot remains discoverable and becomes disabled while automation is active.
+  assert.match(app, /disabled=\{autoAvoidance\}/);
   assert.match(app, /避让一次/);
 });
 
@@ -1297,8 +1317,10 @@ test("框选批量设置与复制粘贴接线完整（纯函数导出 / inspecto
   // BatchInspector 接入 inspector 导出与上下文
   assert.match(inspectorIndex, /BatchInspector/);
   assert.match(inspectorProps, /applyBatchParamUpdate:\s*\(ids: string\[\], key: string, value: number\) => void/);
-  assert.match(batchInspector, /wiring-param-slider/);
+  assert.match(batchInspector, /wiring-batch-param-control/);
   assert.match(batchInspector, /computeBatchCategoryGroups/);
+  assert.match(batchInspector, /onPointerUp=/);
+  assert.match(batchInspector, /多值/);
   // WiringDiagramApp 接线：面板切换、批量更新、剪贴板、快捷键、工具栏
   assert.match(app, /const isBatchPanel = selectedIds\.length >= 2/);
   assert.match(app, /<BatchInspector ctx=\{inspectorCtx\} \/>/);
@@ -1311,9 +1333,9 @@ test("框选批量设置与复制粘贴接线完整（纯函数导出 / inspecto
   assert.match(app, /pasteClipboardActionRef\.current = pasteClipboard/);
   assert.match(app, /duplicateSelectionActionRef\.current = duplicateSelection/);
   assert.match(app, /Ctrl\+C 复制 \/ Ctrl\+V 粘贴 \/ Ctrl\+D 原位复制/);
-  assert.match(app, /📋 复制/);
-  assert.match(app, /📌 粘贴/);
-  assert.match(app, /⧉ 原位复制/);
+  assert.match(app, />复制<\/span>/);
+  assert.match(app, />粘贴<\/span>/);
+  assert.match(app, />原位复制<\/span>/);
   // CSS 分类 chips
   assert.match(css, /\.wiring-batch-category-chips/);
 });

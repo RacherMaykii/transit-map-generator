@@ -1,5 +1,5 @@
 import { worldPortPosition } from "./types";
-import type { AttachedGraphic, BackgroundImageObject, DiagramModule, LabelObject, LayerNode, ModuleConnection, ModulePort, ModuleTemplate, PlatformObject, PortRole, TransferGroup } from "./types";
+import type { AttachedGraphic, BackgroundImageObject, DiagramModule, GraphicShapeType, LabelObject, LayerNode, ModuleConnection, ModulePort, ModuleTemplate, PlatformObject, PortRole, TransferGroup } from "./types";
 import { defaultModuleLayerId, defaultPlatformLayerId } from "./layerAssignment";
 
 /** 画布尺寸调整方式：infinite=无限流自动适应内容 / manual=手动固定尺寸（关闭自动调整） */
@@ -252,6 +252,116 @@ export function computePlatformResize(
   return computePlatformResizeFromSize(platform, anchor, newW, newH, minWidth, minHeight);
 }
 
+// ── 矢量图形缩放（形状控制点：8 点框选缩放 + 圆角手柄） ──────────────
+
+/** 基础形状默认圆角：圆角矩形用旧公式 min(14, min(w,h)*0.2)，其余形状 0。 */
+export function defaultGraphicRadius(shapeType: GraphicShapeType | undefined, width: number, height: number): number {
+  return shapeType === "roundRect" ? Math.min(14, Math.min(width, height) * 0.2) : 0;
+}
+
+/** 圆角矩形有效圆角：钳制到 [0, min(w,h)/2]（SVG rx 最大为短边一半）。非圆角矩形恒为 0。 */
+export function effectiveGraphicRadius(
+  shapeType: GraphicShapeType | undefined,
+  width: number,
+  height: number,
+  radius?: number,
+): number {
+  if (shapeType !== "roundRect") return 0;
+  const base = radius ?? defaultGraphicRadius(shapeType, width, height);
+  return Math.max(0, Math.min(base, Math.min(width, height) / 2));
+}
+
+/**
+ * 图形缩放手柄索引 → 固定锚点（九宫格）。
+ *
+ * 手柄绘制在基础本地网格 handleIndex（0..8，4=中心）。缩放公式（computePlatformResize 系列）
+ * 保持的是「锚点基础本地坐标的非镜像世界位置」；而图形外层带镜像变换，视觉角点与基础本地
+ * 角点错位。为使视觉对角点（手柄对面）固定，锚点须取手柄的镜像对侧：
+ *   fxAnchor = mirrorX ? fx : 1 - fx；fyAnchor = mirrorY ? fy : 1 - fy
+ * 无镜像时退化为 8 - handleIndex。图片图标/信号机固定 anchor=0（保持旧行为：translate 原点不动）。
+ */
+export function graphicResizeAnchor(handleIndex: number, mirrorX?: boolean, mirrorY?: boolean): CanvasAnchor {
+  const { fx, fy } = CANVAS_ANCHORS[handleIndex] ?? CANVAS_ANCHORS[8];
+  const fxA = mirrorX ? fx : 1 - fx;
+  const fyA = mirrorY ? fy : 1 - fy;
+  const idx = CANVAS_ANCHORS.findIndex((a) => a.fx === fxA && a.fy === fyA);
+  return (idx >= 0 ? idx : 0) as CanvasAnchor;
+}
+
+/**
+ * 拖拽缩放矢量图形：委托 computePlatformResize（旋转感知、锚点固定、最小钳制）。
+ * 边中点手柄（fx=0.5 上下边 / fy=0.5 左右边）只沿所在轴调整——上下边只改高度、左右边只改宽度，
+ * 把世界位移转回本地后零掉垂直分量再解算；只有角点手柄同时调整宽高。
+ * mode="aspect"（Shift）仅对角点生效：按原长宽比重解高度并保持锚点不动。
+ */
+export function computeGraphicResize(
+  graphic: Pick<AttachedGraphic, "x" | "y" | "width" | "height" | "rotation">,
+  anchor: CanvasAnchor,
+  dx: number,
+  dy: number,
+  mode: "free" | "aspect" = "free",
+  minSize = MIN_PLATFORM_WIDTH,
+): PlatformResizeResult {
+  const { fx, fy } = CANVAS_ANCHORS[anchor] ?? CANVAS_ANCHORS[0];
+  if (fx === 0.5 || fy === 0.5) {
+    // 边中点手柄：旋转感知地把位移投影到所在本地轴
+    const rot = graphic.rotation ?? 0;
+    const local = rotateAround({ x: dx, y: dy }, { x: 0, y: 0 }, -rot);
+    if (fx === 0.5) local.x = 0; // 上下边：宽度不变
+    else local.y = 0;            // 左右边：高度不变
+    const constrained = rotateAround(local, { x: 0, y: 0 }, rot);
+    return computePlatformResize(graphic, anchor, constrained.x, constrained.y, minSize, minSize);
+  }
+  const base = computePlatformResize(graphic, anchor, dx, dy, minSize, minSize);
+  if (mode !== "aspect") return base;
+  const ratio = graphic.height / graphic.width;
+  return computePlatformResizeFromSize(graphic, anchor, base.width, base.width * ratio, minSize, minSize);
+}
+
+/**
+ * 拖拽圆角手柄：把世界位移转回本地坐标，用本地 x 增量解圆角（镜像翻转局部 x 轴方向），
+ * 钳制到 [0, min(w,h)/2]。
+ */
+export function computeGraphicRadiusDrag(
+  graphic: Pick<AttachedGraphic, "rotation" | "mirrorX" | "mirrorY" | "width" | "height">,
+  startRadius: number,
+  dx: number,
+  dy: number,
+): number {
+  let inv = rotateAround({ x: dx, y: dy }, { x: 0, y: 0 }, -(graphic.rotation ?? 0));
+  if (graphic.mirrorX) inv.x = -inv.x;
+  if (graphic.mirrorY) inv.y = -inv.y;
+  return Math.max(0, Math.min(startRadius + inv.x, Math.min(graphic.width, graphic.height) / 2));
+}
+
+/** 形状外观默认值（来自「设置 → 默认」）。fill/stroke 空串 = 跟随形状自带颜色；radius null = 跟随大小公式。 */
+export interface ShapeAppearanceDefaults {
+  fill: string;
+  stroke: string;
+  strokeWidth: number;
+  radius: number | null;
+  /** 形状不透明度（仅 5 个矢量形状应用） */
+  shapeOpacity: number;
+  /** 全部对象不透明度（信号机等非基础形状应用） */
+  objectOpacity: number;
+}
+
+/** 解析放置时的形状外观：信号机不应用外观默认；fill/stroke 空串回退到形状自带；圆角仅 roundRect 应用，null 表示跟随公式。 */
+export function resolveShapeAppearance(
+  shapeType: string,
+  defaults: ShapeAppearanceDefaults,
+  meta: { defaultFill?: string; defaultStroke?: string },
+): { fill?: string; stroke?: string; strokeWidth?: number; radius?: number; opacity: number } {
+  if (shapeType.startsWith("signal-")) return { opacity: defaults.objectOpacity };
+  return {
+    fill: defaults.fill || meta.defaultFill,
+    stroke: defaults.stroke || meta.defaultStroke,
+    strokeWidth: defaults.strokeWidth,
+    radius: shapeType === "roundRect" && defaults.radius !== null ? Math.max(0, defaults.radius) : undefined,
+    opacity: defaults.shapeOpacity,
+  };
+}
+
 export interface CanvasResizeTransform {
   width: number;
   height: number;
@@ -468,7 +578,7 @@ export function restoreBackgroundSize(image: BackgroundImageObject): BackgroundI
   return { ...image, scale: 1 };
 }
 
-function rotateAround(point: { x: number; y: number }, pivot: { x: number; y: number }, degrees: number) {
+export function rotateAround(point: { x: number; y: number }, pivot: { x: number; y: number }, degrees: number) {
   const radians = (degrees * Math.PI) / 180;
   const dx = point.x - pivot.x;
   const dy = point.y - pivot.y;

@@ -166,11 +166,35 @@ test("v1 projects migrate to the current schema without mutating the input", () 
   };
   const before = structuredClone(v1);
   const migrated = projectStore.migrateProjectSchema(v1);
-  assert.equal(migrated.schemaVersion, 5);
+  assert.equal(migrated.schemaVersion, 6);
   assert.deepEqual(v1, before);
   assert.deepEqual(migrated.sourceMappings, []);
   assert.deepEqual(migrated.filters, { lineIds: [] });
   assert.ok(migrated.pages.length);
+});
+
+test("v5 double-track forks migrate angle settings to pixel opening without mutating input", () => {
+  const legacy = {
+    schemaVersion: 5,
+    projectInfo: { name: "legacy-fork", createdAt: "a", updatedAt: "b" },
+    pages: [], layers: [], connections: [], backgroundImages: [], labels: [], transferGroups: [], platforms: [], graphics: [], assets: [],
+    sourceLines: [], sourceStationsOnLine: [], physicalStations: [], sourceMappings: [], filters: { lineIds: [] }, unresolvedChanges: [], pendingPlacement: null,
+    modules: [
+      { id: "angle-only", templateId: "double_fork_up", lineIds: [], sourceStationIds: [], layerId: "layer-track-turnout", customParams: { length: 260, spacing: 40, angle: 26.2 } },
+      { id: "mixed", templateId: "double_fork_dn", lineIds: [], sourceStationIds: [], layerId: "layer-track-turnout", customParams: { length: 260, spacing: 40, branchOffset: 18, angle: 23 } },
+    ],
+    viewport: { panX: 0, panY: 0, scale: 1 },
+  };
+  const before = structuredClone(legacy);
+  const migrated = projectStore.migrateProjectSchema(legacy);
+  const byId = Object.fromEntries(migrated.modules.map((module) => [module.id, module]));
+
+  assert.equal(migrated.schemaVersion, 6);
+  assert.equal(byId["angle-only"].customParams.branchOffset, 64);
+  assert.equal(byId.mixed.customParams.branchOffset, 18, "已有 px 参数优先，角度字段仅被清理");
+  assert.equal(byId["angle-only"].customParams.angle, undefined);
+  assert.equal(byId.mixed.customParams.angle, undefined);
+  assert.deepEqual(legacy, before);
 });
 
 test("color migration converts stored default color modes to line for existing objects", () => {
@@ -189,7 +213,7 @@ test("color migration converts stored default color modes to line for existing o
     viewport: { panX: 0, panY: 0, scale: 1 },
   };
   const migrated = projectStore.migrateProjectSchema(v2);
-  assert.equal(migrated.schemaVersion, 5);
+  assert.equal(migrated.schemaVersion, 6);
   const m1 = migrated.modules.find((m) => m.id === "m1");
   assert.equal(m1.trackColorMode, "line", "旧工程的显式 default 轨道色转换为跟随线路");
   assert.equal(m1.labelColorMode, "line", "旧工程的显式 default 站名色转换为跟随线路");
@@ -262,7 +286,7 @@ test("v4 migration reclassifies legacy generic layers once and preserves manual 
   });
 
   const customLayer = { id: "custom-leaf", name: "自定义", visible: true, locked: false, opacity: 1, expanded: true, parentId: null, order: 99 };
-  const current = { ...migrated, schemaVersion: 5, layers: [...migrated.layers, customLayer], modules: migrated.modules.map((item) => item.id === "turnout" ? { ...item, layerId: customLayer.id } : item) };
+  const current = { ...migrated, schemaVersion: 6, layers: [...migrated.layers, customLayer], modules: migrated.modules.map((item) => item.id === "turnout" ? { ...item, layerId: customLayer.id } : item) };
   assert.equal(projectStore.migrateProjectSchema(current).modules.find((item) => item.id === "turnout").layerId, customLayer.id);
 });
 
@@ -314,7 +338,7 @@ test("connections migrate line style and dynamic/manual zIndex modes", () => {
     viewport: { panX: 0, panY: 0, scale: 1 },
   };
   const migrated = projectStore.migrateProjectSchema(project);
-  assert.equal(migrated.schemaVersion, 5);
+  assert.equal(migrated.schemaVersion, 6);
   const byId = Object.fromEntries(migrated.connections.map((c) => [c.id, c]));
   assert.equal(byId.c1.lineStyle, "solid", "旧连接缺省线型应为实线");
   assert.equal(byId.c2.lineStyle, "dashed", "显式虚线线型应保留");

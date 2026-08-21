@@ -25,6 +25,7 @@ import type {
 import { DEFAULT_LAYERS } from "./types";
 import { createCanvasPage, leafLayerIds, type CanvasPageSettings } from "./canvasLogic";
 import { MODULE_TEMPLATES } from "./templates";
+import { legacyForkAngleToOpening } from "./templates/customize";
 import { defaultConnectionLayerId, defaultGraphicLayerId, defaultLabelLayerId, defaultModuleLayerId, defaultPlatformLayerId } from "./layerAssignment";
 import {
   DEFAULT_LAYOUT,
@@ -39,7 +40,7 @@ import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 import { buildSourceIdentityRecords } from "./sourceIdentity";
 
 /** 工程文件 schema 版本 */
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 const MAX_ARCHIVE_BYTES = 100 * 1024 * 1024;
 const MAX_ARCHIVE_ENTRIES = 2000;
 const MAX_UNCOMPRESSED_BYTES = 200 * 1024 * 1024;
@@ -367,7 +368,18 @@ export function migrateProjectSchema(project: ProjectFile): ProjectFile {
     color: c.color ?? undefined,
   }));
 
-  migrated.modules = migrated.modules.map((item, index) => ({ ...item, pageId: item.pageId || "page-1", createdOrder: typeof item.createdOrder === "number" ? item.createdOrder : index, trackColorMode: item.trackColorMode ?? "line", trackColor: item.trackColor ?? undefined, labelColorMode: item.labelColorMode ?? "line" }));
+  const legacyForkTemplateIds = new Set(["double_fork_up", "double_fork_dn", "double_fork_y"]);
+  migrated.modules = migrated.modules.map((item, index) => {
+    let customParams = item.customParams;
+    if (legacyForkTemplateIds.has(item.templateId) && customParams && Number.isFinite(customParams.angle)) {
+      const { angle, ...remainingParams } = customParams;
+      customParams = {
+        ...remainingParams,
+        branchOffset: customParams.branchOffset ?? legacyForkAngleToOpening(angle, customParams.length ?? 260),
+      };
+    }
+    return { ...item, customParams, pageId: item.pageId || "page-1", createdOrder: typeof item.createdOrder === "number" ? item.createdOrder : index, trackColorMode: item.trackColorMode ?? "line", trackColor: item.trackColor ?? undefined, labelColorMode: item.labelColorMode ?? "line" };
+  });
   migrated.backgroundImages = (migrated.backgroundImages || []).map((item, index) => ({ ...item, rotation: item.rotation ?? 0, pageId: item.pageId || "page-1", createdOrder: typeof item.createdOrder === "number" ? item.createdOrder : index }));
   migrated.labels = migrated.labels.map((item, index) => ({ ...item, pageId: item.pageId || "page-1", createdOrder: typeof item.createdOrder === "number" ? item.createdOrder : index, positionMode: item.positionMode || (item.attachedToId ? "attached" : "independent"), offsetX: item.offsetX ?? 0, offsetY: item.offsetY ?? 0, colorMode: item.colorMode === "default" && /^.+:template-label:(?:zh|en)$/.test(item.id || "") ? undefined : item.colorMode }));
   migrated.transferGroups = migrated.transferGroups.map((item, index) => ({ ...item, moduleIds: item.moduleIds?.length ? item.moduleIds : ((item as unknown as Record<string, unknown>).memberModuleIds as string[] || []), pageId: item.pageId || "page-1", createdOrder: typeof item.createdOrder === "number" ? item.createdOrder : index }));

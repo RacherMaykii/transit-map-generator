@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 5,
+  "schemaVersion": 6,
   "projectInfo": {
     "name": "虚空城示例配线图",
     "createdAt": "2026-08-14T02:02:17.253Z",
@@ -3852,8 +3852,7 @@
       "customParams": {
         "length": 260,
         "spacing": 40,
-        "branchOffset": 16,
-        "angle": 23
+        "branchOffset": 16
       },
       "trackColorMode": "line",
       "labelColorMode": "line"
@@ -3946,8 +3945,7 @@
       "customParams": {
         "length": 190,
         "spacing": 40,
-        "branchOffset": 40,
-        "angle": 36
+        "branchOffset": 40
       },
       "trackColorMode": "line",
       "labelColorMode": "line"

@@ -180,6 +180,28 @@ try {
       return label && label.querySelector('input[type=number]') ? label.querySelector('input[type=number]').value : null;
     })()`);
   }
+  async function setDefaultOverride(labelText, value) {
+    return await evalJs(`(() => {
+      const fields = [...document.querySelectorAll('.wiring-settings-override-field')];
+      const field = fields.find((candidate) => candidate.querySelector('.wiring-settings-override-heading b')?.textContent.trim() === '${labelText}');
+      if (!field) return false;
+      const uniform = [...field.querySelectorAll('.wiring-settings-mode-switch button')].find((button) => button.textContent.trim() === '统一设置');
+      if (uniform && !uniform.classList.contains('active')) uniform.click();
+      const input = field.querySelector('input[type=number]');
+      if (!input) return false;
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+      setter.call(input, String(${value}));
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      return true;
+    })()`);
+  }
+  async function readDefaultOverride(labelText) {
+    return await evalJs(`(() => {
+      const fields = [...document.querySelectorAll('.wiring-settings-override-field')];
+      const field = fields.find((candidate) => candidate.querySelector('.wiring-settings-override-heading b')?.textContent.trim() === '${labelText}');
+      return field?.querySelector('input[type=number]')?.value ?? null;
+    })()`);
+  }
 
   // ── 1. 吸附间距可调 ──
   await openSettings();
@@ -280,15 +302,16 @@ try {
   await clickSettingsTab("默认");
   await waitFor("document.querySelector('.wiring-settings-section') !== null", 5000);
   const defaultsTabOk = await evalJs(`(() => {
-    const section = [...document.querySelectorAll('.wiring-settings-section')].find(s => s.querySelector('h3')?.textContent.trim() === '默认放置');
-    const hasLen = section ? [...section.querySelectorAll('label')].some(l => l.firstChild?.textContent.trim() === '默认站台长度') : false;
-    const hasSpacing = section ? [...section.querySelectorAll('label')].some(l => l.firstChild?.textContent.trim() === '默认线路间距') : false;
+    const section = [...document.querySelectorAll('.wiring-settings-section')].find(s => s.querySelector('h3')?.textContent.trim() === '新元件默认值');
+    const names = section ? [...section.querySelectorAll('.wiring-settings-override-heading b')].map((node) => node.textContent.trim()) : [];
+    const hasLen = names.includes('站台长度');
+    const hasSpacing = names.includes('线路间距');
     return { hasLen, hasSpacing };
   })()`);
   check("「默认」分类显示默认站台长度/宽度/线路间距", defaultsTabOk.hasLen && defaultsTabOk.hasSpacing, JSON.stringify(defaultsTabOk));
-  await setNumberInput("默认站台长度", 200);
+  await setDefaultOverride("站台长度", 200);
   await sleep(300);
-  check("默认站台长度已设为 200", (await readNumberInput("默认站台长度")) === "200", `value=${await readNumberInput("默认站台长度")}`);
+  check("默认站台长度已设为 200", (await readDefaultOverride("站台长度")) === "200", `value=${await readDefaultOverride("站台长度")}`);
   await closeSettings();
 
   const placed2 = await clickCard("侧式站台站");
@@ -306,9 +329,9 @@ try {
   // ── 3. 默认线路间距 ──
   await openSettings();
   await clickSettingsTab("默认");
-  await setNumberInput("默认线路间距", 60);
+  await setDefaultOverride("线路间距", 60);
   await sleep(300);
-  check("默认线路间距已设为 60", (await readNumberInput("默认线路间距")) === "60", `value=${await readNumberInput("默认线路间距")}`);
+  check("默认线路间距已设为 60", (await readDefaultOverride("线路间距")) === "60", `value=${await readDefaultOverride("线路间距")}`);
   await closeSettings();
 
   const placed3 = await clickCard("双线区间");

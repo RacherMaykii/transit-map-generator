@@ -4,6 +4,7 @@
 // ──────────────────────────────────────────────
 
 import { doubleMain, standardPorts } from "./helpers";
+import { buildDoubleForkGeometry } from "./customize";
 import { DOWN_MAIN_Y, UP_MAIN_Y, type ModuleTemplate } from "../types";
 
 // ── B. 道岔与连接 ────────────────────────────
@@ -163,34 +164,23 @@ export const doubleBranchTurnout: ModuleTemplate = {
 // 连接出去才真正带斜度。直股对与支线对都各保留上下行双轨，用车道号（1/2）区分配对：
 // R_up1↔R_dn1（直股）、R_up2↔R_dn2（支线），findDoubleTrackPartner 按尾号自动配对。
 
+const doubleForkUpGeometry = buildDoubleForkGeometry("up", 260, 40, 64);
+const doubleForkDnGeometry = buildDoubleForkGeometry("dn", 260, 40, 56);
+const doubleForkYGeometry = buildDoubleForkGeometry("y", 260, 40, 40);
+
 export const doubleForkUp: ModuleTemplate = {
   id: "double_fork_up",
   name: "双线斜上分叉",
   category: "turnout",
   categoryName: "道岔与连接",
-  width: 260,
-  height: 128,
-  ports: [
-    { id: "L_up1", name: "左·上行", side: "left", role: "up_main", x: 0, y: 76, direction: 180 },
-    { id: "L_dn1", name: "左·下行", side: "left", role: "down_main", x: 0, y: 116, direction: 180 },
-    { id: "R_up1", name: "右·直股上行", side: "right", role: "up_main", x: 260, y: 76, direction: 0 },
-    { id: "R_dn1", name: "右·直股下行", side: "right", role: "down_main", x: 260, y: 116, direction: 0 },
-    { id: "R_up2", name: "右·支线上行", side: "right", role: "up_main", x: 260, y: 12, direction: 334 },
-    { id: "R_dn2", name: "右·支线下行", side: "right", role: "down_main", x: 260, y: 52, direction: 334 },
-  ],
-  tracks: [
-    { x1: 0, y1: 76, x2: 260, y2: 76, type: "main" },
-    { x1: 0, y1: 116, x2: 260, y2: 116, type: "main" },
-    { x1: 130, y1: 76, x2: 260, y2: 12, type: "branch" },
-    { x1: 130, y1: 116, x2: 260, y2: 52, type: "branch" },
-  ],
+  ...doubleForkUpGeometry,
   platforms: [],
-  labels: [{ x: 40, y: 30, text: "上分叉", fontSize: 9, anchor: "middle", fill: "#6b7b85" }],
   description: "双线主干直行，另分出一条双线斜向上的支线",
   params: [
     { key: "length", label: "长度", min: 40, max: 400, default: 260, unit: "px" },
     { key: "spacing", label: "线间距", min: 10, max: 128, default: 40, unit: "px" },
-    { key: "angle", label: "开合角度", min: 17, max: 30, default: 26.2, unit: "°" },
+    { key: "branchOffset", label: "开口幅度", min: 40, max: 76, default: 64, unit: "px" },
+    { key: "alignBranchEnds", label: "端点补齐对齐", kind: "boolean", min: 0, max: 1, default: 0, step: 1 },
   ],
 };
 
@@ -199,29 +189,14 @@ export const doubleForkDn: ModuleTemplate = {
   name: "双线斜下分叉",
   category: "turnout",
   categoryName: "道岔与连接",
-  width: 260,
-  height: 144,
-  ports: [
-    { id: "L_up1", name: "左·上行", side: "left", role: "up_main", x: 0, y: 36, direction: 180 },
-    { id: "L_dn1", name: "左·下行", side: "left", role: "down_main", x: 0, y: 76, direction: 180 },
-    { id: "R_up1", name: "右·直股上行", side: "right", role: "up_main", x: 260, y: 36, direction: 0 },
-    { id: "R_dn1", name: "右·直股下行", side: "right", role: "down_main", x: 260, y: 76, direction: 0 },
-    { id: "R_up2", name: "右·支线上行", side: "right", role: "up_main", x: 260, y: 92, direction: 23 },
-    { id: "R_dn2", name: "右·支线下行", side: "right", role: "down_main", x: 260, y: 132, direction: 23 },
-  ],
-  tracks: [
-    { x1: 0, y1: 36, x2: 260, y2: 36, type: "main" },
-    { x1: 0, y1: 76, x2: 260, y2: 76, type: "main" },
-    { x1: 130, y1: 36, x2: 260, y2: 92, type: "branch" },
-    { x1: 130, y1: 76, x2: 260, y2: 132, type: "branch" },
-  ],
+  ...doubleForkDnGeometry,
   platforms: [],
-  labels: [{ x: 40, y: 26, text: "下分叉", fontSize: 9, anchor: "middle", fill: "#6b7b85" }],
   description: "双线主干直行，另分出一条双线斜向下的支线",
   params: [
     { key: "length", label: "长度", min: 40, max: 400, default: 260, unit: "px" },
     { key: "spacing", label: "线间距", min: 10, max: 128, default: 40, unit: "px" },
-    { key: "angle", label: "开合角度", min: 8, max: 60, default: 23.3, unit: "°" },
+    { key: "branchOffset", label: "开口幅度", min: 40, max: 240, default: 56, unit: "px" },
+    { key: "alignBranchEnds", label: "端点补齐对齐", kind: "boolean", min: 0, max: 1, default: 0, step: 1 },
   ],
 };
 
@@ -230,31 +205,14 @@ export const doubleForkY: ModuleTemplate = {
   name: "双线Y形分叉",
   category: "turnout",
   categoryName: "道岔与连接",
-  width: 260,
-  height: 144,
-  ports: [
-    { id: "L_up1", name: "左·上行", side: "left", role: "up_main", x: 0, y: 52, direction: 180 },
-    { id: "L_dn1", name: "左·下行", side: "left", role: "down_main", x: 0, y: 92, direction: 180 },
-    { id: "R_up1", name: "右·上支上行", side: "right", role: "up_main", x: 260, y: 12, direction: 343 },
-    { id: "R_dn1", name: "右·上支下行", side: "right", role: "down_main", x: 260, y: 52, direction: 343 },
-    { id: "R_up2", name: "右·下支上行", side: "right", role: "up_main", x: 260, y: 92, direction: 17 },
-    { id: "R_dn2", name: "右·下支下行", side: "right", role: "down_main", x: 260, y: 132, direction: 17 },
-  ],
-  tracks: [
-    { x1: 0, y1: 52, x2: 130, y2: 52, type: "main" },
-    { x1: 0, y1: 92, x2: 130, y2: 92, type: "main" },
-    { x1: 130, y1: 52, x2: 260, y2: 12, type: "branch" },
-    { x1: 130, y1: 92, x2: 260, y2: 52, type: "branch" },
-    { x1: 130, y1: 52, x2: 260, y2: 92, type: "branch" },
-    { x1: 130, y1: 92, x2: 260, y2: 132, type: "branch" },
-  ],
+  ...doubleForkYGeometry,
   platforms: [],
-  labels: [{ x: 40, y: 36, text: "Y形分叉", fontSize: 9, anchor: "middle", fill: "#6b7b85" }],
   description: "双线一进二出，分成两条对称的双线斜向支线",
   params: [
     { key: "length", label: "长度", min: 40, max: 400, default: 260, unit: "px" },
     { key: "spacing", label: "线间距", min: 10, max: 128, default: 40, unit: "px" },
-    { key: "angle", label: "开合角度", min: 9, max: 21, default: 17.1, unit: "°" },
+    { key: "branchOffset", label: "开口幅度", min: 20, max: 52, default: 40, unit: "px" },
+    { key: "alignBranchEnds", label: "端点补齐对齐", kind: "boolean", min: 0, max: 1, default: 0, step: 1 },
   ],
 };
 
@@ -355,4 +313,3 @@ export const symmetricDoubleBranch: ModuleTemplate = {
     { key: "spacing", label: "线路间距", min: 10, max: 128, default: 40, unit: "px" },
   ],
 };
-

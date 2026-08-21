@@ -72,7 +72,7 @@ import {
   parseCsvFile,
   type ParsedCsvFile,
 } from "../transit/csv-io";
-import { alignModuleToTrackPorts, CANVAS_ANCHOR_NAMES, CANVAS_PRESETS, canvasAnchorArrowGrid, canvasAnchorDescription, centerBackgroundOnCanvas, compareRenderOrder, computeCanvasFitTransform, computeCanvasResizeTransform, computePlatformResize, computePlatformResizeFromSize, createCanvasPage, createLayerRank, effectiveConnectionZIndex, effectiveLabelZIndex, effectiveLayerOpacity, effectivePlatformZIndex, expandCanvasToFitBounds, fitBackgroundToCanvas, leafLayerIds, MIN_PLATFORM_HEIGHT, MIN_PLATFORM_WIDTH, mirrorModuleOwnedObjects, readableLabelRotation, rectFullyOutside, relayoutModuleOwnedObjects, restoreBackgroundSize, rotateModuleOwnedObjects, shiftOwnedPlatformZIndex, toggleOwnedModuleSelection, translateCanvasSelection, translateModuleGroup, type CanvasAnchor, type CanvasFlowMode, type CanvasResizeTransform } from "./canvasLogic";
+import { alignModuleToTrackPorts, CANVAS_ANCHOR_NAMES, CANVAS_PRESETS, canvasAnchorArrowGrid, canvasAnchorDescription, centerBackgroundOnCanvas, compareRenderOrder, computeCanvasFitTransform, computeCanvasResizeTransform, computeGraphicRadiusDrag, computeGraphicResize, computePlatformResize, computePlatformResizeFromSize, createCanvasPage, createLayerRank, effectiveConnectionZIndex, effectiveGraphicRadius, effectiveLabelZIndex, effectiveLayerOpacity, effectivePlatformZIndex, expandCanvasToFitBounds, fitBackgroundToCanvas, graphicResizeAnchor, leafLayerIds, MIN_PLATFORM_HEIGHT, MIN_PLATFORM_WIDTH, mirrorModuleOwnedObjects, readableLabelRotation, rectFullyOutside, relayoutModuleOwnedObjects, resolveShapeAppearance, restoreBackgroundSize, rotateModuleOwnedObjects, shiftOwnedPlatformZIndex, toggleOwnedModuleSelection, translateCanvasSelection, translateModuleGroup, type CanvasAnchor, type CanvasFlowMode, type CanvasResizeTransform } from "./canvasLogic";
 import { computeGraphicBbox, computeLabelBbox, computeLabelLocalBox, computePlatformBbox, resolveLabelIconOverlaps } from "./labelAvoidance";
 import { reconcileLineIdsForStationAssociations } from "./stationAssociation";
 import { duplicateTransferStationLabelIds } from "./transferLabels";
@@ -184,6 +184,7 @@ import {
 import type { InspectorContext } from "./inspectors/inspectorProps";
 import { applyBatchParam } from "./batch";
 import { buildCopyPayload, buildPasteData, type ClipboardPayload } from "./clipboard";
+import { buildPlacementCustomParams, DEFAULT_OVERRIDE_MODES, resolveDefaultOverrideMode, type DefaultOverrideKey, type DefaultOverrideMode } from "./defaultPlacement";
 import { renderItemBounds as pureRenderItemBounds, renderItemName as pureRenderItemName, moveLabelRelative as pureMoveLabelRelative, moveLabelToEdge as pureMoveLabelToEdge, renderCanvasItem as pureRenderCanvasItem, type RenderItemContext } from "./ui/renderItem";
 import { siteUrl } from "../site";
 
@@ -196,6 +197,54 @@ const MAX_EXPORT_PIXELS = 100_000_000;
 interface WiringDiagramAppProps {
   projectId?: string;
   repository?: ProjectRepository;
+}
+
+function DefaultNumberOverrideField({
+  label,
+  description,
+  rangeLabel,
+  mode,
+  value,
+  min,
+  max,
+  step = 1,
+  onModeChange,
+  onValueChange,
+}: {
+  label: string;
+  description: string;
+  rangeLabel: string;
+  mode: DefaultOverrideMode;
+  value: number;
+  min: number;
+  max: number;
+  step?: number;
+  onModeChange: (mode: DefaultOverrideMode) => void;
+  onValueChange: (value: number) => void;
+}) {
+  return (
+    <div className={`wiring-settings-override-field${mode === "template" ? " follows-template" : ""}`}>
+      <div className="wiring-settings-override-heading">
+        <span><b>{label}</b><small>{description}</small></span>
+        <div className="wiring-settings-mode-switch" role="group" aria-label={`${label}的默认方式`}>
+          <button type="button" className={mode === "template" ? "active" : ""} onClick={() => onModeChange("template")}>跟随模板</button>
+          <button type="button" className={mode === "uniform" ? "active" : ""} onClick={() => onModeChange("uniform")}>统一设置</button>
+        </div>
+      </div>
+      <label className="wiring-settings-number-field">
+        <span>统一值<small>{rangeLabel}</small></span>
+        <input
+          type="number"
+          min={min}
+          max={max}
+          step={step}
+          value={value}
+          disabled={mode === "template"}
+          onChange={(event) => onValueChange(Number(event.target.value))}
+        />
+      </label>
+    </div>
+  );
 }
 
 export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repository }: WiringDiagramAppProps) {
@@ -250,7 +299,7 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
   const [activeServicePatternId, setActiveServicePatternId] = useState("");
   const [csvImportPreview, setCsvImportPreview] = useState<CsvImportPreview | null>(null);
   const [showCsvImport, setShowCsvImport] = useState(false);
-  const [expandedSections, setExpandedSections] = usePersistentState<Record<string, boolean>>(PREF_KEY("expandedSections"), { library: true, stations: true, assets: false, layers: false });
+  const [expandedSections, setExpandedSections] = usePersistentState<Record<string, boolean>>(PREF_KEY("expandedSections"), { library: true, stations: true, physicalMappings: false, assets: false, layers: false });
   const toggleSection = useCallback((sectionId: string) => {
     setExpandedSections((prev) => ({ ...prev, [sectionId]: !prev[sectionId] }));
   }, []);
@@ -264,10 +313,29 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
   const [showPlacedOnly, setShowPlacedOnly] = useState(false);
   const [advancedMode, setAdvancedMode] = usePersistentState(PREF_KEY("advancedMode"), false);
   const [continuousPlace, setContinuousPlace] = usePersistentState(PREF_KEY("continuousPlace"), false);
-  /** 默认放置参数：新放置模板时按模板支持的参数键覆盖其默认值（站台长度/宽度、线路间距等） */
+  /** 默认放置参数：数值会被保留，但仅在对应模式为「统一设置」时覆盖模板。 */
   const [defaultSpacing, setDefaultSpacing] = usePersistentState<number>(PREF_KEY("defaultSpacing"), 40);
   const [defaultPlatformLength, setDefaultPlatformLength] = usePersistentState<number>(PREF_KEY("defaultPlatformLength"), 160);
   const [defaultPlatformWidth, setDefaultPlatformWidth] = usePersistentState<number>(PREF_KEY("defaultPlatformWidth"), 16);
+  const [defaultOverrideModes, setDefaultOverrideModes] = usePersistentState<Record<DefaultOverrideKey, DefaultOverrideMode>>(PREF_KEY("defaultOverrideModes"), DEFAULT_OVERRIDE_MODES);
+  const defaultOverrideMode = useCallback((key: DefaultOverrideKey): DefaultOverrideMode => (
+    resolveDefaultOverrideMode(defaultOverrideModes, key)
+  ), [defaultOverrideModes]);
+  const updateDefaultOverrideMode = useCallback((key: DefaultOverrideKey, mode: DefaultOverrideMode) => {
+    setDefaultOverrideModes((previous) => ({ ...DEFAULT_OVERRIDE_MODES, ...previous, [key]: mode }));
+  }, []);
+  // 形状外观默认：fill/stroke 空串 = 跟随形状自带颜色；圆角模式单独决定是否沿用尺寸公式。
+  const [defaultShapeFill, setDefaultShapeFill] = usePersistentState<string>(PREF_KEY("defaultShapeFill"), "");
+  const [defaultShapeStroke, setDefaultShapeStroke] = usePersistentState<string>(PREF_KEY("defaultShapeStroke"), "");
+  const [defaultShapeStrokeWidth, setDefaultShapeStrokeWidth] = usePersistentState<number>(PREF_KEY("defaultShapeStrokeWidth"), 1.5);
+  const [defaultShapeRadius, setDefaultShapeRadius] = usePersistentState<number>(PREF_KEY("defaultShapeRadius"), 0);
+  // 不透明度默认：形状只作用于 5 个矢量形状；全部对象作用于模块/文字/编号/图标/信号机/背景图
+  const [defaultShapeOpacity, setDefaultShapeOpacity] = usePersistentState<number>(PREF_KEY("defaultShapeOpacity"), 1);
+  const [defaultObjectOpacity, setDefaultObjectOpacity] = usePersistentState<number>(PREF_KEY("defaultObjectOpacity"), 1);
+  // 道岔数值仅在对应模式为「统一设置」时覆盖 length/branchOffset。
+  const [defaultTurnoutLength, setDefaultTurnoutLength] = usePersistentState<number>(PREF_KEY("defaultTurnoutLength"), 0);
+  const [defaultBranchOffset, setDefaultBranchOffset] = usePersistentState<number>(PREF_KEY("defaultBranchOffset"), 0);
+  const [defaultAlignBranchEnds, setDefaultAlignBranchEnds] = usePersistentState<boolean>(PREF_KEY("defaultAlignBranchEnds"), false);
   const [editingPlatformModuleId, setEditingPlatformModuleId] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
@@ -333,7 +401,7 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
   const pasteClipboardActionRef = useRef<() => void>(() => undefined);
   const duplicateSelectionActionRef = useRef<() => void>(() => undefined);
   const dragRef = useRef<{
-    type: "none" | "module" | "selection" | "transferGroup" | "pan" | "bgImage" | "label" | "platform" | "graphic" | "platformResize" | "graphicResize" | "controlPoint" | "controlPointHandle" | "selectionBox";
+    type: "none" | "module" | "selection" | "transferGroup" | "pan" | "bgImage" | "label" | "platform" | "graphic" | "platformResize" | "graphicResize" | "graphicRadius" | "controlPoint" | "controlPointHandle" | "selectionBox";
     selectionIds?: string[];
     moduleId?: string;
     transferGroupId?: string;
@@ -356,10 +424,17 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
     startPY: number;
     startWidth?: number;
     startHeight?: number;
-    /** 站台缩放：九宫格锚点（0-8） */
+    /** 图形缩放：九宫格锚点（0-8），已按镜像校正 */
     anchor?: number;
-    /** 站台缩放：起始旋转角 */
+    /** 图形缩放：起始旋转角 */
     startRotation?: number;
+    /** 图形缩放：是否为矢量形状（决定 Shift 等比 vs 图标固定等比） */
+    graphicShape?: boolean;
+    /** 圆角拖拽：起始圆角 */
+    startRadius?: number;
+    /** 圆角拖拽：起始镜像（拖拽期间镜像不变，用于本地坐标取反） */
+    startMirrorX?: boolean;
+    startMirrorY?: boolean;
     moved: boolean;
     /** mousedown 时对象是否已处于选中状态：mouseup 未移动时据此决定取消选中还是选中，避免闭包陈旧 */
     wasSelected?: boolean;
@@ -368,6 +443,27 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
     lastMY?: number;
   }>({ type: "none", startSX: 0, startSY: 0, startMX: 0, startMY: 0, startPX: 0, startPY: 0, moved: false });
   const selectionBoxRef = useRef<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
+
+  /**
+   * 顶部主工具的唯一切换入口。
+   * 按钮、快捷键与 Esc 都必须经过这里，避免退出放置或连接时残留不同的交互状态。
+   */
+  const activateToolbarTool = useCallback((nextTool: "auto" | "select" | "pan" | "label" | "connect") => {
+    setActiveTool(nextTool);
+    setActiveTemplateId(null);
+    setPendingElement(null);
+    setPendingStationId(null);
+    setConnectFrom(null);
+    if (nextTool === "label") setSelectedIds([]);
+    if (nextTool === "connect") setStatus("连接工具：请选择起点端口");
+  }, []);
+
+  /** 顶部网格开关与当前画布共用同一数据源，设置弹窗不会再读到旧值。 */
+  const updateShowGrid = useCallback((visible: boolean) => {
+    setShowGrid(visible);
+    setPages((previous) => previous.map((page) => page.id === activePageId ? { ...page, showGrid: visible } : page));
+    setHasUnsavedChanges(true);
+  }, [activePageId]);
 
   /** 图层拖拽排序状态 */
   const layerDragRef = useRef<{ draggedId: string | null; dropTargetId: string | null; dropPosition: "before" | "after" | "inside" | null }>({ draggedId: null, dropTargetId: null, dropPosition: null });
@@ -1206,23 +1302,23 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
       zIndex: placementZIndex,
       pageId: activePageId,
       createdOrder: Date.now(),
+      opacity: defaultObjectOpacity,
     };
     // Also set customLabel to the station name if available
     if (sourceStationId) {
       if (station) mod.customLabel = station.nameZh;
     }
-    // 初始化模板参数默认值，并按「默认放置」设置覆盖模板支持的参数键（站台长度/宽度、线路间距等）
+    // 初始化模板参数默认值；只有显式选择「统一设置」的项目才覆盖模板自带参数。
+    // 这样同台换乘的 32px 线距、折返站的 80px 站台等特殊比例不会被全局值意外改写。
     if (template.params && template.params.length > 0) {
-      mod.customParams = Object.fromEntries(template.params.map(p => [p.key, p.default]));
-      const placementDefaults: Record<string, number> = {
+      mod.customParams = buildPlacementCustomParams(template, defaultOverrideModes, {
         spacing: defaultSpacing,
         platformLength: defaultPlatformLength,
         platformWidth: defaultPlatformWidth,
-      };
-      for (const key of Object.keys(mod.customParams)) {
-        const override = placementDefaults[key];
-        if (override != null && Number.isFinite(override) && override > 0) mod.customParams[key] = override;
-      }
+        length: defaultTurnoutLength,
+        branchOffset: defaultBranchOffset,
+        alignBranchEnds: defaultAlignBranchEnds,
+      });
     }
     // 解析带自定义参数的模板几何：站台/标签位置跟随 customParams（线路间距、站台长度/宽度等），
     // 与渲染端 buildResolvedTemplateMap 用同一工厂，保证物化站台与模块内轨道/端口一致。
@@ -1978,7 +2074,7 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
           previewSrc: createBackgroundPreview(img),
           scale: Math.min(1, 800 / img.naturalWidth),
           rotation: 0,
-          opacity: tracingMode ? 0.4 : 0.6,
+          opacity: (tracingMode ? 0.4 : 0.6) * defaultObjectOpacity,
           locked: false,
           visible: true,
           layerId: resolvePlacementLayer("layer-bg"),
@@ -2061,7 +2157,7 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
     const owner = selectedModules[0];
     const x = owner ? owner.x + 20 : Math.max(0, -viewport.panX / viewport.scale + 120);
     const y = owner ? owner.y + 20 : Math.max(0, -viewport.panY / viewport.scale + 120);
-    const graphic: AttachedGraphic = { id: genId("graphic"), assetId: asset.id, attachedToId: owner?.id, positionMode: owner ? "attached" : "independent", offsetX: owner ? x - owner.x : 0, offsetY: owner ? y - owner.y : 0, x, y, width: 32, height: 32, rotation: 0, opacity: 1, layerId: resolvePlacementLayer(defaultGraphicLayerId({ attachedToId: owner?.id })), zIndex: placementZIndex, pageId: activePageId, visible: true, locked: false, createdOrder: Date.now() };
+    const graphic: AttachedGraphic = { id: genId("graphic"), assetId: asset.id, attachedToId: owner?.id, positionMode: owner ? "attached" : "independent", offsetX: owner ? x - owner.x : 0, offsetY: owner ? y - owner.y : 0, x, y, width: 32, height: 32, rotation: 0, opacity: defaultObjectOpacity, layerId: resolvePlacementLayer(defaultGraphicLayerId({ attachedToId: owner?.id })), zIndex: placementZIndex, pageId: activePageId, visible: true, locked: false, createdOrder: Date.now() };
     history.captureSnapshot("放置图标");
     setGraphics((prev) => [...prev, graphic]);
     setSelectedIds([graphic.id]);
@@ -2179,6 +2275,7 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
       zIndex: placementZIndex,
       pageId: activePageId,
       createdOrder: Date.now(),
+      opacity: defaultObjectOpacity,
     };
     history.captureSnapshot("放置标签");
     setLabels((prev) => [...prev, label]);
@@ -2215,12 +2312,22 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
     const meta = SHAPE_META[pending.shapeType];
     const x = snapEnabled ? snapToGrid(worldX, snapGridSize) : Math.round(worldX);
     const y = snapEnabled ? snapToGrid(worldY, snapGridSize) : Math.round(worldY);
+    const appr = resolveShapeAppearance(pending.shapeType, {
+      fill: defaultShapeFill,
+      stroke: defaultShapeStroke,
+      strokeWidth: defaultShapeStrokeWidth,
+      radius: defaultOverrideMode("shapeRadius") === "uniform" ? defaultShapeRadius : null,
+      shapeOpacity: defaultShapeOpacity,
+      objectOpacity: defaultObjectOpacity,
+    }, meta);
     const graphic: AttachedGraphic = {
       id: genId("graphic"),
       assetId: undefined,
       shapeType: pending.shapeType,
-      fill: meta.defaultFill,
-      stroke: meta.defaultStroke,
+      fill: appr.fill ?? meta.defaultFill,
+      stroke: appr.stroke ?? meta.defaultStroke,
+      strokeWidth: appr.strokeWidth,
+      radius: appr.radius,
       positionMode: "independent",
       x,
       y,
@@ -2229,7 +2336,7 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
       rotation: 0,
       mirrorX: placementMirrorX,
       mirrorY: placementMirrorY,
-      opacity: 1,
+      opacity: appr.opacity,
       layerId: resolvePlacementLayer(defaultGraphicLayerId({ shapeType: pending.shapeType })),
       zIndex: placementZIndex,
       pageId: activePageId,
@@ -2284,6 +2391,7 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
       zIndex: placementZIndex,
       pageId: activePageId,
       createdOrder: Date.now(),
+      opacity: defaultObjectOpacity,
     };
     history.captureSnapshot(`放置${pending.numeralType === "track" ? "股道编号" : "道岔编号"}`);
     setLabels((prev) => [...prev, label]);
@@ -3160,12 +3268,23 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
     dragRef.current = { type: "platformResize", platformId: platform.id, anchor: platform.resizeAnchor ?? 0, startRotation: platform.rotation, startSX: e.clientX, startSY: e.clientY, startMX: platform.x, startMY: platform.y, startPX: 0, startPY: 0, startWidth: platform.width, startHeight: platform.height, moved: false };
   }
 
-  function handleGraphicResizeMouseDown(e: React.MouseEvent, graphic: AttachedGraphic) {
+  function handleGraphicResizeMouseDown(e: React.MouseEvent, graphic: AttachedGraphic, handleIndex = 8) {
     e.stopPropagation();
     if (graphic.locked || isLayerLocked(graphic.layerId)) return;
     setSelectedIds([graphic.id]);
-    history.captureSnapshot("调整图标尺寸");
-    dragRef.current = { type: "graphicResize", graphicId: graphic.id, startSX: e.clientX, startSY: e.clientY, startMX: graphic.x, startMY: graphic.y, startPX: 0, startPY: 0, startWidth: graphic.width, startHeight: graphic.height, moved: false };
+    history.captureSnapshot("调整图形尺寸");
+    const isShape = !!graphic.shapeType && !graphic.shapeType.startsWith("signal-");
+    // 矢量形状用镜像感知锚点；图片图标/信号机固定锚点 0（保持旧行为：translate 原点不动）
+    const anchor = isShape ? graphicResizeAnchor(handleIndex, graphic.mirrorX, graphic.mirrorY) : 0;
+    dragRef.current = { type: "graphicResize", graphicId: graphic.id, anchor, graphicShape: isShape, startRotation: graphic.rotation, startMirrorX: graphic.mirrorX, startMirrorY: graphic.mirrorY, startSX: e.clientX, startSY: e.clientY, startMX: graphic.x, startMY: graphic.y, startPX: 0, startPY: 0, startWidth: graphic.width, startHeight: graphic.height, moved: false };
+  }
+
+  function handleGraphicRadiusMouseDown(e: React.MouseEvent, graphic: AttachedGraphic) {
+    e.stopPropagation();
+    if (graphic.locked || isLayerLocked(graphic.layerId)) return;
+    setSelectedIds([graphic.id]);
+    history.captureSnapshot("调整圆角");
+    dragRef.current = { type: "graphicRadius", graphicId: graphic.id, startRotation: graphic.rotation, startMirrorX: graphic.mirrorX, startMirrorY: graphic.mirrorY, startSX: e.clientX, startSY: e.clientY, startMX: graphic.x, startMY: graphic.y, startPX: 0, startPY: 0, startWidth: graphic.width, startHeight: graphic.height, startRadius: effectiveGraphicRadius(graphic.shapeType, graphic.width, graphic.height, graphic.radius), moved: false };
   }
 
   /** 全局鼠标移动 */
@@ -3392,12 +3511,33 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
       if (drag.type === "graphicResize" && drag.graphicId) {
         const w = toWorld(e.clientX, e.clientY);
         const startW = toWorld(drag.startSX, drag.startSY);
-        const startWidth = drag.startWidth || 4;
-        const startHeight = drag.startHeight || 4;
-        const width = Math.max(4, startWidth + w.x - startW.x);
-        const height = Math.max(4, width * (startHeight / startWidth));
-        if (width !== startWidth || height !== startHeight) drag.moved = true;
-        setGraphics((prev) => prev.map((graphic) => graphic.id === drag.graphicId ? { ...graphic, width, height } : graphic));
+        const start = { x: drag.startMX, y: drag.startMY, width: drag.startWidth ?? MIN_PLATFORM_WIDTH, height: drag.startHeight ?? MIN_PLATFORM_HEIGHT, rotation: drag.startRotation ?? 0 };
+        // 矢量形状：Shift 保持长宽比，否则自由；图片图标/信号机：固定等比（保持旧行为）
+        const mode = drag.graphicShape ? (e.shiftKey ? "aspect" : "free") : "aspect";
+        const result = computeGraphicResize(start, (drag.anchor ?? 0) as CanvasAnchor, w.x - startW.x, w.y - startW.y, mode);
+        if (result.width !== drag.startWidth || result.height !== drag.startHeight) drag.moved = true;
+        setGraphics((prev) => prev.map((graphic) => {
+          if (graphic.id !== drag.graphicId) return graphic;
+          const owner = graphic.positionMode === "attached" ? modulesRef.current.find((module) => module.id === graphic.attachedToId) : undefined;
+          const next: AttachedGraphic = { ...graphic, x: result.x, y: result.y, width: result.width, height: result.height, offsetX: owner ? result.x - owner.x : graphic.offsetX, offsetY: owner ? result.y - owner.y : graphic.offsetY };
+          // 缩小尺寸时同步钳制存储的圆角
+          if (graphic.shapeType === "roundRect" && typeof graphic.radius === "number") {
+            next.radius = Math.min(graphic.radius, Math.min(result.width, result.height) / 2);
+          }
+          return next;
+        }));
+      }
+      if (drag.type === "graphicRadius" && drag.graphicId) {
+        const w = toWorld(e.clientX, e.clientY);
+        const startW = toWorld(drag.startSX, drag.startSY);
+        const radius = computeGraphicRadiusDrag(
+          { rotation: drag.startRotation ?? 0, mirrorX: drag.startMirrorX, mirrorY: drag.startMirrorY, width: drag.startWidth ?? MIN_PLATFORM_WIDTH, height: drag.startHeight ?? MIN_PLATFORM_HEIGHT },
+          drag.startRadius ?? 0,
+          w.x - startW.x,
+          w.y - startW.y,
+        );
+        if (radius !== drag.startRadius) drag.moved = true;
+        setGraphics((prev) => prev.map((graphic) => graphic.id === drag.graphicId ? { ...graphic, radius } : graphic));
       }
       // 控制点只保存中间位置与切线。端点和端点锚点每次都从模块端口派生。
       if (drag.type === "controlPoint" && drag.connId && drag.cpId) {
@@ -3630,10 +3770,10 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
         }
       }
       if (drag.type === "graphic" && drag.moved) setHasUnsavedChanges(true);
-      if ((drag.type === "platformResize" || drag.type === "graphicResize") && !drag.moved) {
+      if ((drag.type === "platformResize" || drag.type === "graphicResize" || drag.type === "graphicRadius") && !drag.moved) {
         history.discardSnapshot();
       }
-      if ((drag.type === "platformResize" || drag.type === "graphicResize") && drag.moved) setHasUnsavedChanges(true);
+      if ((drag.type === "platformResize" || drag.type === "graphicResize" || drag.type === "graphicRadius") && drag.moved) setHasUnsavedChanges(true);
       if ((drag.type === "controlPoint" || drag.type === "controlPointHandle") && !drag.moved) {
         history.discardSnapshot();
       }
@@ -3735,26 +3875,21 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
       } else if (e.key === "Escape") {
         const wasConnecting = activeTool === "connect" || activeTool === "auto" || connectFrom;
         const wasPlacing = activeTool === "shape" && pendingElement !== null;
-        setActiveTool("auto");
-        setActiveTemplateId(null);
-        setPendingElement(null);
-        setConnectFrom(null);
+        activateToolbarTool("auto");
         setSelectedIds([]);
         if (wasConnecting) setStatus("已取消连接");
         else if (wasPlacing) setStatus("已取消放置");
       } else if (e.key === "v" || e.key === "V") {
-        setActiveTool("select");
+        activateToolbarTool("select");
       } else if (e.key === "h" || e.key === "H") {
-        setActiveTool("pan");
+        activateToolbarTool("pan");
       } else if (e.key === "c" || e.key === "C") {
-        setActiveTool("connect");
-        setConnectFrom(null);
-        setStatus("连接工具：请选择起点端口");
+        activateToolbarTool("connect");
       }
     }
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [selectedIds, handleUndo, handleRedo, backgroundImages, modules, labels, activeTool, connectFrom, pendingElement]);
+  }, [selectedIds, handleUndo, handleRedo, backgroundImages, modules, labels, activeTool, connectFrom, pendingElement, activateToolbarTool]);
 
   /** 右键菜单 */
   function handleContextMenu(e: React.MouseEvent) {
@@ -4120,12 +4255,12 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
       height: activePage.height,
       orientation: activePage.orientation,
       gridSize: activePage.gridSize,
-      showGrid: activePage.showGrid,
+      showGrid,
       backgroundColor: activePage.backgroundColor,
       anchor: 4,
       preset: "custom",
     });
-  }, [settingsOpen, settingsTab, activePage, activePageId]);
+  }, [settingsOpen, settingsTab, activePage, activePageId, showGrid]);
 
   /** 新建画布对话框打开时，把手动大小数值重置为当前画布尺寸；同次打开内用户的输入不被覆盖。 */
   useEffect(() => {
@@ -4786,6 +4921,7 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
     handlePlatformResizeMouseDown,
     handleGraphicMouseDown,
     handleGraphicResizeMouseDown,
+    handleGraphicRadiusMouseDown,
     updateGraphic,
     handleTransferGroupMouseDown,
     handleTransferGroupDoubleClick,
@@ -4900,23 +5036,30 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
 
   /** 多选 ≥2 个对象时右侧面板整体切换为「批量设置」 */
   const isBatchPanel = selectedIds.length >= 2;
+  const selectedModuleCount = modules.filter((module) => selectedIds.includes(module.id)).length;
+  const saveButtonLabel = saveStatus === "saving"
+    ? "保存中…"
+    : saveStatus === "saved" && !hasUnsavedChanges
+      ? "已保存"
+      : "保存";
 
   return (
     <div className="wiring-editor-shell" onContextMenu={handleContextMenu}>
       {/* ══════════ 顶部工具栏 ══════════ */}
       <header className="wiring-toolbar">
-        {/* ── Row 1: 核心操作 ── */}
-        <div className="wiring-toolbar-row">
-          <div className="wiring-toolbar-group">
+        {/* ── Row 1: 项目、编辑命令与文件操作 ── */}
+        <div className="wiring-toolbar-row wiring-toolbar-primary-row">
+          <div className="wiring-toolbar-group wiring-toolbar-brand">
             <span className="brand-mark"><img src={siteUrl("assets/rail-transit-icon.png")} alt="" /></span>
             <div className="wiring-toolbar-title">
-              <h1>配线图编辑器</h1>
-              <p>Simplified Metro Track Layout</p>
+              <h1>配线图</h1>
+              <p>Track Layout Editor</p>
             </div>
           </div>
 
-          <div className="wiring-toolbar-group">
-            <button className="wiring-btn" onClick={() => setNewCanvasOpen(true)}>新建画布</button>
+          <div className="wiring-toolbar-group wiring-toolbar-project" aria-label="画布管理">
+            <span className="wiring-toolbar-group-label">画布</span>
+            <button className="wiring-btn" onClick={() => setNewCanvasOpen(true)} title="新建画布"><span className="wiring-btn-icon">＋</span><span className="wiring-btn-label">新建画布</span></button>
             <select className="wiring-page-select" value={activePageId} onChange={(e) => switchCanvasPage(e.target.value)} title="切换画布">
               {pages.map((page) => <option key={page.id} value={page.id}>{page.name}</option>)}
             </select>
@@ -4924,70 +5067,82 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
             <button className="wiring-btn icon-only danger" onClick={deleteActivePage} disabled={pages.length < 2} title="删除画布">×</button>
           </div>
 
-          <div className="wiring-toolbar-group">
-            <button className="wiring-btn" onClick={() => void handleSaveProject()} title="保存到当前城市项目 (Ctrl+S)">💾 保存</button>
-          </div>
-
-          <div className="wiring-toolbar-group">
+          <div className="wiring-toolbar-group wiring-toolbar-edit" aria-label="编辑命令">
+            <span className="wiring-toolbar-group-label">编辑</span>
             <button className="wiring-btn icon-only" onClick={handleUndo} disabled={!history.canUndo} title={`撤销 (Ctrl+Z)${history.lastOperation ? `：${history.lastOperation}` : ""}`}>↶</button>
             <button className="wiring-btn icon-only" onClick={handleRedo} disabled={!history.canRedo} title={`重做 (Ctrl+Shift+Z)${history.nextOperation ? `：${history.nextOperation}` : ""}`}>↷</button>
-            <button className="wiring-btn icon-only wiring-tutorial-btn" onClick={resetTutorial} title="查看使用教程">?</button>
+            <button className="wiring-btn wiring-command-btn" onClick={copySelection} disabled={!selectedIds.length} title="复制选中内容 (Ctrl+C)"><span className="wiring-btn-icon">⧉</span><span className="wiring-btn-label">复制</span></button>
+            <button className="wiring-btn wiring-command-btn" onClick={pasteClipboard} disabled={!clipboard} title="粘贴并偏移 24px (Ctrl+V)"><span className="wiring-btn-icon">▣</span><span className="wiring-btn-label">粘贴</span></button>
+            <button className="wiring-btn wiring-command-btn" onClick={duplicateSelection} disabled={!selectedIds.length} title="原位复制选中内容 (Ctrl+D)"><span className="wiring-btn-icon">⧉+</span><span className="wiring-btn-label">原位复制</span></button>
+            <button className="wiring-btn wiring-command-btn danger" onClick={deleteSelected} disabled={!selectedIds.length} title="删除选中内容 (Delete)"><span className="wiring-btn-icon">⌫</span><span className="wiring-btn-label">删除</span></button>
           </div>
 
           <div className="wiring-toolbar-spacer" />
 
-          <div className="wiring-toolbar-group">
-            <button className="wiring-btn" onClick={openSettings} title="打开设置：常规选项与画布大小调整">⚙ 设置</button>
-            <PopoverMenu label="导入" icon="📥" items={importMenuItems} />
-            <PopoverMenu label="导出" icon="📤" items={exportMenuItems} />
-            <PopoverMenu label="筛选" icon="🔽" badge={activeFilterCount > 0 ? activeFilterCount : undefined} items={filterMenuItems} minWidth={220} />
-          </div>
-
-          <div className="wiring-toolbar-group">
-            <button className="wiring-btn" onClick={copySelection} disabled={!selectedIds.length} title="复制选中模块（带参数与所属对象）(Ctrl+C)">📋 复制</button>
-            <button className="wiring-btn" onClick={pasteClipboard} disabled={!clipboard} title="粘贴复制的模块（偏移 24px）(Ctrl+V)">📌 粘贴</button>
-            <button className="wiring-btn" onClick={duplicateSelection} disabled={!selectedIds.length} title="原位复制选中模块（带参数与所属对象）(Ctrl+D)">⧉ 原位复制</button>
-            <button className="wiring-btn danger" onClick={deleteSelected} disabled={!selectedIds.length}>🗑 删除</button>
+          <div className="wiring-toolbar-group wiring-toolbar-file" aria-label="文件与设置">
+            <button className={`wiring-btn primary wiring-save-btn${hasUnsavedChanges ? " dirty" : ""}`} onClick={() => void handleSaveProject()} title="保存到当前城市项目 (Ctrl+S)">
+              <span className="wiring-save-indicator" aria-hidden="true" />
+              <span className="wiring-btn-label">{saveButtonLabel}</span>
+            </button>
+            <button className="wiring-btn wiring-compact-label" onClick={openSettings} title="编辑器偏好与画布设置"><span className="wiring-btn-icon">⚙</span><span className="wiring-btn-label">设置</span></button>
+            <PopoverMenu label="导入" icon="↓" items={importMenuItems} />
+            <PopoverMenu label="导出" icon="↑" items={exportMenuItems} />
+            <PopoverMenu label="筛选" icon="⌕" badge={activeFilterCount > 0 ? activeFilterCount : undefined} items={filterMenuItems} minWidth={220} align="right" />
+            <button className="wiring-btn icon-only wiring-tutorial-btn" onClick={resetTutorial} title="查看使用教程">?</button>
           </div>
         </div>
 
-        {/* ── Row 2: 工具 + 选项 + 视图 ── */}
-        <div className="wiring-toolbar-row">
-          <div className="wiring-toolbar-group">
+        {/* ── Row 2: 工具模式、上下文命令、显示辅助与视图 ── */}
+        <div className="wiring-toolbar-row wiring-toolbar-secondary-row">
+          <div className="wiring-toolbar-group wiring-toolbar-tools" aria-label="绘图工具">
+            <span className="wiring-toolbar-group-label">工具</span>
             <div className="wiring-segmented">
-              <button className={activeTool === "auto" ? "active" : ""} onClick={() => { setActiveTool("auto"); setActiveTemplateId(null); setPendingElement(null); setConnectFrom(null); }} title="自动工具：选择、移动模块；选中模块后可直接点击端口连接">自动</button>
-              <button className={activeTool === "select" ? "active" : ""} onClick={() => { setActiveTool("select"); setActiveTemplateId(null); setPendingElement(null); }} title="选择工具 (V)">选择</button>
-              <button className={activeTool === "pan" ? "active" : ""} onClick={() => { setActiveTool("pan"); setPendingElement(null); }} title="平移工具 (H)">平移</button>
-              <button className={activeTool === "label" ? "active" : ""} onClick={() => { setSelectedIds([]); setActiveTool("label"); setActiveTemplateId(null); setPendingElement(null); }} title="文字标签工具：点击画布放置文字标签">文字</button>
-              <button className={activeTool === "connect" ? "active" : ""} onClick={() => { setActiveTool("connect"); setActiveTemplateId(null); setPendingElement(null); setConnectFrom(null); }} title="连接工具：点击两个端口创建轨道连接 (C)">连接</button>
+              <button className={activeTool === "auto" ? "active" : ""} onClick={() => activateToolbarTool("auto")} title="自动工具：选择、移动；点击端口可连接"><span>◎</span>自动</button>
+              <button className={activeTool === "select" ? "active" : ""} onClick={() => activateToolbarTool("select")} title="选择工具 (V)"><span>↖</span>选择</button>
+              <button className={activeTool === "pan" ? "active" : ""} onClick={() => activateToolbarTool("pan")} title="平移工具 (H)"><span>↔</span>平移</button>
+              <button className={activeTool === "label" ? "active" : ""} onClick={() => activateToolbarTool("label")} title="文字工具：点击画布放置文字"><span>T</span>文字</button>
+              <button className={activeTool === "connect" ? "active" : ""} onClick={() => activateToolbarTool("connect")} title="连接工具：点击两个端口创建轨道连接 (C)"><span>⌁</span>连接</button>
             </div>
+          </div>
+
+          <div className="wiring-toolbar-group wiring-toolbar-context" aria-label="上下文操作">
+            <span className="wiring-toolbar-group-label">操作</span>
             <button
-              className="wiring-btn"
+              className="wiring-btn wiring-context-btn"
               onClick={() => createTransferGroupFromSelection()}
-              disabled={modules.filter((m) => selectedIds.includes(m.id)).length < 2}
-              title={modules.filter((m) => selectedIds.includes(m.id)).length < 2 ? "请至少选择两个站台" : "将选中的站台创建为换乘组"}
+              disabled={selectedModuleCount < 2}
+              title={selectedModuleCount < 2 ? "请至少选择两个站台模块" : "将选中的站台创建为换乘组"}
             >
-              换乘
+              <span className="wiring-transfer-icon" aria-hidden="true"><i /><i /><b /></span><span className="wiring-btn-label">创建换乘</span>
             </button>
-            {!autoAvoidance && (
-              <button className="wiring-btn" onClick={() => applyLabelAvoidance(true)} title="自动避让已关闭：手动整理站名和图标位置，避免相互遮挡">🔀 避让一次</button>
-            )}
+            <button className="wiring-btn wiring-context-btn" onClick={() => applyLabelAvoidance(true)} disabled={autoAvoidance} title={autoAvoidance ? "已开启自动避让，无需手动执行" : "执行一次站名和图标避让"}><span className="wiring-btn-icon">↝</span><span className="wiring-btn-label">避让一次</span></button>
           </div>
 
-          <div className="wiring-toolbar-group">
-            <label className="wiring-check" title="控制辅助小字与站台类型文字（岛式/侧式/终点/折返等）的全局显示；不会修改各组件自己的设置"><input type="checkbox" checked={showAuxLabels} onChange={(e) => setShowAuxLabels(e.target.checked)} />辅助标识</label>
+          <div className="wiring-toolbar-spacer" />
+
+          <div className="wiring-toolbar-group wiring-toolbar-assists" aria-label="显示与连接辅助">
+            <span className="wiring-toolbar-group-label">辅助</span>
+            <label className="wiring-check wiring-toolbar-toggle" title="显示辅助小字与站台类型"><input type="checkbox" checked={showAuxLabels} onChange={(e) => setShowAuxLabels(e.target.checked)} /><span>辅助标识</span></label>
+            <label className="wiring-check wiring-toolbar-toggle"><input type="checkbox" checked={showGrid} onChange={(e) => updateShowGrid(e.target.checked)} /><span>网格</span></label>
+            <label className="wiring-check wiring-toolbar-toggle"><input type="checkbox" checked={snapEnabled} onChange={(e) => setSnapEnabled(e.target.checked)} /><span>吸附</span></label>
+            <label className="wiring-check wiring-toolbar-toggle" title="连接标准上、下行端口时，同时创建另一条正线连接"><input type="checkbox" checked={doubleTrackConnect} onChange={(e) => setDoubleTrackConnect(e.target.checked)} /><span>双线连接</span></label>
           </div>
 
-          <div className="wiring-toolbar-group">
-            <label className="wiring-check"><input type="checkbox" checked={showGrid} onChange={(e) => setShowGrid(e.target.checked)} />网格</label>
-            <label className="wiring-check"><input type="checkbox" checked={snapEnabled} onChange={(e) => setSnapEnabled(e.target.checked)} />吸附</label>
-            <label className="wiring-check" title="连接标准上、下行端口时，同时创建另一条正线连接"><input type="checkbox" checked={doubleTrackConnect} onChange={(e) => setDoubleTrackConnect(e.target.checked)} />双线连接</label>
-          </div>
-
-          <div className="wiring-toolbar-group">
-            <button className="wiring-btn" onClick={fitCanvas}>适应画布</button>
-            <button className="wiring-btn" onClick={() => setViewport({ panX: 0, panY: 0, scale: 1 })}>原始尺寸</button>
-            <button className="wiring-btn" onClick={centerCanvas}>居中</button>
+          <div className="wiring-toolbar-group wiring-toolbar-view" aria-label="视图控制">
+            <span className="wiring-toolbar-group-label">视图</span>
+            <button className="wiring-btn wiring-view-btn" onClick={fitCanvas} title="适应画布">
+              <span className="wiring-btn-icon wiring-view-icon" aria-hidden="true">
+                <svg viewBox="0 0 16 16"><path d="M6 2H2v4M10 2h4v4M14 10v4h-4M6 14H2v-4" /></svg>
+              </span>
+              <span className="wiring-btn-label">适应画布</span>
+            </button>
+            <button className="wiring-btn wiring-view-btn" onClick={() => setViewport({ panX: 0, panY: 0, scale: 1 })} title="原始尺寸 100%"><span className="wiring-btn-icon wiring-one-to-one">1:1</span><span className="wiring-btn-label">原始尺寸</span></button>
+            <button className="wiring-btn wiring-view-btn" onClick={centerCanvas} title="将画布居中">
+              <span className="wiring-btn-icon wiring-view-icon" aria-hidden="true">
+                <svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="3.25" /><path d="M8 1v3M8 12v3M1 8h3M12 8h3" /></svg>
+              </span>
+              <span className="wiring-btn-label">居中</span>
+            </button>
           </div>
         </div>
 
@@ -5057,70 +5212,155 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
       {settingsOpen && (
         <div className="wiring-dialog-backdrop" role="presentation" onMouseDown={() => setSettingsOpen(false)}>
           <section className="wiring-dialog wiring-settings-modal" role="dialog" aria-modal="true" aria-labelledby="wiring-settings-title" onMouseDown={(event) => event.stopPropagation()}>
-            <header><h2 id="wiring-settings-title">设置</h2><button className="wiring-btn icon-only" onClick={() => setSettingsOpen(false)} title="关闭">×</button></header>
+            <header className="wiring-settings-header">
+              <div className="wiring-settings-title">
+                <span>编辑器偏好</span>
+                <h2 id="wiring-settings-title">设置</h2>
+                <p>调整编辑行为、默认放置参数与当前画布外观。</p>
+              </div>
+              <button className="wiring-btn icon-only" onClick={() => setSettingsOpen(false)} title="关闭">×</button>
+            </header>
             <div className="wiring-settings-body">
               <nav className="wiring-settings-categories">
-                <button className={settingsTab === "general" ? "active" : ""} onClick={() => setSettingsTab("general")}>常规</button>
-                <button className={settingsTab === "defaults" ? "active" : ""} onClick={() => setSettingsTab("defaults")}>默认</button>
-                <button className={settingsTab === "canvas" ? "active" : ""} onClick={() => setSettingsTab("canvas")}>画布</button>
+                <button type="button" data-icon="⚙" data-description="编辑行为与辅助操作" className={settingsTab === "general" ? "active" : ""} onClick={() => setSettingsTab("general")}>常规</button>
+                <button type="button" data-icon="＋" data-description="新元件的初始规格" className={settingsTab === "defaults" ? "active" : ""} onClick={() => setSettingsTab("defaults")}>默认</button>
+                <button type="button" data-icon="▣" data-description="尺寸、网格与背景" className={settingsTab === "canvas" ? "active" : ""} onClick={() => setSettingsTab("canvas")}>画布</button>
               </nav>
               <div className="wiring-settings-detail">
+                <div className={`wiring-settings-save-note ${settingsTab === "canvas" ? "draft" : "instant"}`}>
+                  <span aria-hidden="true" />
+                  {settingsTab === "canvas" ? "画布调整会先保留为草稿，点击底部“应用”后写入工程。" : "此页修改即时保存在本机偏好中，不会改动已放置元件。"}
+                </div>
                 {settingsTab === "general" ? (
                   <div className="wiring-settings-section">
-                    <h3>常规</h3>
-                    <label className="wiring-check"><input type="checkbox" checked={advancedMode} onChange={(e) => { const enabled = e.target.checked; setAdvancedMode(enabled); if (!enabled) { setPlacementRotation(0); setPlacementMirrorX(false); setPlacementMirrorY(false); } }} />高级模式</label>
-                    <label className="wiring-check"><input type="checkbox" checked={autoConnect} onChange={(e) => setAutoConnect(e.target.checked)} />自动连接</label>
-                    <label className="wiring-check" title="站名/图标与站台重叠时自动推开；关闭后可手动点击“避让一次”"><input type="checkbox" checked={autoAvoidance} onChange={(e) => setAutoAvoidance(e.target.checked)} />自动避让</label>
-                    <label className="wiring-check"><input type="checkbox" checked={continuousPlace} onChange={(e) => setContinuousPlace(e.target.checked)} title="连续放置模式：选择模板后可多次点击放置" />连续放置</label>
-                    <label className="wiring-check" title="开启时吸附步长跟随当前画布的「网格间距」；关闭后按下方数值单独设置吸附步长"><input type="checkbox" checked={snapStep === 0} onChange={(e) => setSnapStep(e.target.checked ? 0 : 20)} />吸附跟随网格</label>
-                    <label title={snapStep === 0 ? "吸附步长跟随画布网格间距，跟随网格时不可编辑；点击可查看解锁提示" : "独立于网格间距的吸附步长"}>吸附间距
-                      <span className={`wiring-snap-field${snapStep === 0 ? " locked" : ""}`} onClick={snapStep === 0 ? showSnapLockHint : undefined}><input type="number" min={1} max={200} value={snapStep === 0 ? pageGridSize : snapStep} disabled={snapStep === 0} onChange={(e) => setSnapStep(Math.max(1, Math.round(Number(e.target.value)) || 20))} /></span>
-                      {snapLockHint && <span className="wiring-snap-field-hint">吸附间距跟随网格，取消勾选「吸附跟随网格」即可解锁编辑</span>}
-                    </label>
+                    <div className="wiring-settings-section-heading"><span>常规</span><h3>编辑行为</h3><p>控制放置、连接与对齐时的默认交互方式。</p></div>
+
+                    <section className="wiring-settings-card">
+                      <header><div><h4>放置行为</h4><p>决定选择元件后如何连续工作，以及是否显示高级变换能力。</p></div></header>
+                      <label className="wiring-check wiring-setting-toggle">
+                        <span className="wiring-setting-copy"><b>高级模式</b><small>显示旋转、镜像和更完整的工程参数。</small></span>
+                        <input type="checkbox" checked={advancedMode} onChange={(e) => { const enabled = e.target.checked; setAdvancedMode(enabled); if (!enabled) { setPlacementRotation(0); setPlacementMirrorX(false); setPlacementMirrorY(false); } }} />
+                      </label>
+                      <label className="wiring-check wiring-setting-toggle">
+                        <span className="wiring-setting-copy"><b>连续放置</b><small>放置一个元件后继续保持当前模板，适合批量绘制。</small></span>
+                        <input type="checkbox" checked={continuousPlace} onChange={(e) => setContinuousPlace(e.target.checked)} title="连续放置模式：选择模板后可多次点击放置" />
+                      </label>
+                    </section>
+
+                    <section className="wiring-settings-card">
+                      <header><div><h4>连接与布局</h4><p>减少重复连接和站名遮挡，关闭后仍可在工具栏手动执行。</p></div></header>
+                      <label className="wiring-check wiring-setting-toggle">
+                        <span className="wiring-setting-copy"><b>自动连接</b><small>放置相邻轨道元件时尝试连接可匹配的端口。</small></span>
+                        <input type="checkbox" checked={autoConnect} onChange={(e) => setAutoConnect(e.target.checked)} />
+                      </label>
+                      <label className="wiring-check wiring-setting-toggle" title="站名/图标与站台重叠时自动推开；关闭后可手动点击“避让一次”">
+                        <span className="wiring-setting-copy"><b>自动避让</b><small>新增站名和图标时自动推开重叠内容。</small></span>
+                        <input type="checkbox" checked={autoAvoidance} onChange={(e) => setAutoAvoidance(e.target.checked)} />
+                      </label>
+                    </section>
+
+                    <section className="wiring-settings-card">
+                      <header><div><h4>网格与吸附</h4><p>吸附可以独立于网格显示；跟随网格时使用当前画布的网格间距。</p></div></header>
+                      <label className="wiring-check wiring-setting-toggle" title="开启时吸附步长跟随当前画布的「网格间距」；关闭后按下方数值单独设置吸附步长">
+                        <span className="wiring-setting-copy"><b>吸附跟随网格</b><small>当前画布网格间距为 {pageGridSize}px。</small></span>
+                        <input type="checkbox" checked={snapStep === 0} onChange={(e) => setSnapStep(e.target.checked ? 0 : 20)} />
+                      </label>
+                      <label className="wiring-settings-field" title={snapStep === 0 ? "吸附步长跟随画布网格间距，跟随网格时不可编辑；点击可查看解锁提示" : "独立于网格间距的吸附步长"}>
+                        <span><b>吸附间距</b><small>{snapStep === 0 ? "正在跟随当前画布网格。" : "独立吸附步长，范围 1–200px。"}</small></span>
+                        <span className={`wiring-snap-field${snapStep === 0 ? " locked" : ""}`} onClick={snapStep === 0 ? showSnapLockHint : undefined}><input type="number" min={1} max={200} value={snapStep === 0 ? pageGridSize : snapStep} disabled={snapStep === 0} onChange={(e) => setSnapStep(Math.max(1, Math.round(Number(e.target.value)) || 20))} /></span>
+                        {snapLockHint && <span className="wiring-snap-field-hint">取消“吸附跟随网格”即可单独编辑间距。</span>}
+                      </label>
+                    </section>
                   </div>
                 ) : settingsTab === "defaults" ? (
                   <div className="wiring-settings-section">
-                    <h3>默认放置</h3>
-                    <p style={{ fontSize: 10, color: "var(--muted)", margin: "4px 0 10px" }}>新放置的元件使用以下默认值；已放置的元件不受影响，可在属性面板的「模板参数」中单独调整。</p>
-                    <label>默认站台长度<input type="number" min={4} max={400} value={defaultPlatformLength} onChange={(e) => setDefaultPlatformLength(Math.max(4, Math.round(Number(e.target.value)) || 160))} /></label>
-                    <label>默认站台宽度<input type="number" min={4} max={40} value={defaultPlatformWidth} onChange={(e) => setDefaultPlatformWidth(Math.max(4, Math.round(Number(e.target.value)) || 16))} /></label>
-                    <label>默认线路间距<input type="number" min={10} max={128} value={defaultSpacing} onChange={(e) => setDefaultSpacing(Math.max(10, Math.round(Number(e.target.value)) || 40))} /></label>
+                    <div className="wiring-settings-section-heading"><span>默认</span><h3>新元件默认值</h3><p>“跟随模板”保留不同元件各自的合理比例；“统一设置”只覆盖之后放置且支持该参数的元件。</p></div>
+                    <section className="wiring-settings-card">
+                      <header><div><h4>轨道与道岔</h4><p>优先保留模板自己的线距和道岔比例；统一值超出某个模板范围时会按该模板范围限制。</p></div></header>
+                      <div className="wiring-settings-override-grid">
+                        <DefaultNumberOverrideField label="线路间距" description="普通双线、同台换乘与双线道岔可以不同。" rangeLabel="10–128px" mode={defaultOverrideMode("spacing")} value={defaultSpacing} min={10} max={128} onModeChange={(mode) => updateDefaultOverrideMode("spacing", mode)} onValueChange={(value) => setDefaultSpacing(Math.min(128, Math.max(10, Math.round(value) || 40)))} />
+                        <DefaultNumberOverrideField label="道岔长度" description="不同道岔模板需要不同的展开长度。" rangeLabel="40–400px" mode={defaultOverrideMode("length")} value={defaultTurnoutLength > 0 ? defaultTurnoutLength : 100} min={40} max={400} onModeChange={(mode) => { if (mode === "uniform" && defaultTurnoutLength <= 0) setDefaultTurnoutLength(100); updateDefaultOverrideMode("length", mode); }} onValueChange={(value) => setDefaultTurnoutLength(Math.min(400, Math.max(40, Math.round(value) || 100)))} />
+                        <DefaultNumberOverrideField label="开口幅度" description="普通单开和双线分岔的允许范围不同。" rangeLabel="12–240px" mode={defaultOverrideMode("branchOffset")} value={defaultBranchOffset > 0 ? defaultBranchOffset : 24} min={12} max={240} onModeChange={(mode) => { if (mode === "uniform" && defaultBranchOffset <= 0) setDefaultBranchOffset(24); updateDefaultOverrideMode("branchOffset", mode); }} onValueChange={(value) => setDefaultBranchOffset(Math.min(240, Math.max(12, Math.round(value) || 24)))} />
+                      </div>
+                      <label className="wiring-check wiring-setting-toggle wiring-settings-card-toggle">
+                        <span className="wiring-setting-copy"><b>双线分岔端点补齐对齐</b><small>新放置的上分支、下分支和 Y 形分支保持两条支线出口平齐；其它模板不受影响。</small></span>
+                        <input type="checkbox" checked={defaultAlignBranchEnds} onChange={(event) => setDefaultAlignBranchEnds(event.target.checked)} />
+                      </label>
+                    </section>
+                    <section className="wiring-settings-card">
+                      <header><div><h4>站点与站台</h4><p>折返站、普通站和换乘站可以使用不同站台尺寸；需要统一时再开启覆盖。</p></div></header>
+                      <div className="wiring-settings-override-grid">
+                        <DefaultNumberOverrideField label="站台长度" description="普通站通常为 160px，部分折返站为 80px。" rangeLabel="60–240px" mode={defaultOverrideMode("platformLength")} value={defaultPlatformLength} min={60} max={240} onModeChange={(mode) => updateDefaultOverrideMode("platformLength", mode)} onValueChange={(value) => setDefaultPlatformLength(Math.min(240, Math.max(60, Math.round(value) || 160)))} />
+                        <DefaultNumberOverrideField label="站台宽度" description="保留站台模板的默认厚度或使用统一值。" rangeLabel="8–24px" mode={defaultOverrideMode("platformWidth")} value={defaultPlatformWidth} min={8} max={24} onModeChange={(mode) => updateDefaultOverrideMode("platformWidth", mode)} onValueChange={(value) => setDefaultPlatformWidth(Math.min(24, Math.max(8, Math.round(value) || 16)))} />
+                      </div>
+                    </section>
+                    <section className="wiring-settings-card">
+                      <header><div><h4>图形与图标</h4><p>设置新放置矢量形状的填充、描边与圆角；图标仍保留素材自身外观。</p></div></header>
+                      <div className="wiring-settings-defaults-body">
+                        <label className="wiring-settings-color-field"><span>默认填充色<small>不勾选时用右侧取色</small></span><span className="wiring-settings-color-controls"><input type="checkbox" title="跟随形状自带默认填充色" checked={defaultShapeFill === ""} onChange={(e) => setDefaultShapeFill(e.target.checked ? "" : (defaultShapeFill || "#cce6f5"))} /><input type="color" value={defaultShapeFill || "#cce6f5"} disabled={defaultShapeFill === ""} onChange={(e) => setDefaultShapeFill(e.target.value)} /></span></label>
+                        <label className="wiring-settings-color-field"><span>默认描边色<small>不勾选时用右侧取色</small></span><span className="wiring-settings-color-controls"><input type="checkbox" title="跟随形状自带默认描边色" checked={defaultShapeStroke === ""} onChange={(e) => setDefaultShapeStroke(e.target.checked ? "" : (defaultShapeStroke || "#202124"))} /><input type="color" value={defaultShapeStroke || "#202124"} disabled={defaultShapeStroke === ""} onChange={(e) => setDefaultShapeStroke(e.target.value)} /></span></label>
+                        <div className="wiring-settings-field-grid">
+                          <label className="wiring-settings-number-field"><span>默认描边粗细<small>0.5–10px</small></span><input type="number" min={0.5} max={10} step={0.5} value={defaultShapeStrokeWidth} onChange={(e) => setDefaultShapeStrokeWidth(Math.min(10, Math.max(0.5, Number(e.target.value) || 1.5)))} /></label>
+                        </div>
+                        <DefaultNumberOverrideField label="圆角矩形圆角" description="跟随模板时根据图形尺寸自动计算；统一值允许设为 0。" rangeLabel="0–100px" mode={defaultOverrideMode("shapeRadius")} value={defaultShapeRadius} min={0} max={100} onModeChange={(mode) => updateDefaultOverrideMode("shapeRadius", mode)} onValueChange={(value) => setDefaultShapeRadius(Math.min(100, Math.max(0, Math.round(value) || 0)))} />
+                      </div>
+                    </section>
+                    <section className="wiring-settings-card">
+                      <header><div><h4>通用外观</h4><p>不透明度仅作用于之后放置的元件；0% 在这里表示真正完全透明。</p></div></header>
+                      <div className="wiring-settings-field-grid">
+                        <label className="wiring-settings-opacity-field"><span>形状不透明度<small>矢量形状</small></span><div><input type="range" min={0} max={100} step={5} value={Math.round(defaultShapeOpacity * 100)} onChange={(e) => setDefaultShapeOpacity(Number(e.target.value) / 100)} /><b>{Math.round(defaultShapeOpacity * 100)}%</b></div></label>
+                        <label className="wiring-settings-opacity-field"><span>全部对象不透明度<small>模块/文字/图标等</small></span><div><input type="range" min={0} max={100} step={5} value={Math.round(defaultObjectOpacity * 100)} onChange={(e) => setDefaultObjectOpacity(Number(e.target.value) / 100)} /><b>{Math.round(defaultObjectOpacity * 100)}%</b></div></label>
+                      </div>
+                    </section>
+                    <div className="wiring-settings-empty-guide"><span>i</span><p>单个元件仍可在右侧属性面板的“模板参数”中覆盖这些初始值。跟随模板是推荐选项，可避免特殊站型被统一尺寸破坏。</p></div>
                   </div>
                 ) : canvasDraft ? (
                   <div className="wiring-settings-section">
-                    <h3>画布</h3>
-                    <label>画布模式<div className="wiring-radio-row">
-                      <label className="wiring-radio"><input type="radio" name="settings-canvas-flow" checked={canvasDraft.flowMode === "infinite"} onChange={() => setCanvasDraft((prev) => prev ? { ...prev, flowMode: "infinite" } : prev)} />无限流<span className="wiring-radio-hint">无元件时自动缩小，元件放到画布外自动扩大</span></label>
-                      <label className="wiring-radio"><input type="radio" name="settings-canvas-flow" checked={canvasDraft.flowMode === "manual"} onChange={() => setCanvasDraft((prev) => prev ? { ...prev, flowMode: "manual" } : prev)} />手动大小</label>
-                    </div></label>
+                    <div className="wiring-settings-section-heading"><span>画布</span><h3>画布与外观</h3><p>调整当前画布的流动方式、尺寸、网格和背景。</p></div>
+                    <section className="wiring-settings-card">
+                      <header><div><h4>画布模式</h4><p>无限流会随内容自动扩展；手动大小适合固定比例输出。</p></div></header>
+                      <div className="wiring-radio-row wiring-canvas-mode-options">
+                        <label className="wiring-radio"><input type="radio" name="settings-canvas-flow" checked={canvasDraft.flowMode === "infinite"} onChange={() => setCanvasDraft((prev) => prev ? { ...prev, flowMode: "infinite" } : prev)} /><span><b>无限流</b><small>画布自动适应内容范围</small></span></label>
+                        <label className="wiring-radio"><input type="radio" name="settings-canvas-flow" checked={canvasDraft.flowMode === "manual"} onChange={() => setCanvasDraft((prev) => prev ? { ...prev, flowMode: "manual" } : prev)} /><span><b>手动大小</b><small>按指定尺寸与锚点调整</small></span></label>
+                      </div>
+                    </section>
                     {canvasDraft.flowMode === "manual" && (
-                      <>
-                        <label>预设<select value={canvasDraft.preset} onChange={(event) => applyDraftPreset(event.target.value)}><option value="custom">自定义</option>{CANVAS_PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}</select></label>
-                        <label>宽度<input type="number" min={320} value={canvasDraft.width} onChange={(event) => setCanvasDraft((prev) => prev ? { ...prev, width: Number(event.target.value), preset: "custom" } : prev)} /></label>
-                        <label>高度<input type="number" min={320} value={canvasDraft.height} onChange={(event) => setCanvasDraft((prev) => prev ? { ...prev, height: Number(event.target.value), preset: "custom" } : prev)} /></label>
-                        <label>方向<select value={canvasDraft.orientation} onChange={(event) => setCanvasDraft((prev) => prev ? { ...prev, orientation: event.target.value as "landscape" | "portrait" } : prev)}><option value="landscape">横向</option><option value="portrait">纵向</option></select></label>
-                        <div className="wiring-anchor-field">
-                          <span>锚点方向</span>
-                          <div className="wiring-anchor-grid">
-                            {canvasAnchorArrowGrid(canvasDraft.anchor).map((arrow, index) => (
-                              <button
-                                key={index}
-                                type="button"
-                                className={canvasDraft.anchor === index ? "selected" : ""}
-                                onClick={() => setCanvasDraft((prev) => prev ? { ...prev, anchor: index as CanvasAnchor } : prev)}
-                                title={`锚点：${CANVAS_ANCHOR_NAMES[index]}（${canvasAnchorDescription(index as CanvasAnchor)}）`}
-                              >{arrow}</button>
-                            ))}
+                      <section className="wiring-settings-card wiring-canvas-size-card">
+                        <header><div><h4>尺寸与锚点</h4><p>缩放画布时，锚点决定哪一侧保持在原位置。</p></div><button type="button" className="wiring-btn" onClick={fitCanvasToContent} title="把画布调整到恰好包裹所有元件并留白">适应内容</button></header>
+                        <div className="wiring-canvas-size-layout">
+                          <div className="wiring-settings-field-grid">
+                            <label className="wiring-settings-number-field"><span>预设</span><select value={canvasDraft.preset} onChange={(event) => applyDraftPreset(event.target.value)}><option value="custom">自定义</option>{CANVAS_PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}</select></label>
+                            <label className="wiring-settings-number-field"><span>宽度</span><input type="number" min={320} value={canvasDraft.width} onChange={(event) => setCanvasDraft((prev) => prev ? { ...prev, width: Number(event.target.value), preset: "custom" } : prev)} /></label>
+                            <label className="wiring-settings-number-field"><span>高度</span><input type="number" min={320} value={canvasDraft.height} onChange={(event) => setCanvasDraft((prev) => prev ? { ...prev, height: Number(event.target.value), preset: "custom" } : prev)} /></label>
+                            <label className="wiring-settings-number-field"><span>方向</span><select value={canvasDraft.orientation} onChange={(event) => setCanvasDraft((prev) => prev ? { ...prev, orientation: event.target.value as "landscape" | "portrait" } : prev)}><option value="landscape">横向</option><option value="portrait">纵向</option></select></label>
                           </div>
-                          <p className="wiring-anchor-hint">{canvasAnchorDescription(canvasDraft.anchor)}</p>
+                          <div className="wiring-anchor-field">
+                            <span>锚点方向</span>
+                            <div className="wiring-anchor-grid">
+                              {canvasAnchorArrowGrid(canvasDraft.anchor).map((arrow, index) => (
+                                <button
+                                  key={index}
+                                  type="button"
+                                  className={canvasDraft.anchor === index ? "selected" : ""}
+                                  onClick={() => setCanvasDraft((prev) => prev ? { ...prev, anchor: index as CanvasAnchor } : prev)}
+                                  title={`锚点：${CANVAS_ANCHOR_NAMES[index]}（${canvasAnchorDescription(index as CanvasAnchor)}）`}
+                                >{arrow}</button>
+                              ))}
+                            </div>
+                            <p className="wiring-anchor-hint">{canvasAnchorDescription(canvasDraft.anchor)}</p>
+                          </div>
                         </div>
-                        <button className="wiring-btn" onClick={fitCanvasToContent} title="把画布调整到恰好包裹所有元件并留白">适应内容</button>
-                      </>
+                      </section>
                     )}
-                    <label>网格间距<input type="number" min={5} value={canvasDraft.gridSize} onChange={(event) => setCanvasDraft((prev) => prev ? { ...prev, gridSize: Number(event.target.value) } : prev)} /></label>
-                    <label className="wiring-check"><input type="checkbox" checked={canvasDraft.showGrid} onChange={(event) => setCanvasDraft((prev) => prev ? { ...prev, showGrid: event.target.checked } : prev)} />显示网格</label>
-                    <label>背景色<input type="color" value={canvasDraft.backgroundColor} onChange={(event) => setCanvasDraft((prev) => prev ? { ...prev, backgroundColor: event.target.value } : prev)} /></label>
-                    <div className="wiring-settings-actions"><button className="wiring-btn primary" onClick={applyCanvasDraft}>应用</button></div>
+                    <section className="wiring-settings-card">
+                      <header><div><h4>网格与背景</h4><p>网格只用于编辑辅助；背景颜色会进入画布与导出结果。</p></div></header>
+                      <div className="wiring-settings-field-grid wiring-canvas-appearance-grid">
+                        <label className="wiring-settings-number-field"><span>网格间距<small>最小 5px</small></span><input type="number" min={5} value={canvasDraft.gridSize} onChange={(event) => setCanvasDraft((prev) => prev ? { ...prev, gridSize: Number(event.target.value) } : prev)} /></label>
+                        <label className="wiring-check wiring-setting-toggle"><span className="wiring-setting-copy"><b>显示网格</b><small>仅影响当前画布。</small></span><input type="checkbox" checked={canvasDraft.showGrid} onChange={(event) => setCanvasDraft((prev) => prev ? { ...prev, showGrid: event.target.checked } : prev)} /></label>
+                        <label className="wiring-settings-color-field"><span>背景色<small>{canvasDraft.backgroundColor.toUpperCase()}</small></span><input type="color" value={canvasDraft.backgroundColor} onChange={(event) => setCanvasDraft((prev) => prev ? { ...prev, backgroundColor: event.target.value } : prev)} /></label>
+                      </div>
+                    </section>
+                    <div className="wiring-settings-actions"><span>应用后作为一个撤销步骤写入当前工程。</span><button className="wiring-btn primary" onClick={applyCanvasDraft}>应用画布设置</button></div>
                   </div>
                 ) : null}
               </div>
@@ -5285,7 +5525,30 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
                   <label className="wiring-check" style={{ marginBottom: 10 }}><input type="checkbox" checked={showPlacedOnly} onChange={(e) => setShowPlacedOnly(e.target.checked)} />只看已放置</label>
                   <label className="wiring-check" style={{ marginBottom: 10 }}><input type="checkbox" checked={filterState.placement === "unplaced"} onChange={(e) => updateFilters({ placement: e.target.checked ? "unplaced" : "all" })} />只看未放置</label>
                   {pendingSourcePlacements.length > 0 && <div className="wiring-pending-tray"><b>待放置站点（{pendingSourcePlacements.length}）</b>{pendingSourcePlacements.map((change) => { const context = adjacentStationContext(change.entityId); return <span key={change.id}><span>{context?.station.nameZh || change.entityId} · {context?.line?.nameZh || context?.station.lineId || "未知线路"}<small>{context?.previous?.nameZh || "起点"} → {context?.next?.nameZh || "终点"}</small></span><button className="wiring-btn" onClick={() => beginStationPlacement(change.entityId)}>手动放置</button><button className="wiring-btn" disabled={!context?.previousModule || !context.nextModule} onClick={() => insertStationBetweenNeighbors(change.entityId)}>插入相邻模块之间</button></span>; })}</div>}
-                  {advancedMode && physicalStationSuggestions.length > 0 && <div className="wiring-change-panel"><header><b>物理站映射建议</b></header>{physicalStationSuggestions.map((suggestion) => <div className={`wiring-change-row ${suggestion.ambiguous ? "warning" : "info"}`} key={suggestion.id}><span>{suggestion.displayName} · {suggestion.sourceStationIds.join(" / ")}{suggestion.ambiguous ? "（存在歧义）" : ""}</span><button onClick={() => confirmPhysicalMapping(suggestion)}>确认合并</button></div>)}</div>}
+                  {advancedMode && physicalStationSuggestions.length > 0 && (
+                    <div className={`wiring-change-panel wiring-physical-mapping-panel ${expandedSections.physicalMappings ? "open" : ""}`}>
+                      <button
+                        type="button"
+                        className="wiring-physical-mapping-toggle"
+                        onClick={() => toggleSection("physicalMappings")}
+                        aria-expanded={Boolean(expandedSections.physicalMappings)}
+                      >
+                        <span className="wiring-physical-mapping-arrow" aria-hidden="true">▸</span>
+                        <b>物理站映射建议</b>
+                        <small>{physicalStationSuggestions.length} 项</small>
+                      </button>
+                      {expandedSections.physicalMappings && (
+                        <div className="wiring-physical-mapping-list">
+                          {physicalStationSuggestions.map((suggestion) => (
+                            <div className={`wiring-change-row ${suggestion.ambiguous ? "warning" : "info"}`} key={suggestion.id}>
+                              <span>{suggestion.displayName} · {suggestion.sourceStationIds.join(" / ")}{suggestion.ambiguous ? "（存在歧义）" : ""}</span>
+                              <button onClick={() => confirmPhysicalMapping(suggestion)}>确认合并</button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                   {unresolvedChanges.length > 0 && <div className="wiring-change-panel"><header><b>数据变更</b><select value={changeSeverity} onChange={(e) => setChangeSeverity(e.target.value as typeof changeSeverity)}><option value="all">全部</option><option value="error">错误</option><option value="warning">警告</option><option value="info">信息</option></select><button onClick={acceptInformationalChanges}>接受全部信息项</button></header>{unresolvedChanges.filter((change) => change.status === "unresolved" && (changeSeverity === "all" || change.severity === changeSeverity)).map((change) => <div className={`wiring-change-row ${change.severity}`} key={change.id}><span>{change.entityType} {change.entityId}: {change.changeType}</span>{change.notes && <p className="wiring-change-notes">{change.notes}</p>}<details><summary>新旧值</summary><code>{JSON.stringify(change.oldValue)} → {JSON.stringify(change.newValue)}</code></details><button onClick={() => locateSourceChange(change)}>定位/手动</button><button onClick={() => resolveSourceChange(change, "accepted")}>接受</button><button onClick={() => resolveSourceChange(change, "ignored")}>忽略</button></div>)}</div>}
                   {Array.from(filteredStations.entries()).map(([lineId, stations]) => {
                     const line = data.lines.find((l) => l.id === lineId);
@@ -5484,10 +5747,18 @@ export default function WiringDiagramApp({ projectId = DEFAULT_PROJECT_ID, repos
               {activeTool === "shape" && pendingElement && (() => {
                 if (pendingElement.kind === "shape") {
                   const meta = SHAPE_META[pendingElement.shapeType];
+                  const appr = resolveShapeAppearance(pendingElement.shapeType, {
+                    fill: defaultShapeFill,
+                    stroke: defaultShapeStroke,
+                    strokeWidth: defaultShapeStrokeWidth,
+                    radius: defaultOverrideMode("shapeRadius") === "uniform" ? defaultShapeRadius : null,
+                    shapeOpacity: defaultShapeOpacity,
+                    objectOpacity: defaultObjectOpacity,
+                  }, meta);
                   return (
                     <g transform={`translate(${mouseWorld.x},${mouseWorld.y})${moduleMirrorTransform(meta.width, meta.height, placementMirrorX, placementMirrorY)}`} className="module-ghost" pointerEvents="none">
-                      <g opacity={0.65}>
-                        <ShapeGraphic shapeType={pendingElement.shapeType} width={meta.width} height={meta.height} fill={meta.defaultFill} stroke={meta.defaultStroke} />
+                      <g opacity={0.65 * appr.opacity}>
+                        <ShapeGraphic shapeType={pendingElement.shapeType} width={meta.width} height={meta.height} fill={appr.fill} stroke={appr.stroke} strokeWidth={appr.strokeWidth} radius={appr.radius} />
                       </g>
                     </g>
                   );
